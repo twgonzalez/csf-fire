@@ -122,14 +122,16 @@ def calculate_hcm_capacity(
 
     if road_type == "two_lane":
         by_speed = hcm.get("two_lane", {}).get("by_speed", {})
+        # YAML loads keys as integers; normalize to int for lookup
+        by_speed_int = {int(k): v for k, v in by_speed.items()}
         # Find the highest speed threshold that is <= the actual speed
-        valid_thresholds = sorted([int(k) for k in by_speed.keys() if int(k) <= speed])
+        valid_thresholds = sorted(k for k in by_speed_int if k <= speed)
         if valid_thresholds:
-            return float(by_speed[str(valid_thresholds[-1])])
+            return float(by_speed_int[valid_thresholds[-1]])
         # Speed below minimum threshold — use the lowest value
-        all_thresholds = sorted(int(k) for k in by_speed.keys())
+        all_thresholds = sorted(by_speed_int.keys())
         if all_thresholds:
-            return float(by_speed[str(all_thresholds[0])])
+            return float(by_speed_int[all_thresholds[0]])
         return 900.0  # absolute fallback
 
     logger.warning(f"Unknown road_type '{road_type}' — capacity set to 0.")
@@ -269,28 +271,41 @@ def _identify_evacuation_routes(
         logger.warning("  No exit nodes found — skipping route identification.")
         return roads_gdf
 
-    # For each origin, find shortest path to nearest exit
+    # Use undirected graph: during evacuation, contraflow is assumed
+    # (vehicles drive against normal direction on one-way streets if needed)
+    G_undir = G_proj.to_undirected()
+
+    # Add a virtual sink node connected to all exits with zero-weight edges.
+    # This lets us run a single Dijkstra per origin to reach the nearest exit.
+    VIRTUAL_SINK = -999999
+    G_undir.add_node(VIRTUAL_SINK)
+    for exit_node in exits:
+        G_undir.add_edge(exit_node, VIRTUAL_SINK, length=0)
+
+    # Get nearest graph node for each FHSZ origin point
+    origin_xs = [p.x for p in origins]
+    origin_ys = [p.y for p in origins]
+    origin_nodes = ox.distance.nearest_nodes(G_proj, X=origin_xs, Y=origin_ys)
+    logger.info(f"  Computing shortest paths for {len(origin_nodes)} origins...")
+
     edge_use_counts = {}
-    for i, origin_point in enumerate(origins):
+    paths_found = 0
+    for i, origin_node in enumerate(origin_nodes):
         try:
-            origin_node = ox.distance.nearest_nodes(
-                G_proj, X=origin_point.x, Y=origin_point.y
-            )
-            # Find nearest exit
-            nearest_exit = min(
-                exits,
-                key=lambda n: nx.shortest_path_length(G_proj, origin_node, n, weight="length")
-                if nx.has_path(G_proj, origin_node, n) else float("inf")
-            )
-            if not nx.has_path(G_proj, origin_node, nearest_exit):
+            path_nodes = nx.shortest_path(G_undir, origin_node, VIRTUAL_SINK, weight="length")
+            # Exclude the final virtual edge (last node is VIRTUAL_SINK)
+            path_nodes = path_nodes[:-1]
+            if len(path_nodes) < 2:
                 continue
-            path_nodes = nx.shortest_path(G_proj, origin_node, nearest_exit, weight="length")
             for u, v in zip(path_nodes[:-1], path_nodes[1:]):
                 edge_key = (min(u, v), max(u, v))
                 edge_use_counts[edge_key] = edge_use_counts.get(edge_key, 0) + 1
+            paths_found += 1
         except (nx.NetworkXNoPath, nx.NodeNotFound, Exception) as e:
             logger.debug(f"  Path from origin {i} failed: {e}")
             continue
+
+    logger.info(f"  Paths found: {paths_found}/{len(origin_nodes)}")
 
     if not edge_use_counts:
         logger.warning("  No evacuation paths found.")
@@ -313,24 +328,47 @@ def _identify_evacuation_routes(
     return roads_gdf
 
 
-def _sample_fhsz_centroids(fhsz_proj: gpd.GeoDataFrame, max_points: int = 50) -> list:
+def _sample_fhsz_centroids(fhsz_proj: gpd.GeoDataFrame, max_points: int = 100) -> list:
     """
-    Sample centroid points from FHSZ trigger zone polygons.
+    Sample interior points from FHSZ trigger zone polygons.
+
+    Uses a regular grid to sample multiple points per polygon, ensuring we
+    capture points deep inside the fire zone (not just boundary centroids).
 
     Returns list of shapely Point objects in the projected CRS.
     """
-    centroids = []
+    import numpy as np
+
+    all_points = []
     for geom in fhsz_proj.geometry:
-        centroid = geom.centroid
-        if not centroid.is_empty:
-            centroids.append(centroid)
+        if geom.is_empty:
+            continue
+        minx, miny, maxx, maxy = geom.bounds
+        width = maxx - minx
+        height = miny - maxy  # negative, but abs used below
 
-    # If too many, sample evenly
-    if len(centroids) > max_points:
-        step = len(centroids) // max_points
-        centroids = centroids[::step][:max_points]
+        # Sample on a grid: aim for ~5 points per polygon
+        step = max(min(abs(width), abs(height)) / 3.0, 50)  # at least 50m apart
+        xs = np.arange(minx + step / 2, maxx, step)
+        ys = np.arange(miny + step / 2, maxy, step)
 
-    return centroids
+        for x in xs:
+            for y in ys:
+                pt = Point(x, y)
+                if geom.contains(pt):
+                    all_points.append(pt)
+
+        # Always include the representative point (guaranteed interior)
+        rep = geom.representative_point()
+        if not rep.is_empty:
+            all_points.append(rep)
+
+    # Deduplicate and cap
+    if len(all_points) > max_points:
+        step = len(all_points) // max_points
+        all_points = all_points[::step][:max_points]
+
+    return all_points
 
 
 def _find_exit_nodes(G_proj, boundary_proj: gpd.GeoDataFrame) -> list:
@@ -346,7 +384,7 @@ def _find_exit_nodes(G_proj, boundary_proj: gpd.GeoDataFrame) -> list:
 
     for node_id, x, y in node_data:
         pt = Point(x, y)
-        if boundary_geom.distance(pt) < 200:  # within 200 meters of boundary
+        if boundary_geom.distance(pt) < 50:  # within 50 meters of boundary
             exit_nodes.append(node_id)
 
     return exit_nodes

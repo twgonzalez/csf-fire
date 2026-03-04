@@ -159,45 +159,49 @@ def fetch_fhsz_zones(
     """
     Fetch Fire Hazard Severity Zones from CAL FIRE ArcGIS REST API.
 
+    Endpoint: FRAP/HHZ_ref_FHSZ MapServer, layer 0
+    Field: FHSZ9 with values like 'SRA_VeryHigh', 'LRA_High', 'FRA_Moderate'
+
     bbox: (minx, miny, maxx, maxy) in EPSG:4326
-    Returns GeoDataFrame with 'HAZ_CLASS' column (zone level as int).
+    Returns GeoDataFrame with 'HAZ_CLASS' column (1=Moderate, 2=High, 3=VeryHigh).
     """
     api_base = config.get("fhsz", {}).get("api_base",
-        "https://egis.fire.ca.gov/arcgis/rest/services/FHSZ/MapServer")
+        "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer")
 
     minx, miny, maxx, maxy = bbox
     geometry_filter = f"{minx},{miny},{maxx},{maxy}"
 
+    url = f"{api_base}/0/query"
+    params = {
+        "geometry": geometry_filter,
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "FHSZ9",
+        "f": "geojson",
+        "returnGeometry": "true",
+    }
+
     all_gdfs = []
-    for layer_id in [0, 1]:  # SRA=0, LRA=1
-        url = f"{api_base}/{layer_id}/query"
-        params = {
-            "geometry": geometry_filter,
-            "geometryType": "esriGeometryEnvelope",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "*",
-            "f": "geojson",
-            "returnGeometry": "true",
-        }
-        try:
-            resp = requests.get(url, params=params, timeout=60)
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("features"):
-                gdf = gpd.GeoDataFrame.from_features(data["features"], crs="EPSG:4326")
-                all_gdfs.append(gdf)
-                logger.info(f"  FHSZ layer {layer_id}: {len(gdf)} features")
-        except Exception as e:
-            logger.warning(f"  FHSZ layer {layer_id} fetch failed: {e}")
+    try:
+        resp = requests.get(url, params=params, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("features"):
+            gdf = gpd.GeoDataFrame.from_features(data["features"], crs="EPSG:4326")
+            all_gdfs.append(gdf)
+            logger.info(f"  FHSZ: {len(gdf)} features retrieved")
+        else:
+            logger.warning("  FHSZ query returned 0 features.")
+    except Exception as e:
+        logger.warning(f"  FHSZ fetch failed: {e}")
 
     if not all_gdfs:
         logger.warning("  No FHSZ data returned from API — returning empty GeoDataFrame.")
         return gpd.GeoDataFrame(columns=["HAZ_CLASS", "geometry"], crs="EPSG:4326")
 
-    combined = gpd.pd.concat(all_gdfs, ignore_index=True)
-    combined = combined.to_crs("EPSG:4326")
-
-    # Normalize zone column — API may use HAZ_CLASS, SRA_ZONE, etc.
+    combined = pd.concat(all_gdfs, ignore_index=True)
+    combined = gpd.GeoDataFrame(combined, crs="EPSG:4326")
     combined = _normalize_fhsz_column(combined)
 
     combined.to_file(output_path, driver="GeoJSON")
@@ -206,27 +210,42 @@ def fetch_fhsz_zones(
 
 
 def _normalize_fhsz_column(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Map various FHSZ column names to a standard 'HAZ_CLASS' integer column."""
-    candidate_cols = ["HAZ_CLASS", "SRA_ZONE", "FHSZ", "ZONE", "CLASS"]
-    for col in candidate_cols:
-        if col in gdf.columns:
-            gdf = gdf.rename(columns={col: "HAZ_CLASS"})
-            break
+    """
+    Normalize the FHSZ zone column to a standard 'HAZ_CLASS' integer column.
+
+    Handles the FHSZ9 field format from CAL FIRE: 'SRA_VeryHigh', 'LRA_High',
+    'FRA_Moderate', etc. Also handles legacy formats.
+    """
+    # FHSZ9 is the field from the HHZ_ref_FHSZ service
+    if "FHSZ9" in gdf.columns:
+        gdf = gdf.rename(columns={"FHSZ9": "HAZ_CLASS"})
+    else:
+        for col in ["HAZ_CLASS", "SRA_ZONE", "FHSZ", "ZONE", "CLASS"]:
+            if col in gdf.columns:
+                gdf = gdf.rename(columns={col: "HAZ_CLASS"})
+                break
 
     if "HAZ_CLASS" not in gdf.columns:
         logger.warning("  Could not identify FHSZ zone column; defaulting all to Zone 3.")
         gdf["HAZ_CLASS"] = 3
         return gdf
 
-    # Convert text values to integers (e.g., "HIGH" → 2, "VERY HIGH" → 3)
-    zone_map = {
-        "MODERATE": 1, "MOD": 1, "1": 1, 1: 1,
-        "HIGH": 2, "2": 2, 2: 2,
-        "VERY HIGH": 3, "VERY_HIGH": 3, "VH": 3, "3": 3, 3: 3,
-    }
-    gdf["HAZ_CLASS"] = gdf["HAZ_CLASS"].map(
-        lambda v: zone_map.get(str(v).strip().upper(), 0)
-    )
+    def _to_zone_int(v) -> int:
+        s = str(v).strip().upper()
+        # FHSZ9 format: 'SRA_VERYHIGH', 'LRA_HIGH', 'FRA_MODERATE'
+        if "VERYHIGH" in s or "VERY_HIGH" in s or "VERY HIGH" in s or s.endswith("VH"):
+            return 3
+        if "HIGH" in s:
+            return 2
+        if "MODERATE" in s or "MOD" in s:
+            return 1
+        # Numeric fallback
+        for num, zone in [("3", 3), ("2", 2), ("1", 1)]:
+            if s == num:
+                return zone
+        return 0
+
+    gdf["HAZ_CLASS"] = gdf["HAZ_CLASS"].map(_to_zone_int)
     return gdf
 
 
@@ -257,23 +276,19 @@ def fetch_road_network(
     speed_defaults = config.get("speed_defaults", {})
     road_type_mapping = config.get("road_type_mapping", {})
 
-    gdf["lane_count"], gdf["lane_count_estimated"] = zip(
-        *gdf["highway"].apply(lambda h: _resolve_lanes(h, gdf.loc[gdf["highway"] == h, "lanes"].iloc[0]
-            if "lanes" in gdf.columns and not gdf.loc[gdf["highway"] == h, "lanes"].empty else None,
-            lane_defaults))
-    )
+    has_lanes_col = "lanes" in gdf.columns
 
-    gdf["speed_limit"], gdf["speed_estimated"] = zip(
-        *gdf.apply(lambda row: _resolve_speed(
-            row.get("highway", "unclassified"),
-            row.get("maxspeed", None),
-            speed_defaults,
-        ), axis=1)
-    )
+    def _process_row(row):
+        hw = _normalize_highway_tag(row.get("highway", "unclassified"))
+        lanes_val = row.get("lanes", None) if has_lanes_col else None
+        lane_count, lane_estimated = _resolve_lanes(hw, lanes_val, lane_defaults)
+        speed, speed_estimated = _resolve_speed(hw, row.get("maxspeed", None), speed_defaults)
+        road_type = _classify_road_type(row.get("highway", "unclassified"), road_type_mapping)
+        return lane_count, lane_estimated, speed, speed_estimated, road_type
 
-    gdf["road_type"] = gdf["highway"].apply(
-        lambda h: _classify_road_type(h, road_type_mapping)
-    )
+    results = gdf.apply(_process_row, axis=1, result_type="expand")
+    results.columns = ["lane_count", "lane_count_estimated", "speed_limit", "speed_estimated", "road_type"]
+    gdf = gdf.join(results)
 
     # Retain only needed columns
     keep_cols = [
@@ -299,9 +314,8 @@ def fetch_road_network(
     return gdf
 
 
-def _resolve_lanes(highway_tag, osm_lanes_value, lane_defaults: dict) -> tuple[int, bool]:
-    """Return (lane_count, is_estimated)."""
-    hw = _normalize_highway_tag(highway_tag)
+def _resolve_lanes(hw: str, osm_lanes_value, lane_defaults: dict) -> tuple[int, bool]:
+    """Return (lane_count, is_estimated). hw must already be normalized."""
     if osm_lanes_value is not None:
         try:
             val = osm_lanes_value

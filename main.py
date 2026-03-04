@@ -211,7 +211,9 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     )
 
     # Save audit trail
-    det_filename = f"determination_{lat}_{lon}.txt".replace("-", "n").replace(".", "_")
+    lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
+    lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
+    det_filename = f"determination_{lat_str}_{lon_str}.txt"
     audit_path = output_dir / det_filename
     generate_audit_trail(project, audit, audit_path)
 

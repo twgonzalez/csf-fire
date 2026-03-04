@@ -151,8 +151,6 @@ fhsz:
   trigger_zones:
     - 2
     - 3
-  # ArcGIS REST API endpoint
-  api_base: "https://egis.fire.ca.gov/arcgis/rest/services/FHSZ/MapServer"
-  # Layer IDs: 0=SRA, 1=LRA (check current API)
-  sra_layer: 0
-  lra_layer: 1
+  # CAL FIRE FRAP ArcGIS REST API — HHZ_ref_FHSZ service, layer 0
+  # Field: FHSZ9 (values: SRA_VeryHigh, LRA_High, FRA_Moderate, etc.)
+  api_base: "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer"
