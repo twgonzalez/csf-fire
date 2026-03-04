@@ -105,6 +105,7 @@ def analyze(city: str, state: str, refresh: bool):
 
     # Agent 2: Capacity Analysis
     console.print("\n[bold]Step 2: Capacity Analysis[/bold]")
+    block_groups_gdf = datasets.get("block_groups")
     with console.status("Running HCM calculations and route identification..."):
         roads_gdf = analyze_capacity(
             roads_gdf=datasets["roads"],
@@ -112,6 +113,7 @@ def analyze(city: str, state: str, refresh: bool):
             boundary_gdf=datasets["boundary"],
             config=config,
             city_config=city_config,
+            block_groups_gdf=block_groups_gdf,
         )
 
     # Save results
@@ -121,8 +123,10 @@ def analyze(city: str, state: str, refresh: bool):
     output_cols = [
         "name", "highway", "road_type", "lane_count", "speed_limit",
         "capacity_vph", "baseline_demand_vph", "vc_ratio", "los",
-        "connectivity_score", "length_meters",
-        "lane_count_estimated", "speed_estimated", "aadt_estimated",
+        "connectivity_score", "catchment_units", "demand_source",
+        "catchment_hu", "catchment_employees",
+        "resident_demand_vph", "employee_demand_vph", "student_demand_vph",
+        "length_meters", "lane_count_estimated", "speed_estimated", "aadt_estimated",
     ]
     save_cols = [c for c in output_cols if c in evac_routes.columns]
     evac_routes[save_cols].to_csv(routes_path, index=False)
@@ -182,16 +186,22 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     console.print(f"  Location: {lat}, {lon}")
     console.print(f"  Units: {units}")
 
+    block_groups_path = data_dir / "block_groups.geojson"
+
     with console.status("Loading cached data..."):
         roads_gdf = gpd.read_file(roads_path, layer="roads")
         fhsz_gdf = gpd.read_file(fhsz_path)
         boundary_gdf = gpd.read_file(boundary_path)
+        block_groups_gdf = gpd.read_file(block_groups_path) if block_groups_path.exists() else None
 
     # If roads don't have capacity columns yet, run capacity analysis first
-    if "vc_ratio" not in roads_gdf.columns:
+    if "vc_ratio" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
         console.print("[yellow]Routes not yet analyzed -- running capacity analysis...[/yellow]")
         from agents.capacity_analysis import analyze_capacity
-        roads_gdf = analyze_capacity(roads_gdf, fhsz_gdf, boundary_gdf, config, city_config)
+        roads_gdf = analyze_capacity(
+            roads_gdf, fhsz_gdf, boundary_gdf, config, city_config,
+            block_groups_gdf=block_groups_gdf,
+        )
 
     project = Project(
         location_lat=lat,
@@ -250,7 +260,10 @@ def _print_data_summary(datasets: dict):
     table.add_column("CRS")
 
     for name, gdf in datasets.items():
-        table.add_row(name, str(len(gdf)), str(gdf.crs))
+        if gdf is None or (hasattr(gdf, "empty") and gdf.empty):
+            table.add_row(name, "0", "—")
+        else:
+            table.add_row(name, str(len(gdf)), str(gdf.crs))
     console.print(table)
 
 
@@ -272,9 +285,10 @@ def _print_routes_table(evac_routes, config: dict):
     table.add_column("Lanes", justify="right")
     table.add_column("Cap (vph)", justify="right")
     table.add_column("Demand (vph)", justify="right")
+    table.add_column("Catchment HU", justify="right")
     table.add_column("v/c", justify="right")
     table.add_column("LOS")
-    table.add_column("Connectivity", justify="right")
+    table.add_column("Src")
 
     sorted_routes = evac_routes.sort_values("vc_ratio", ascending=False).head(20)
 
@@ -283,6 +297,11 @@ def _print_routes_table(evac_routes, config: dict):
         los = row.get("los", "")
         vc_str = f"{vc:.3f}"
         style = "red" if vc >= threshold else ("yellow" if vc >= 0.60 else "green")
+        catchment = row.get("catchment_units", 0)
+        catchment_str = f"{catchment:.0f}" if catchment else "—"
+        demand_src = str(row.get("demand_source", ""))
+        # abbreviate demand source for display
+        src_abbr = {"catchment_based": "CB", "aadt_based": "AADT", "road_class_estimated": "RC"}.get(demand_src, demand_src[:4])
 
         table.add_row(
             str(row.get("name", ""))[:30] or "Unnamed",
@@ -290,9 +309,10 @@ def _print_routes_table(evac_routes, config: dict):
             str(row.get("lane_count", "")),
             f"{row.get('capacity_vph', 0):.0f}",
             f"{row.get('baseline_demand_vph', 0):.0f}",
+            catchment_str,
             f"[{style}]{vc_str}[/{style}]",
             f"[{style}]{los}[/{style}]",
-            str(row.get("connectivity_score", "")),
+            src_abbr,
         )
 
     console.print(table)
@@ -301,7 +321,12 @@ def _print_routes_table(evac_routes, config: dict):
 def _print_determination(project, audit: dict):
     """Print the final determination result prominently."""
     det = project.determination
-    color = "red" if det == "DISCRETIONARY" else "green"
+    _TIER_COLOR = {
+        "DISCRETIONARY":           "red",
+        "CONDITIONAL MINISTERIAL": "yellow",
+        "MINISTERIAL":             "green",
+    }
+    color = _TIER_COLOR.get(det, "white")
 
     console.print()
     console.print(Panel(
@@ -311,25 +336,271 @@ def _print_determination(project, audit: dict):
     ))
 
     table = Table(title="Standards Results", show_header=True, header_style="bold")
-    table.add_column("Standard")
+    table.add_column("Check")
     table.add_column("Result")
     table.add_column("Details")
 
-    s = audit["determination"]
+    d = audit["determination"]
+    s1 = audit["standards"]["standard_1_citywide_fhsz"]
+    fz = audit["standards"]["fire_zone_severity_modifier"]
+    s2 = audit["standards"]["standard_2_size_threshold"]
+    s4 = audit["standards"]["standard_4_capacity_threshold"]
+
     std_rows = [
-        ("Standard 1: Fire Zone", s["standard_1_triggered"],
-         f"Zone: {audit['standards']['standard_1_fire_zone'].get('zone_description', '')}"),
-        ("Standard 2: Size Threshold", s["standard_2_triggered"],
-         f"{project.dwelling_units} units vs. {project.size_threshold_used} threshold"),
-        ("Standard 4: Capacity Threshold", s["standard_4_triggered"],
-         f"{project.project_vehicles_peak_hour:.1f} peak-hour vehicles"),
+        (
+            "Std 1: Citywide FHSZ",
+            d["standard_1_citywide"],
+            f"{s1.get('fhsz_polygon_count', 0)} FHSZ polygon(s) in city",
+        ),
+        (
+            "Fire Zone Modifier",
+            d["fire_zone_modifier"],
+            fz.get("zone_description", "Not in FHSZ"),
+        ),
+        (
+            "Std 2: Size (DISC path)",
+            d["standard_2_disc_triggered"],
+            f"{project.dwelling_units} units vs. {s2['discretionary_check']['threshold']} threshold",
+        ),
+        (
+            "Std 2: Size (COND path)",
+            d["standard_2_cond_triggered"],
+            f"{project.dwelling_units} units vs. {s2['conditional_check']['threshold']} threshold",
+        ),
+        (
+            "Std 3: Serving Routes",
+            d["standard_3_triggered"],
+            f"{len(project.serving_route_ids)} route segment(s) within {project.search_radius_miles} mi",
+        ),
+        (
+            "Std 4: Capacity Exceeded",
+            d["standard_4_triggered"],
+            f"{project.project_vehicles_peak_hour:.1f} peak-hour vehicles generated",
+        ),
     ]
     for label, triggered, detail in std_rows:
         style = "red" if triggered else "green"
         table.add_row(
             label,
-            f"[{style}]{'TRIGGERED' if triggered else 'not triggered'}[/{style}]",
+            f"[{style}]{'YES' if triggered else 'NO'}[/{style}]",
             detail,
+        )
+
+    console.print(table)
+
+    # Tier logic reminder
+    console.print(
+        "\n  [dim]Tier logic: "
+        "DISCRETIONARY if std2_disc AND std4 (capacity exceeded — fire zone is severity modifier only) | "
+        "CONDITIONAL MINISTERIAL if std1_citywide AND std2_cond | "
+        "else MINISTERIAL[/dim]"
+    )
+
+
+@cli.command()
+@click.option("--city", required=True, help="City name (must match a prior analyze run)")
+@click.option("--state", default="CA", show_default=True, help="State abbreviation")
+@click.option(
+    "--projects", "projects_file", default=None,
+    help="Path to projects YAML (default: config/projects/{city}_demo.yaml)",
+)
+@click.option("--output", "output_name", default="demo_map", show_default=True,
+              help="Output filename stem (no extension)")
+def demo(city: str, state: str, projects_file: str, output_name: str):
+    """
+    Multi-project demo: evaluate a batch of projects and generate a comparison map.
+
+    Loads a YAML list of projects, evaluates each against the city's evacuation
+    network, prints a summary table, and saves an interactive HTML map where each
+    project is a toggleable layer — useful for showing city planners the difference
+    between ministerial (green) and discretionary (red) outcomes.
+
+    Requires a prior `analyze` run to have generated data/{city}/ files.
+
+    Example:
+      uv run python main.py demo --city "Berkeley"
+    """
+    import geopandas as gpd
+    from agents.objective_standards import evaluate_project
+    from agents.visualization import create_demo_map
+    from models.project import Project
+
+    config, city_config = load_config(city)
+    base_dir = Path(__file__).parent
+    city_slug = city.lower().replace(" ", "_")
+    data_dir = base_dir / "data" / city_slug
+    output_dir = base_dir / "output" / city_slug
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve projects file
+    if projects_file is None:
+        projects_file = base_dir / "config" / "projects" / f"{city_slug}_demo.yaml"
+    else:
+        projects_file = Path(projects_file)
+
+    if not Path(projects_file).exists():
+        console.print(f"[red]ERROR: Projects file not found: {projects_file}[/red]")
+        console.print(
+            f"Create a YAML at that path with a [cyan]projects:[/cyan] list, or run "
+            f"with the default Berkeley demo at [cyan]config/projects/berkeley_demo.yaml[/cyan]."
+        )
+        sys.exit(1)
+
+    with open(projects_file) as f:
+        demo_cfg = yaml.safe_load(f)
+
+    project_defs = demo_cfg.get("projects", [])
+    demo_title = demo_cfg.get("description", f"{city} Fire Evacuation Demo")
+
+    if not project_defs:
+        console.print("[red]ERROR: No projects defined in the YAML file.[/red]")
+        sys.exit(1)
+
+    console.rule(f"[bold cyan]{demo_title}[/bold cyan]")
+    console.print(f"  {len(project_defs)} project(s) to evaluate\n")
+
+    # ── Load cached city data ──────────────────────────────────────────────
+    roads_path       = data_dir / "roads.gpkg"
+    fhsz_path        = data_dir / "fhsz.geojson"
+    boundary_path    = data_dir / "boundary.geojson"
+    block_groups_path = data_dir / "block_groups.geojson"
+
+    missing = [p for p in [roads_path, fhsz_path, boundary_path] if not p.exists()]
+    if missing:
+        console.print(f"[red]ERROR: Missing data files: {[str(p) for p in missing]}[/red]")
+        console.print(f'Run first: [cyan]uv run python main.py analyze --city "{city}"[/cyan]')
+        sys.exit(1)
+
+    with console.status("Loading cached data..."):
+        roads_gdf      = gpd.read_file(roads_path, layer="roads")
+        fhsz_gdf       = gpd.read_file(fhsz_path)
+        boundary_gdf   = gpd.read_file(boundary_path)
+        block_groups_gdf = (
+            gpd.read_file(block_groups_path) if block_groups_path.exists() else None
+        )
+
+    # Run capacity analysis if the cached roads don't yet have vc_ratio
+    if "vc_ratio" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
+        console.print("[yellow]Roads not yet analyzed — running capacity analysis...[/yellow]")
+        from agents.capacity_analysis import analyze_capacity
+        roads_gdf = analyze_capacity(
+            roads_gdf, fhsz_gdf, boundary_gdf, config, city_config,
+            block_groups_gdf=block_groups_gdf,
+        )
+
+    # ── Evaluate each project ──────────────────────────────────────────────
+    evaluated: list[Project] = []
+    _TIER_RICH = {
+        "DISCRETIONARY":           "bold red",
+        "CONDITIONAL MINISTERIAL": "bold yellow",
+        "MINISTERIAL":             "bold green",
+    }
+
+    for i, pdef in enumerate(project_defs, 1):
+        name    = pdef.get("name", f"Project {i}")
+        lat     = float(pdef["lat"])
+        lon     = float(pdef["lon"])
+        units   = int(pdef["units"])
+        address = pdef.get("address", "")
+
+        console.print(
+            f"  [{i}/{len(project_defs)}] [bold]{name}[/bold]  "
+            f"({units} units · {lat:.4f}, {lon:.4f})"
+        )
+
+        project = Project(
+            location_lat=lat,
+            location_lon=lon,
+            address=address,
+            dwelling_units=units,
+            project_name=name,
+        )
+        project, _ = evaluate_project(
+            project=project,
+            roads_gdf=roads_gdf,
+            fhsz_gdf=fhsz_gdf,
+            config=config,
+            city_config=city_config,
+        )
+        evaluated.append(project)
+
+        det   = project.determination
+        style = _TIER_RICH.get(det, "white")
+        n_srv = len(project.serving_route_ids or [])
+        n_flg = len(project.flagged_route_ids or [])
+        console.print(
+            f"     [{style}]{det}[/{style}]  "
+            f"[dim]{n_srv} serving routes · {n_flg} flagged[/dim]"
+        )
+
+    # ── Summary table ──────────────────────────────────────────────────────
+    console.print()
+    _print_demo_summary(evaluated, config)
+
+    # ── Generate map ───────────────────────────────────────────────────────
+    console.print("\n[bold]Generating demo map...[/bold]")
+    map_path = output_dir / f"{output_name}.html"
+    create_demo_map(
+        projects=evaluated,
+        roads_gdf=roads_gdf,
+        fhsz_gdf=fhsz_gdf,
+        boundary_gdf=boundary_gdf,
+        config=config,
+        output_path=map_path,
+        demo_title=demo_title,
+    )
+    console.print(f"  Map saved: [cyan]{map_path}[/cyan]")
+    console.print(f"  Open with: [dim]open {map_path}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Rich output helpers
+# ---------------------------------------------------------------------------
+
+def _print_demo_summary(projects: list, config: dict):
+    """Print a multi-project comparison table."""
+    vc_threshold = config.get("vc_threshold", 0.80)
+    unit_threshold = config.get("unit_threshold", 50)
+
+    table = Table(
+        title="Demo Project Summary",
+        show_header=True,
+        header_style="bold blue",
+        show_lines=False,
+    )
+    table.add_column("Project", min_width=22)
+    table.add_column("Units", justify="right")
+    table.add_column("Std 2\n(size)", justify="center")
+    table.add_column("Std 3\n(routes)", justify="center")
+    table.add_column("Std 4\n(capacity)", justify="center")
+    table.add_column("Fire\nZone", justify="center")
+    table.add_column("Peak Veh\n(vph)", justify="right")
+    table.add_column("Serving\nSegs", justify="right")
+    table.add_column("Determination")
+
+    _TIER_COLOR = {
+        "DISCRETIONARY":           "red",
+        "CONDITIONAL MINISTERIAL": "yellow",
+        "MINISTERIAL":             "green",
+    }
+
+    for p in projects:
+        det   = p.determination or "UNKNOWN"
+        color = _TIER_COLOR.get(det, "white")
+        std2  = "[green]✓[/green]" if p.meets_size_threshold else "[dim]✗[/dim]"
+        std3  = f"[green]✓[/green]" if p.serving_route_ids else "[dim]✗[/dim]"
+        std4  = "[red]✓[/red]" if p.exceeds_capacity_threshold else "[green]✗[/green]"
+        fzone = (f"[red]Z{p.fire_zone_level}[/red]" if p.in_fire_zone else "[dim]—[/dim]")
+        table.add_row(
+            str(p.project_name)[:24],
+            str(p.dwelling_units),
+            std2,
+            std3,
+            std4,
+            fzone,
+            f"{p.project_vehicles_peak_hour:.0f}",
+            str(len(p.serving_route_ids or [])),
+            f"[{color} bold]{det}[/{color} bold]",
         )
 
     console.print(table)

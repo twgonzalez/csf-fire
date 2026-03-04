@@ -146,6 +146,70 @@ cache_ttl_days: 90
 # Source: CAL FIRE Office of State Fire Marshal
 # ============================================================
 
+# ============================================================
+# Census ACS Configuration
+# Source: U.S. Census Bureau American Community Survey 5-year estimates
+# Used for housing-unit-weighted evacuation demand baseline (Agent 2)
+# ============================================================
+
+census:
+  acs_year: 2022
+  housing_units_table: "B25001_001E"    # Total housing units per block group
+  population_table: "B01001_001E"       # Total population (for employee fallback)
+  api_base: "https://api.census.gov/data"
+  max_origins: 100                       # Max block group origin points for network path analysis
+  lodes_year: 2021                       # LEHD LODES data year (2021 is latest in LODES8)
+  # api_key: ""                          # Optional Census API key (not required; avoids rate limits)
+
+# ============================================================
+# Evacuation Demand Baseline Method
+# Controls how baseline_demand_vph is computed for evacuation route segments.
+# ============================================================
+
+evacuation_demand:
+  method: "catchment"
+  # "catchment" — use census housing-unit-weighted catchment per segment
+  #   formula: catchment_housing_units × vehicles_per_unit × peak_hour_mobilization
+  #   requires: Census block group data downloaded by Agent 1
+  # "road_class" — flat utilization rate by road class (legacy behavior)
+  #   use this when Census data is unavailable or for backward compatibility
+
+# ============================================================
+# Evacuation Demand Model — KLD Engineering AB 747 Methodology
+# Buffer-based demand for ALL road segments (Phase 2b+)
+# Source: KLD Engineering TR-1381 (Berkeley AB 747 Study, March 2024)
+# ============================================================
+
+demand:
+  # Radius around each road segment to collect resident/employee/student demand
+  # Source: KLD Engineering AB 747 methodology (Berkeley study)
+  buffer_radius_miles: 0.25
+
+  # Fraction of households that mobilize per hour during peak evacuation
+  # Source: Figure 12, KLD Engineering AB 747 study (Berkeley, 2024)
+  resident_mobilization: 0.57
+
+  # Employee mobilization: daytime scenario — all employees must evacuate
+  # Source: KLD Engineering AB 747 methodology
+  employee_mobilization_day: 1.00
+
+  # Employee mobilization: nighttime/weekend scenario
+  employee_mobilization_night: 0.10
+
+  # Student mobilization (same as daytime employee for max demand scenario)
+  student_mobilization_day: 1.00
+
+  # Vehicles per housing unit
+  # Source: U.S. Census American Community Survey (ACS)
+  vehicles_per_unit: 2.5
+
+  # Vehicles per employee (all commute alone for evacuation planning)
+  employee_vehicle_occupancy: 1.0
+
+  # Demand scenario — "maximum" uses day mobilization rates
+  # "minimum" would use night rates (not yet implemented)
+  scenario: "maximum"
+
 fhsz:
   # Zones 2 and 3 trigger the objective standards
   trigger_zones:
@@ -154,3 +218,33 @@ fhsz:
   # CAL FIRE FRAP ArcGIS REST API — HHZ_ref_FHSZ service, layer 0
   # Field: FHSZ9 (values: SRA_VeryHigh, LRA_High, FRA_Moderate, etc.)
   api_base: "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer"
+
+# ============================================================
+# Three-Tier Determination Configuration
+# Cities can override thresholds per tier in their city config.
+# All thresholds are 100% algorithmic — zero discretion permitted.
+# ============================================================
+
+determination_tiers:
+  discretionary:
+    # Triggers: size >= threshold AND capacity exceeded (Standard 4)
+    # Fire zone location is a severity modifier recorded in audit trail, NOT a gate
+    # Legal basis: AB 747 (California Government Code §65302.15) + HCM 2022
+    unit_threshold: 50    # minimum dwelling units; if absent, inherits unit_threshold
+    vc_threshold: 0.80    # v/c exceedance trigger; if absent, inherits vc_threshold
+    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — project adds vehicles to evacuation routes operating at or above LOS E/F (citywide evacuation scenario)"
+
+  conditional_ministerial:
+    # Triggers: city has FHSZ zones + size >= threshold + serving evacuation routes exist
+    # Ministerial approval eligible with mandatory evacuation conditions to be defined by city.
+    # Legal basis: General Plan Safety Element consistency + AB 1600 nexus
+    #   (project adds vehicles to shared evacuation network regardless of location)
+    unit_threshold: 50    # minimum dwelling units; if absent, inherits unit_threshold
+    legal_basis: "General Plan Safety Element consistency and AB 1600 nexus (project adds vehicles to shared evacuation network regardless of project location)"
+
+  ministerial:
+    # Default when neither DISCRETIONARY nor CONDITIONAL conditions are met:
+    #   - project below size threshold, OR
+    #   - no serving evacuation routes identified, OR
+    #   - city has no FHSZ zones (framework not applicable)
+    legal_basis: "Project below applicable significance threshold; ministerial approval eligible without evacuation conditions"

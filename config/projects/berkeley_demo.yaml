@@ -1,0 +1,112 @@
+# ============================================================
+# Berkeley AB 747 Demo Projects
+# ============================================================
+# Use with:  uv run python main.py demo --city "Berkeley"
+#
+# Purpose: Demonstrate ministerial vs discretionary determination
+# to city planners.  Each project appears as a toggleable layer
+# on the output map so reviewers can compare impacts side-by-side.
+#
+# Tier logic (Phase 2b):
+#   DISCRETIONARY        — size >= 50 AND any serving route v/c >= 0.80
+#   CONDITIONAL MINISTERIAL — city has FHSZ AND size >= 50 (std4 not triggered)
+#   MINISTERIAL          — size < 50 OR no FHSZ in city
+#
+# NOTE: All Berkeley arterials are at LOS F under the KLD citywide
+# demand model, so any ≥50-unit project near an evacuation route
+# will trigger DISCRETIONARY.  Smaller projects remain MINISTERIAL
+# because the 50-unit size threshold is not met.
+# ============================================================
+
+city: "Berkeley"
+state: "CA"
+description: "Berkeley AB 747 — Ministerial vs Discretionary Demo"
+
+projects:
+
+  # -----------------------------------------------------------
+  # 1 — Small infill: below the 50-unit threshold → MINISTERIAL
+  # -----------------------------------------------------------
+  - name: "Ashby Small Infill"
+    address: "Ashby BART Station Area"
+    lat: 37.8528
+    lon: -122.2699
+    units: 10
+    description: >
+      10-unit project at Ashby BART — well below the 50-unit size threshold.
+      Standard 2 is not triggered, so the project qualifies for ministerial
+      approval regardless of evacuation route congestion.
+    expected_tier: "MINISTERIAL"
+
+  # -----------------------------------------------------------
+  # 2 — Mid-rise downtown: at threshold, LOS F arterials → DISCRETIONARY
+  # -----------------------------------------------------------
+  - name: "Downtown Mid-Rise"
+    address: "Shattuck Ave & Center St, Downtown Berkeley"
+    lat: 37.8695
+    lon: -122.2685
+    units: 75
+    description: >
+      75-unit project on Shattuck Ave.  Exceeds the 50-unit threshold and is
+      served by multiple LOS F arterials (Shattuck, University).
+      Standard 4 is triggered → DISCRETIONARY review required.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 3 — Telegraph corridor: major commercial street → DISCRETIONARY
+  # -----------------------------------------------------------
+  - name: "Telegraph Corridor"
+    address: "Telegraph Ave & Ashby Ave"
+    lat: 37.8558
+    lon: -122.2596
+    units: 60
+    description: >
+      60-unit project at Telegraph/Ashby.  Telegraph is a primary evacuation
+      arterial already operating at LOS F.  Standard 4 triggered.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 4 — Hills gateway: in FHSZ Zone 3 → DISCRETIONARY + fire zone modifier
+  # -----------------------------------------------------------
+  - name: "Hills Gateway"
+    address: "Claremont Ave & Tunnel Rd (FHSZ Zone 3)"
+    lat: 37.8914
+    lon: -122.2494
+    units: 80
+    description: >
+      80-unit project in the Berkeley Hills, within FHSZ Zone 3.  Fire zone
+      location is recorded as a severity modifier in the audit trail.  Because
+      the standard AB 747 threshold applies regardless of fire zone location,
+      the project still triggers DISCRETIONARY based on size + capacity alone.
+      The fire zone modifier elevates the conditions that discretionary review
+      must address.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 5 — Large transit-oriented: high unit count → DISCRETIONARY (severe)
+  # -----------------------------------------------------------
+  - name: "North Berkeley TOD"
+    address: "North Shattuck Ave & Rose St"
+    lat: 37.8810
+    lon: -122.2695
+    units: 200
+    description: >
+      200-unit transit-oriented development.  Generates 285 peak-hour
+      evacuation vehicles (200 × 2.5 × 0.57).  All nearby arterials already
+      operate at LOS F — this project adds significant load.  DISCRETIONARY.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 6 — West Berkeley: lower-traffic area, test for CONDITIONAL
+  # -----------------------------------------------------------
+  - name: "West Berkeley Flex"
+    address: "Heinz Ave & 4th St, West Berkeley"
+    lat: 37.8680
+    lon: -122.3050
+    units: 55
+    description: >
+      55-unit mixed-use project in the West Berkeley industrial corridor.
+      Fewer classified evacuation routes in this area — may trigger
+      CONDITIONAL MINISTERIAL if no serving routes exceed v/c threshold,
+      or DISCRETIONARY if LOS F arterials are within 0.5 miles.
+    expected_tier: "CONDITIONAL MINISTERIAL (or DISCRETIONARY)"
