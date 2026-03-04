@@ -1050,7 +1050,7 @@ def create_demo_map(
                 continue
             vc     = float(row.get("vc_ratio", 0) or 0)
             color  = _vc_background_color(vc)
-            weight = _traffic_weight(row.get("highway"), color)
+            weight = max(_highway_weight(row.get("highway")) * 0.25, 0.5)
             buckets[(color, weight)].append(mapping(row.geometry))
 
         for (color, weight), geoms in buckets.items():
@@ -1064,7 +1064,7 @@ def create_demo_map(
             folium.GeoJson(
                 fc,
                 style_function=lambda _, c=color, w=weight: {
-                    "color": c, "weight": w, "opacity": 0.32,
+                    "color": c, "weight": w, "opacity": 0.15,
                 },
             ).add_to(m)
 
