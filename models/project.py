@@ -43,7 +43,8 @@ class Project:
     flagged_route_ids: list = field(default_factory=list)
 
     # Final determination
-    determination: str = ""  # "MINISTERIAL" | "DISCRETIONARY"
+    determination: str = ""         # "MINISTERIAL" | "CONDITIONAL MINISTERIAL" | "DISCRETIONARY"
+    determination_tier: str = ""    # same value as determination; explicit tier field
     determination_reason: str = ""
 
     def vehicle_generation(self, vehicles_per_unit: float, peak_hour_factor: float) -> float:
@@ -67,4 +68,5 @@ class Project:
             "project_vehicles_peak_hour": round(self.project_vehicles_peak_hour, 1),
             "exceeds_capacity_threshold": self.exceeds_capacity_threshold,
             "determination": self.determination,
+            "determination_tier": self.determination_tier,
         }

@@ -24,6 +24,28 @@ overrides: {}
 # vc_threshold: 0.75
 # unit_threshold: 25
 
+# ============================================================
+# Employment and Student Demand Parameters
+# Source: KLD Engineering AB 747 Study (Berkeley, March 2024)
+# ============================================================
+
+# Fraction of working-age population (16+) that is employed
+# Source: U.S. Census ACS 2022, Berkeley
+employment_rate: 0.62
+
+# Fraction of Berkeley jobs filled by workers commuting in from outside Berkeley
+# Source: Census LEHD OnTheMap, 2021 — Alameda County inflow/outflow
+commute_in_fraction: 0.45
+
+# University campuses contributing student vehicle demand
+# Students assigned to block groups within 0.5 miles of campus centroid (area-weighted)
+universities:
+  - name: "UC Berkeley"
+    enrollment: 45057         # Fall 2023 enrollment (Office of Planning & Analysis)
+    student_vehicle_rate: 0.08  # Fraction of enrolled students with a vehicle on campus
+    location_lat: 37.8724
+    location_lon: -122.2595
+
 # Key evacuation routes for validation (from Berkeley study)
 # These should appear in the output for cross-check
 known_evacuation_routes:
