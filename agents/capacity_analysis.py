@@ -82,17 +82,25 @@ def analyze_capacity(
     )
 
     # Step 3: Baseline demand
-    # If block group data is available with the new demand config, use the
-    # KLD quarter-mile buffer methodology (Phase 2b). Otherwise fall back.
-    use_buffer = (
+    # CLAUDE.md item 2: Use catchment-based demand (network path analysis) as baseline_demand_vph
+    # for Standard 4 marginal impact test. The KLD simultaneous-evacuation buffer model is
+    # appropriate for citywide infrastructure sizing but produces 30-40× overload at the
+    # project level, making the marginal causation test impossible to satisfy.
+    #
+    # KLD buffer demand (if available) is stored in evacuation_demand_vph for informational
+    # purposes (citywide planning) but NOT used as baseline for Standard 4.
+    if (
         block_groups_gdf is not None
         and not block_groups_gdf.empty
         and "demand" in config
-    )
-    if use_buffer:
+    ):
         roads_gdf = _apply_buffer_demand(roads_gdf, block_groups_gdf, config, analysis_crs)
-    else:
-        roads_gdf = _apply_baseline_demand(roads_gdf, config)
+        # Preserve KLD buffer demand separately; baseline_demand_vph will be overwritten below
+        roads_gdf["evacuation_demand_vph"] = roads_gdf["baseline_demand_vph"]
+
+    # Catchment-based or road-class demand for project-level marginal analysis (Standard 4)
+    roads_gdf = _apply_baseline_demand(roads_gdf, config)
+    demand_method = config.get("evacuation_demand", {}).get("method", "catchment")
 
     # Step 4: v/c ratio and LOS
     roads_gdf["vc_ratio"] = roads_gdf.apply(
@@ -104,10 +112,9 @@ def analyze_capacity(
     )
 
     evac_count = roads_gdf["is_evacuation_route"].sum()
-    demand_src = "census_buffer" if use_buffer else config.get("evacuation_demand", {}).get("method", "catchment")
     logger.info(
         f"Capacity analysis complete. {evac_count} evacuation route segments. "
-        f"Demand method: {demand_src}."
+        f"Demand method: {demand_method} (AADT proxy for Standard 4 marginal test)."
     )
     return roads_gdf
 
