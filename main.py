@@ -490,6 +490,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
 
     # ── Evaluate each project ──────────────────────────────────────────────
     evaluated: list[Project] = []
+    audits: list[dict] = []
     _TIER_RICH = {
         "DISCRETIONARY":           "bold red",
         "CONDITIONAL MINISTERIAL": "bold yellow",
@@ -515,7 +516,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             dwelling_units=units,
             project_name=name,
         )
-        project, _ = evaluate_project(
+        project, audit = evaluate_project(
             project=project,
             roads_gdf=roads_gdf,
             fhsz_gdf=fhsz_gdf,
@@ -523,6 +524,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             city_config=city_config,
         )
         evaluated.append(project)
+        audits.append(audit)
 
         det   = project.determination
         style = _TIER_RICH.get(det, "white")
@@ -548,6 +550,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
         config=config,
         output_path=map_path,
         demo_title=demo_title,
+        audits=audits,
     )
     console.print(f"  Map saved: [cyan]{map_path}[/cyan]")
     console.print(f"  Open with: [dim]open {map_path}[/dim]")

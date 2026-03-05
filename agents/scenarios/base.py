@@ -217,11 +217,16 @@ class EvacuationScenario(ABC):
         roads_gdf: gpd.GeoDataFrame,
     ) -> tuple[bool, list, dict]:
         """
-        Step 5: Does demand / capacity exceed the v/c threshold on any serving route?
+        Step 5: Does the project's demand cause any serving route to exceed the v/c threshold?
 
-        Two tests (either triggers DISCRETIONARY):
-          A) Baseline: baseline_vc >= threshold (route already failing)
-          B) Proposed: (baseline_demand + project_vehicles_per_route) / capacity > threshold
+        Marginal causation test — a route is flagged only when the project itself causes the
+        threshold crossing:
+            baseline_vc < threshold  AND  proposed_vc >= threshold
+
+        Routes already failing at baseline are recorded in the audit for transparency but do NOT
+        trigger DISCRETIONARY — the project did not cause that failure. This is consistent with
+        standard CEQA significance methodology and prevents the standard from functioning as a
+        categorical prohibition on infill near pre-existing congestion.
 
         Project vehicles are distributed equally across all serving routes.
 
@@ -230,8 +235,12 @@ class EvacuationScenario(ABC):
 
         Discretion: Zero — arithmetic comparison against city-adopted threshold.
         """
-        vc_threshold      = self.vc_threshold
-        vehicles_per_route = project_vph / max(len(route_ids), 1)
+        vc_threshold = self.vc_threshold
+        # Worst-case marginal impact: each serving route is independently evaluated
+        # against the project's full peak-hour vehicle load. This tests whether any
+        # single route would be pushed over the threshold if it absorbed all project
+        # vehicles — consistent with the marginal causation standard.
+        vehicles_per_route = project_vph
 
         serving = roads_gdf[
             roads_gdf["osmid"].apply(
@@ -240,9 +249,9 @@ class EvacuationScenario(ABC):
             )
         ].copy()
 
-        route_results    = []
-        baseline_flagged = []
-        proposed_flagged = []
+        route_results   = []
+        already_failing = []   # baseline >= threshold — recorded but NOT a trigger
+        project_caused  = []   # baseline < threshold AND proposed >= threshold — flagged
 
         for _, row in serving.iterrows():
             baseline_vc     = float(row.get("vc_ratio", 0.0))
@@ -252,43 +261,45 @@ class EvacuationScenario(ABC):
             proposed_demand = baseline_demand + vehicles_per_route
             proposed_vc     = proposed_demand / capacity if capacity > 0 else 0.0
 
-            baseline_exceeds = baseline_vc >= vc_threshold
-            proposed_exceeds = proposed_vc > vc_threshold
+            baseline_exceeds          = baseline_vc >= vc_threshold
+            proposed_exceeds          = proposed_vc >= vc_threshold
+            project_causes_exceedance = (not baseline_exceeds) and proposed_exceeds
 
             osmid_str = str(row.get("osmid", ""))
             if baseline_exceeds:
-                baseline_flagged.append(osmid_str)
-            if proposed_exceeds:
-                proposed_flagged.append(osmid_str)
+                already_failing.append(osmid_str)
+            if project_causes_exceedance:
+                project_caused.append(osmid_str)
 
             route_results.append({
-                "osmid":               osmid_str,
-                "name":                row.get("name", ""),
-                "capacity_vph":        round(capacity, 0),
-                "baseline_demand_vph": round(baseline_demand, 1),
-                "baseline_vc":         round(baseline_vc, 4),
-                "baseline_exceeds":    baseline_exceeds,
-                "vehicles_added":      round(vehicles_per_route, 1),
-                "proposed_demand_vph": round(proposed_demand, 1),
-                "proposed_vc":         round(proposed_vc, 4),
-                "proposed_exceeds":    proposed_exceeds,
+                "osmid":                     osmid_str,
+                "name":                      row.get("name", ""),
+                "capacity_vph":              round(capacity, 0),
+                "baseline_demand_vph":       round(baseline_demand, 1),
+                "baseline_vc":               round(baseline_vc, 4),
+                "baseline_exceeds":          baseline_exceeds,
+                "vehicles_added":            round(vehicles_per_route, 1),
+                "proposed_demand_vph":       round(proposed_demand, 1),
+                "proposed_vc":               round(proposed_vc, 4),
+                "proposed_exceeds":          proposed_exceeds,
+                "project_causes_exceedance": project_causes_exceedance,
             })
 
-        any_flagged = bool(baseline_flagged or proposed_flagged)
-        flagged_ids = list(set(baseline_flagged + proposed_flagged))
+        any_flagged = bool(project_caused)
+        flagged_ids = list(set(project_caused))
 
         detail = {
-            "vc_threshold":           vc_threshold,
-            "project_vehicles_peak_hour": round(project_vph, 1),
-            "vehicles_per_route":     round(vehicles_per_route, 1),
-            "serving_routes_evaluated": len(serving),
-            "baseline_test_flagged":  baseline_flagged,
-            "proposed_test_flagged":  proposed_flagged,
-            "flagged_route_ids":      flagged_ids,
-            "result":                 any_flagged,
-            "triggers_standard":      any_flagged,
-            "method":                 "Per-route: baseline_vc >= threshold OR (baseline_demand + project_vph/n_routes) / capacity > threshold",
-            "route_details":          route_results,
+            "vc_threshold":                vc_threshold,
+            "project_vehicles_peak_hour":  round(project_vph, 1),
+            "vehicles_per_route":          round(vehicles_per_route, 1),
+            "serving_routes_evaluated":    len(serving),
+            "already_failing_at_baseline": already_failing,
+            "project_caused_exceedance":   project_caused,
+            "flagged_route_ids":           flagged_ids,
+            "result":                      any_flagged,
+            "triggers_standard":           any_flagged,
+            "method":                      "Marginal causation: baseline_vc < threshold AND proposed_vc >= threshold",
+            "route_details":               route_results,
         }
         return any_flagged, flagged_ids, detail
 

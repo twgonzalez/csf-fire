@@ -30,7 +30,27 @@ uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --uni
 
 # Force refresh cached data
 uv run python main.py analyze --city "Berkeley" --state "CA" --refresh
+
+# Regenerate the primary demo map (REQUIRED after any visualization code change)
+uv run python main.py demo --city "Berkeley"
+# → output/berkeley/demo_map.html
 ```
+
+## Primary UX Artifact
+
+**`output/{city}/demo_map.html`** is the primary stakeholder-facing UX — the interactive
+multi-project comparison map used for demos, city attorney review, and planning presentations.
+This is the ONLY output file external users need to open.
+
+**After ANY change to `agents/visualization/`**, regenerate it:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+uv run python main.py demo --city "Berkeley"
+# → output/berkeley/demo_map.html
+```
+
+The `output/` directory is git-ignored. Share `output/{city}/demo_map.html` directly with
+stakeholders. Do NOT leave a stale demo map — always regenerate before sharing.
 
 ## Directory Structure
 
@@ -64,7 +84,7 @@ output/{city}/          # Results (git-ignored)
 
 | Parameter | Default | Source |
 |-----------|---------|--------|
-| `vc_threshold` | 0.80 | LOS E/F boundary, HCM 2022 |
+| `vc_threshold` | 0.95 | Exact LOS E/F boundary, HCM 2022 |
 | `unit_threshold` | 50 | CEQA categorical exemption |
 | `vehicles_per_unit` | 2.5 | U.S. Census ACS |
 | `peak_hour_mobilization` | 0.57 | Berkeley mobilization study |
@@ -101,7 +121,7 @@ All four standards are algorithmic — zero discretion allowed. Do NOT add any "
 1. **Standard 1**: GIS point-in-polygon test against FHSZ Zone 2 or 3
 2. **Standard 2**: `units >= 50` (integer comparison)
 3. **Standard 3**: Network analysis to find evacuation routes within 0.5 miles
-4. **Standard 4**: `baseline_vc >= 0.80` OR `proposed_vc > 0.80` for any serving route
+4. **Standard 4**: `baseline_vc < 0.95` AND `proposed_vc >= 0.95` for any serving route — marginal causation test; project must itself cause the threshold crossing (0.95 = exact HCM LOS E/F boundary)
 
 **Final determination:**
 ```
@@ -128,3 +148,28 @@ Phase 1 (MVP): Agents 1–3 only. CLI output to CSV + text. No web UI, no fee ca
 
 Phase 2 (next): Agent 4 (impact fee calculator) + Agent 6 (Folium maps).
 Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
+
+## Pending Methodology Work
+
+1. ✅ **Trigger fix (marginal causation)** — `ratio_test()` in `agents/scenarios/base.py`
+   Changed from absolute trigger (`baseline_vc >= threshold`) to marginal test
+   (`baseline_vc < threshold AND proposed_vc >= threshold`). Projects near pre-existing
+   congestion are no longer automatically DISCRETIONARY; only projects that cause a
+   threshold crossing are flagged.
+
+2. ✅ **Demand model** — `agents/capacity_analysis.py` + `agents/scenarios/base.py`
+   KLD buffer model preserved as `evacuation_demand_vph` (informational). `baseline_demand_vph`
+   now uses catchment-based demand (network path analysis: catchment_units × vpu × mob), which
+   represents realistic per-segment load. `vehicles_per_route = project_vph` (not divided by
+   n_routes) implements worst-case marginal impact test. Result: DISCRETIONARY is now
+   demonstrable for constrained locations (e.g., Ridge Road, Cedar Street near capacity).
+
+3. **Physical site access standard (new Standard 6)** — no file yet
+   The Clark Street (Encinitas) problem — 200 units at end of an 18' wide dead-end street —
+   is not a v/c ratio problem. It is a physical access problem governed by IFC §503
+   (fire apparatus access roads). Objective thresholds already exist in adopted fire code:
+   - Minimum road width: 20 ft one-way, 26 ft two-way
+   - Dead-end without turnaround: flag if > 150 ft serving > N units
+   - Single access point: flag for large projects (city-adopted N)
+   This should be a new scenario subclass (`agents/scenarios/site_access.py`) using OSM
+   `width` tags and road geometry as inputs.

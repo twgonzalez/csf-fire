@@ -7,15 +7,14 @@
 # to city planners.  Each project appears as a toggleable layer
 # on the output map so reviewers can compare impacts side-by-side.
 #
-# Tier logic (Phase 2b):
-#   DISCRETIONARY        — size >= 50 AND any serving route v/c >= 0.80
-#   CONDITIONAL MINISTERIAL — city has FHSZ AND size >= 50 (std4 not triggered)
-#   MINISTERIAL          — size < 50 OR no FHSZ in city
+# Tier logic (Phase 2c — demand model fix, marginal causation):
+#   DISCRETIONARY           — size >= 50 AND project causes a serving route
+#                             to cross v/c 0.95 (baseline < 0.95, proposed >= 0.95)
+#   CONDITIONAL MINISTERIAL — city has FHSZ AND size >= 50 (Standard 4 not triggered)
+#   MINISTERIAL             — size < 50 OR no FHSZ in city
 #
-# NOTE: All Berkeley arterials are at LOS F under the KLD citywide
-# demand model, so any ≥50-unit project near an evacuation route
-# will trigger DISCRETIONARY.  Smaller projects remain MINISTERIAL
-# because the 50-unit size threshold is not met.
+# Demand model: catchment-based (network path analysis) for baseline_demand_vph.
+# Standard 4 impact: worst-case marginal test (full project vph per route).
 # ============================================================
 
 city: "Berkeley"
@@ -39,7 +38,7 @@ projects:
     expected_tier: "MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 2 — Mid-rise downtown: at threshold, LOS F arterials → DISCRETIONARY
+  # 2 — Mid-rise downtown: at threshold, high-capacity arterials → CONDITIONAL
   # -----------------------------------------------------------
   - name: "Downtown Mid-Rise"
     address: "Shattuck Ave & Center St, Downtown Berkeley"
@@ -47,13 +46,16 @@ projects:
     lon: -122.2685
     units: 75
     description: >
-      75-unit project on Shattuck Ave.  Exceeds the 50-unit threshold and is
-      served by multiple LOS F arterials (Shattuck, University).
-      Standard 4 is triggered → DISCRETIONARY review required.
-    expected_tier: "DISCRETIONARY"
+      75-unit project on Shattuck Ave.  Exceeds the 50-unit threshold and
+      has 75 serving evacuation routes within 0.5 miles.  The high-capacity
+      arterials here (Shattuck, University) have sufficient headroom that
+      107 peak-hour project vehicles do not push any single route from below
+      to above the v/c 0.95 threshold.  Standard 4 is NOT triggered →
+      CONDITIONAL MINISTERIAL (evacuation conditions required, but ministerial).
+    expected_tier: "CONDITIONAL MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 3 — Telegraph corridor: major commercial street → DISCRETIONARY
+  # 3 — Telegraph corridor: near-capacity local roads → DISCRETIONARY
   # -----------------------------------------------------------
   - name: "Telegraph Corridor"
     address: "Telegraph Ave & Ashby Ave"
@@ -61,29 +63,30 @@ projects:
     lon: -122.2596
     units: 60
     description: >
-      60-unit project at Telegraph/Ashby.  Telegraph is a primary evacuation
-      arterial already operating at LOS F.  Standard 4 triggered.
+      60-unit project at Telegraph/Ashby.  Cedar Street (within 0.5 miles)
+      is already at LOS E (v/c = 0.91); 86 peak-hour project vehicles
+      push it above the 0.95 threshold.  Standard 4 triggered →
+      DISCRETIONARY review required.
     expected_tier: "DISCRETIONARY"
 
   # -----------------------------------------------------------
-  # 4 — Hills gateway: in FHSZ Zone 3 → DISCRETIONARY + fire zone modifier
+  # 4 — Hills gateway: in FHSZ area, arterials have headroom → CONDITIONAL
   # -----------------------------------------------------------
   - name: "Hills Gateway"
-    address: "Claremont Ave & Tunnel Rd (FHSZ Zone 3)"
+    address: "Claremont Ave & Tunnel Rd"
     lat: 37.8914
     lon: -122.2494
     units: 80
     description: >
-      80-unit project in the Berkeley Hills, within FHSZ Zone 3.  Fire zone
-      location is recorded as a severity modifier in the audit trail.  Because
-      the standard AB 747 threshold applies regardless of fire zone location,
-      the project still triggers DISCRETIONARY based on size + capacity alone.
-      The fire zone modifier elevates the conditions that discretionary review
-      must address.
-    expected_tier: "DISCRETIONARY"
+      80-unit project near the Berkeley Hills.  City is in FHSZ zone area;
+      fire zone is recorded as a severity modifier in the audit trail (not
+      a tier gate).  Serving evacuation routes within 0.5 miles have
+      catchment-based demand below the v/c 0.95 threshold, so Standard 4
+      is NOT triggered → CONDITIONAL MINISTERIAL with fire zone conditions.
+    expected_tier: "CONDITIONAL MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 5 — Large transit-oriented: high unit count → DISCRETIONARY (severe)
+  # 5 — Large transit-oriented: 200 units → DISCRETIONARY (severe)
   # -----------------------------------------------------------
   - name: "North Berkeley TOD"
     address: "North Shattuck Ave & Rose St"
@@ -92,12 +95,13 @@ projects:
     units: 200
     description: >
       200-unit transit-oriented development.  Generates 285 peak-hour
-      evacuation vehicles (200 × 2.5 × 0.57).  All nearby arterials already
-      operate at LOS F — this project adds significant load.  DISCRETIONARY.
+      vehicles.  Multiple near-capacity evacuation routes (Cedar Street,
+      others) are pushed above v/c 0.95 by the project's load.
+      Standard 4 triggered → DISCRETIONARY.
     expected_tier: "DISCRETIONARY"
 
   # -----------------------------------------------------------
-  # 6 — West Berkeley: lower-traffic area, test for CONDITIONAL
+  # 6 — West Berkeley: near-capacity local streets → DISCRETIONARY
   # -----------------------------------------------------------
   - name: "West Berkeley Flex"
     address: "Heinz Ave & 4th St, West Berkeley"
@@ -106,7 +110,41 @@ projects:
     units: 55
     description: >
       55-unit mixed-use project in the West Berkeley industrial corridor.
-      Fewer classified evacuation routes in this area — may trigger
-      CONDITIONAL MINISTERIAL if no serving routes exceed v/c threshold,
-      or DISCRETIONARY if LOS F arterials are within 0.5 miles.
-    expected_tier: "CONDITIONAL MINISTERIAL (or DISCRETIONARY)"
+      Local two-lane evacuation routes serving this area are near capacity
+      (LOS E). The project's 78 peak-hour vehicles push at least one route
+      above v/c 0.95 → DISCRETIONARY.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 7 — Hills hillside: Standard 4 (wildland) triggers via Ridge Road
+  # -----------------------------------------------------------
+  - name: "Claremont Hills Terrace"
+    address: "Ridge Road & Claremont Ave, Berkeley Hills"
+    lat: 37.876
+    lon: -122.260
+    units: 75
+    description: >
+      75-unit hillside project at the edge of the Berkeley Hills.
+      Ridge Road — a narrow two-lane access road (cap 1,125 vph) — carries
+      evacuation demand at v/c 0.94 at baseline.  The project's 107 peak-hour
+      vehicles push Ridge Road from v/c 0.94 to 1.03, crossing the 0.95
+      LOS E/F threshold.  Standard 4 (wildland) triggered →
+      DISCRETIONARY review required.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 8 — Cedar Street corridor: Standard 5 (local density) + Standard 4
+  # -----------------------------------------------------------
+  - name: "Cedar Street Infill"
+    address: "Cedar Street & Shattuck Ave, North Berkeley"
+    lat: 37.879
+    lon: -122.278
+    units: 75
+    description: >
+      75-unit project in the North Berkeley residential corridor.
+      Cedar Street (two-lane, cap 1,125 vph) is at v/c 0.91 at baseline;
+      the project's 107 vehicles push it to 1.00 (LOS F).
+      Standard 4 (wildland, 0.5-mile) AND Standard 5 (local density,
+      0.25-mile) are both triggered — project is within the local egress
+      radius of the near-capacity street.  DISCRETIONARY.
+    expected_tier: "DISCRETIONARY"

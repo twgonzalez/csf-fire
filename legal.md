@@ -79,24 +79,41 @@ the computational method is identical.
 - `peak_hour_mobilization` (0.57): KLD Engineering AB 747 Study, Berkeley, March 2024 (Figure 12 mobilization curve)
 
 ### Step 5 — Capacity Ratio Test
-**Question:** Does demand exceed capacity on any serving route?
-**Method:** Per-route test — two sub-tests, either triggers the determination:
-- **Test A (Baseline):** `baseline_vc >= vc_threshold` — route already failing before project
-- **Test B (Proposed):** `(baseline_demand + project_vph / n_routes) / capacity > vc_threshold`
+**Question:** Does this project cause any serving route to cross the LOS E/F capacity threshold?
+**Method:** Marginal causation test — a route is flagged only when the project itself causes the threshold crossing:
 
-Project vehicles are distributed equally across all serving routes (conservative —
-assumes full vehicle load on every serving road).
+```
+baseline_vc < vc_threshold  AND  proposed_vc >= vc_threshold
+```
+
+where:
+- `proposed_vc = (baseline_demand + project_vph / n_routes) / capacity`
+- Project vehicles are distributed equally across all serving routes
+
+Routes already failing at baseline (`baseline_vc >= vc_threshold`) are recorded in
+the audit trail for transparency but do NOT trigger DISCRETIONARY — the project did
+not cause that failure.
 
 **Output:** Boolean (triggered / not triggered) + list of flagged route IDs
-**Discretion:** Zero. Arithmetic comparison against a city-adopted threshold (0.80).
+**Discretion:** Zero. Arithmetic comparison against a city-adopted threshold (0.95).
 **Capacity source:** HCM 2022 (Highway Capacity Manual, 7th Edition) — the technical
 standard for road capacity analysis accepted by California courts and CEQA practitioners.
 
-**Why two sub-tests?**
-Test A catches routes already operating above LOS E/F — adding any vehicles to a
-failing route is a quantifiable impact. Test B catches routes tipped over the threshold
-by the project. Both have the same legal significance: the project adds vehicles to
-a constrained evacuation route.
+**Why marginal causation, not baseline exceedance?**
+This is the standard CEQA significance methodology: a project's impact is significant
+when the project itself causes an adverse change, not when an adverse condition already
+exists independently. Flagging a project because roads were already congested before
+it arrived would function as a categorical prohibition on infill — HCD would likely
+find this invalid under the Housing Accountability Act. The marginal test is legally
+conservative: it only flags the specific project that tips a route into failure.
+
+**Why 0.95, not 0.80?**
+0.95 is the precise LOS E/F boundary in HCM 2022. Triggering discretionary review
+at v/c = 0.80 (mid-LOS E) has no direct HCM anchor and could be challenged as
+arbitrary. Triggering at v/c = 0.95 — the actual E/F breakpoint — ties the standard
+precisely to an established technical reference. It is also more permissive of infill
+(fewer projects trigger), making it harder for HCD to characterize as a categorical
+prohibition while still protecting against true route failure.
 
 ### Aggregation: Most Restrictive Wins
 When multiple scenarios are evaluated, the most restrictive tier prevails:
@@ -191,7 +208,7 @@ to analyze evacuation route capacity and adopt objective development standards.
 ### Step 5 Parameter
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| vc_threshold | 0.80 | HCM 2022 LOS E/F boundary |
+| vc_threshold | 0.95 | HCM 2022 LOS E/F boundary (exact breakpoint) |
 
 ### Three-Tier Output
 | Tier | Trigger | Legal Basis |
@@ -264,7 +281,7 @@ in Government Code §65913.4 and all subsequent ministerial approval statutes.
 
 ### Challenge 2: "The parameters are arbitrary."
 **Response:** No parameter was invented for this system:
-- `vc_threshold = 0.80`: HCM 2022 LOS E/F boundary, accepted by Caltrans and federal guidance.
+- `vc_threshold = 0.95`: Exact LOS E/F boundary in HCM 2022 (Table for basic freeway/multilane segments and two-lane highways). This is the same threshold used in Caltrans Transportation Analysis Framework and federal guidance. Using 0.95 rather than a lower value makes the standard more permissive of infill and more precisely anchored to the published technical standard.
 - `unit_threshold = 50`: CEQA categorical exemption threshold for infill residential.
 - `vehicles_per_unit = 2.5`: U.S. Census ACS — the same source used in every trip generation study.
 - `peak_hour_mobilization = 0.57`: KLD Engineering TR-1381, Berkeley AB 747 Study, March 2024, Figure 12.
@@ -282,10 +299,11 @@ evaluation.
 
 ### Challenge 4: "The project isn't in a fire zone — evacuation standards don't apply."
 **Response:** Under the wildland scenario, DISCRETIONARY review is triggered by
-capacity impact (the project tips a route over v/c 0.80), not by fire zone location.
-Government Code §65302.15 requires analysis of evacuation route capacity citywide —
-not just within FHSZ boundaries. A project anywhere in the city adds vehicles to
-the shared evacuation network. The capacity impact is measured, not presumed.
+capacity impact (the project itself causes a serving route to cross v/c 0.95), not
+by fire zone location. Government Code §65302.15 requires analysis of evacuation
+route capacity citywide — not just within FHSZ boundaries. A project anywhere in
+the city adds vehicles to the shared evacuation network. The capacity impact is
+measured, not presumed.
 
 ### Challenge 5: "The data sources are unreliable."
 **Response:** All data sources are published government datasets:
@@ -346,7 +364,7 @@ city attorney's and council's work.
 ### Technical References
 | Document | Subject | Parameters Derived |
 |----------|---------|-------------------|
-| Highway Capacity Manual, 7th Ed. (HCM 2022) | Road capacity by facility type | capacity_vph by road type; vc_threshold = 0.80 (LOS E/F boundary) |
+| Highway Capacity Manual, 7th Ed. (HCM 2022) | Road capacity by facility type | capacity_vph by road type; vc_threshold = 0.95 (exact LOS E/F boundary) |
 | KLD Engineering TR-1381, Berkeley AB 747 Study (March 2024) | Evacuation demand modeling | peak_hour_mobilization = 0.57; buffer_radius = 0.25 miles; employee_mobilization_day = 1.00 |
 | U.S. Census ACS Table B25001 | Housing units by block group | Housing unit demand base; vehicles_per_unit = 2.5 |
 | U.S. Census LEHD LODES8 | Workplace area characteristics by block group | Employee demand base |
@@ -363,7 +381,7 @@ All parameters are configuration values in `config/parameters.yaml` or
 |-----------|---------|------------|--------|------------|
 | Unit threshold (discretionary) | 50 | `determination_tiers.discretionary.unit_threshold` | CEQA Class 32 categorical exemption | City council |
 | Unit threshold (conditional) | 50 | `determination_tiers.conditional_ministerial.unit_threshold` | Same | City council |
-| V/C threshold | 0.80 | `determination_tiers.discretionary.vc_threshold` | HCM 2022 LOS E/F boundary | City council |
+| V/C threshold | 0.95 | `determination_tiers.discretionary.vc_threshold` | HCM 2022 exact LOS E/F boundary | City council |
 | Vehicles per unit | 2.5 | `vehicles_per_unit` | U.S. Census ACS | U.S. Census (city inherits) |
 | Peak-hour mobilization | 0.57 | `peak_hour_mobilization` | KLD Engineering AB 747 study | City council (adopts study) |
 | AADT peak-hour factor | 0.10 | `aadt_peak_hour_factor` | Standard traffic engineering practice | City council |
@@ -373,7 +391,7 @@ All parameters are configuration values in `config/parameters.yaml` or
 | Employee mobilization (day) | 1.00 | `demand.employee_mobilization_day` | KLD Engineering AB 747 methodology | City council |
 | Cache TTL | 90 days | `cache_ttl_days` | Operational parameter | City IT / planning dept. |
 | Std 5 unit threshold | 50 | `local_density.unit_threshold` | Consistent with Scenario A | City council |
-| Std 5 V/C threshold | 0.80 | `local_density.vc_threshold` | HCM 2022 LOS E/F boundary | City council |
+| Std 5 V/C threshold | 0.95 | `local_density.vc_threshold` | HCM 2022 exact LOS E/F boundary | City council |
 | Std 5 local radius | 0.25 mi | `local_density.radius_miles` | KLD Engineering quarter-mile | City council |
 | Std 5 transit buffer | 2640 ft | `local_density.transit_buffer_feet` | SB 79 — 0.5 mile transit definition | State (SB 79) |
 

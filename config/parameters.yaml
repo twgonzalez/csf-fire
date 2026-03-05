@@ -8,8 +8,10 @@
 # ============================================================
 
 # Volume-to-capacity threshold triggering discretionary review
-# Basis: LOS E/F boundary per Highway Capacity Manual 2022
-vc_threshold: 0.80
+# Basis: LOS E/F boundary per Highway Capacity Manual 2022 (v/c = 0.95 is the exact E/F breakpoint)
+# Legal rationale: 0.95 is the true HCM LOS E/F boundary — more permissive of infill than
+# an arbitrary mid-LOS-E value, and harder for HCD to challenge as a categorical prohibition.
+vc_threshold: 0.95
 
 # Minimum dwelling units triggering Standards review
 # Basis: CEQA categorical exemption threshold for residential projects
@@ -231,8 +233,8 @@ determination_tiers:
     # Fire zone location is a severity modifier recorded in audit trail, NOT a gate
     # Legal basis: AB 747 (California Government Code §65302.15) + HCM 2022
     unit_threshold: 50    # minimum dwelling units; if absent, inherits unit_threshold
-    vc_threshold: 0.80    # v/c exceedance trigger; if absent, inherits vc_threshold
-    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — project adds vehicles to evacuation routes operating at or above LOS E/F (citywide evacuation scenario)"
+    vc_threshold: 0.95    # v/c exceedance trigger; if absent, inherits vc_threshold (exact HCM LOS E/F boundary)
+    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — project causes a serving evacuation route to cross the LOS E/F boundary (v/c = 0.95) from below"
 
   conditional_ministerial:
     # Triggers: city has FHSZ zones + size >= threshold + serving evacuation routes exist
@@ -267,8 +269,8 @@ local_density:
   # Minimum dwelling units to trigger Standard 5 analysis
   unit_threshold: 50
 
-  # Volume-to-capacity threshold (same as wildland scenario for consistency)
-  vc_threshold: 0.80
+  # Volume-to-capacity threshold (same as wildland scenario for consistency — exact HCM LOS E/F boundary)
+  vc_threshold: 0.95
 
   # Buffer radius around project to collect local egress roads
   # Source: KLD Engineering quarter-mile methodology
