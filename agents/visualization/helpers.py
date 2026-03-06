@@ -221,5 +221,10 @@ def _build_global_styles() -> str:
     color: #adb5bd !important;
     border-radius: 6px 0 0 0 !important;
   }
+
+  /* ---- Push top Leaflet controls below the JOSH brand header ---- */
+  .leaflet-top {
+    top: 58px !important;
+  }
 </style>
 """
