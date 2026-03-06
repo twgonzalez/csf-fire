@@ -381,27 +381,38 @@ def _build_header(city_name: str, case_num: str, eval_date: str, project) -> str
     apn_line = f"APN: {apn} &nbsp;&middot;&nbsp;" if apn else ""
 
     return f"""<header class="brief-header no-print-border">
-  <div style="max-width:860px; margin:0 auto; display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap;">
-    <div>
-      <!-- Org identity -->
-      <div style="font-size:10px; letter-spacing:2px; text-transform:uppercase; color:#a8c8e8; font-weight:600; margin-bottom:6px;">
-        California Stewardship Alliance
+  <div style="max-width:860px; margin:0 auto;">
+    <!-- Top row: org + case block -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; margin-bottom:18px;">
+      <div>
+        <!-- Org identity -->
+        <div style="font-size:10px; letter-spacing:2px; text-transform:uppercase; color:#a8c8e8; font-weight:600; margin-bottom:6px;">
+          California Stewardship Alliance
+        </div>
+        <!-- Department name -->
+        <div style="font-size:24px; font-weight:800; color:#fff; line-height:1.2; margin-bottom:4px;">
+          City of {city_name} &mdash; Planning Department
+        </div>
+        <!-- Document type -->
+        <div style="font-size:13px; color:#c8dff0; font-weight:500;">
+          Fire Evacuation Capacity Determination &nbsp;&middot;&nbsp; AB 747 &nbsp;&middot;&nbsp; Gov. Code &sect;65302.15
+        </div>
       </div>
-      <!-- Department name -->
-      <div style="font-size:24px; font-weight:800; color:#fff; line-height:1.2; margin-bottom:4px;">
-        City of {city_name} &mdash; Planning Department
-      </div>
-      <!-- Document type -->
-      <div style="font-size:13px; color:#c8dff0; font-weight:500;">
-        Fire Evacuation Capacity Determination &nbsp;&middot;&nbsp; AB 747 &nbsp;&middot;&nbsp; Gov. Code &sect;65302.15
+      <!-- Case block -->
+      <div style="text-align:right; font-size:11px; color:#a8c8e8; line-height:1.8; flex-shrink:0;">
+        <div style="font-weight:700; color:#fff; font-size:12px;">{case_num}</div>
+        <div>{apn_line}Issued: {eval_date}</div>
+        <div>{units} dwelling units</div>
       </div>
     </div>
-    <!-- Case block -->
-    <div style="text-align:right; font-size:11px; color:#a8c8e8; line-height:1.8; flex-shrink:0;">
-      <div style="font-weight:700; color:#fff; font-size:12px;">{case_num}</div>
-      <div>{apn_line}Issued: {eval_date}</div>
-      <div style="margin-top:4px; color:#c8dff0;">{proj_line}</div>
-      <div>{units} dwelling units</div>
+    <!-- Project title bar -->
+    <div style="border-top:1px solid rgba(255,255,255,0.18); padding-top:14px;">
+      <div style="font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#a8c8e8; font-weight:600; margin-bottom:4px;">
+        Project
+      </div>
+      <div style="font-size:20px; font-weight:800; color:#fff; line-height:1.2;">
+        {proj_line}
+      </div>
     </div>
   </div>
 </header>"""

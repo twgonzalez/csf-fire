@@ -537,6 +537,13 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
                 f"got [white]{actual_tier}[/white][/bold red]"
             )
 
+        # Generate determination brief so demo map links resolve.
+        from agents.visualization.brief import create_determination_brief
+        lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
+        lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
+        brief_path = output_dir / f"brief_{lat_str}_{lon_str}_{units}u.html"
+        create_determination_brief(project, audit, config, city_config, brief_path)
+
     # ── Summary table ──────────────────────────────────────────────────────
     console.print()
     _print_demo_summary(evaluated, config)
