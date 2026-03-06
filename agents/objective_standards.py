@@ -21,7 +21,8 @@ Architecture:
 Active scenarios:
   A. WildlandScenario     — Standards 1–4 (AB 747, Gov. Code §65302.15)
   B. LocalDensityScenario — Standard 5 (General Plan §65302(g), Fire Code 503, SB 79)
-                            [disabled by default — requires GTFS data; see legal.md]
+                            [ENABLED — citywide, no transit gate; see parameters.yaml local_density block]
+                            [Phase 3: GTFS transit proximity gating available via require_transit_proximity]
 
 Public API (unchanged from prior architecture):
   evaluate_project(project, roads_gdf, fhsz_gdf, config, city_config) → (Project, audit)
@@ -324,17 +325,24 @@ def generate_audit_trail(
                 "",
                 "  STEP 5 — CAPACITY RATIO TEST",
                 "  " + "-" * 38,
-                f"  V/C Threshold: {s5.get('vc_threshold', 0.80)}",
+                f"  V/C Threshold: {s5.get('vc_threshold', 0.95)}",
                 f"  Method: {s5.get('method', '')}",
                 f"  Project vehicles per route: {s5.get('vehicles_per_route', 0):.1f} vph",
                 f"  Routes evaluated: {s5.get('serving_routes_evaluated', 0)}",
-                f"  Baseline flagged: {s5.get('baseline_test_flagged', [])}",
-                f"  Proposed flagged: {s5.get('proposed_test_flagged', [])}",
+                f"  Already failing at baseline (not caused by project): {s5.get('already_failing_at_baseline', [])}",
+                f"  Project-caused exceedance (triggers DISCRETIONARY): {s5.get('project_caused_exceedance', [])}",
                 "",
                 "  Route-by-Route Results:",
             ]
             for r in s5.get("route_details", []):
-                flag = " *** FLAGGED ***" if (r["baseline_exceeds"] or r["proposed_exceeds"]) else ""
+                # Only mark routes the PROJECT causes to cross the threshold (marginal causation).
+                # Routes already failing at baseline are noted separately — they do not trigger DISCRETIONARY.
+                if r.get("project_causes_exceedance"):
+                    flag = " *** PROJECT CAUSES EXCEEDANCE ***"
+                elif r.get("baseline_exceeds"):
+                    flag = " [pre-existing LOS F — not caused by project]"
+                else:
+                    flag = ""
                 lines.append(f"    {r.get('name') or r['osmid']}:{flag}")
                 lines.append(
                     f"      Baseline: {r['baseline_demand_vph']:.1f} vph, "

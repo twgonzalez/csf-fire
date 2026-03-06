@@ -274,7 +274,7 @@ def _print_routes_table(evac_routes, config: dict):
         console.print("[yellow]No evacuation routes identified.[/yellow]")
         return
 
-    threshold = config.get("vc_threshold", 0.80)
+    threshold = config.get("vc_threshold", 0.95)
 
     table = Table(
         title="Evacuation Routes (top 20 by v/c ratio)",
@@ -535,6 +535,16 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             f"[dim]{n_srv} serving routes · {n_flg} flagged[/dim]"
         )
 
+        # Regression check: warn if result differs from expected_tier in the YAML.
+        # This catches methodology regressions without requiring a separate test suite.
+        expected_tier = pdef.get("expected_tier", "").strip().upper()
+        actual_tier   = det.strip().upper()
+        if expected_tier and actual_tier != expected_tier:
+            console.print(
+                f"     [bold red]⚠ REGRESSION: expected [white]{expected_tier}[/white] "
+                f"got [white]{actual_tier}[/white][/bold red]"
+            )
+
     # ── Summary table ──────────────────────────────────────────────────────
     console.print()
     _print_demo_summary(evaluated, config)
@@ -562,7 +572,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
 
 def _print_demo_summary(projects: list, config: dict):
     """Print a multi-project comparison table."""
-    vc_threshold = config.get("vc_threshold", 0.80)
+    vc_threshold = config.get("vc_threshold", 0.95)
     unit_threshold = config.get("unit_threshold", 50)
 
     table = Table(

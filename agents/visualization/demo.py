@@ -297,6 +297,7 @@ def create_demo_map(
         proj_group.add_to(m)
 
     # ── Fixed panels ───────────────────────────────────────────────────────
+    m.get_root().html.add_child(folium.Element(_build_brand_header_html()))
     m.get_root().html.add_child(folium.Element(
         _build_demo_panel_html(
             projects, demo_title, config,
@@ -313,6 +314,102 @@ def create_demo_map(
     m.save(str(output_path))
     logger.info(f"Demo map saved: {output_path}")
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Brand header (top bar)
+# ---------------------------------------------------------------------------
+
+def _build_brand_header_html() -> str:
+    """Full-width fixed header with JOSH product branding and CSA org identity."""
+    return """
+<div id="josh-header" style="
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 10001;
+    height: 54px;
+    background: #1e1612;
+    border-bottom: 3px solid #7a3f3f;
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 3px 18px rgba(0,0,0,0.50);
+    gap: 0;
+    user-select: none;
+">
+
+  <!-- CSA seal mark (pine tree + water waves) -->
+  <div style="
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(196,168,130,0.50);
+      background: rgba(196,168,130,0.07);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+  ">
+    <svg width="24" height="24" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="14,4 22,17 6,17" fill="#c4a882" opacity="0.88"/>
+      <rect x="12.5" y="17" width="3" height="4.5" fill="#c4a882" opacity="0.88"/>
+      <path d="M4 23 Q7.5 21 11 23 Q14.5 25 18 23 Q21.5 21 25 23"
+            stroke="#c4a882" stroke-width="1.3" fill="none" opacity="0.60"
+            stroke-linecap="round"/>
+    </svg>
+  </div>
+
+  <!-- CSA org name -->
+  <div style="margin-left: 11px; flex-shrink: 0; line-height: 1.3;">
+    <div style="font-size: 8px; color: #c4a882; letter-spacing: 2px;
+                text-transform: uppercase; font-weight: 700;">CALIFORNIA</div>
+    <div style="font-size: 8px; color: #c4a882; letter-spacing: 2px;
+                text-transform: uppercase; font-weight: 700;">STEWARDSHIP ALLIANCE</div>
+  </div>
+
+  <!-- Vertical divider -->
+  <div style="
+      width: 1px; height: 32px;
+      background: rgba(255,255,255,0.13);
+      margin: 0 20px;
+      flex-shrink: 0;
+  "></div>
+
+  <!-- JOSH product identity -->
+  <div style="display: flex; align-items: center; gap: 15px; flex-shrink: 0;">
+
+    <!-- Logotype -->
+    <div style="
+        font-size: 27px; font-weight: 900; color: #ffffff;
+        letter-spacing: 1px; line-height: 1;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.4);
+    ">JOSH</div>
+
+    <!-- Inner divider -->
+    <div style="width:1px; height:26px; background:rgba(255,255,255,0.13); flex-shrink:0;"></div>
+
+    <!-- Full name + sub-label -->
+    <div style="line-height: 1.35;">
+      <div style="font-size: 11.5px; font-weight: 600; color: #e8ddd0;
+                  letter-spacing: 0.15px;">
+        Jurisdictional Objective Standards for Housing
+      </div>
+      <div style="font-size: 9px; color: #9c8878; letter-spacing: 0.4px; margin-top: 2px;">
+        Fire Evacuation Capacity Analysis &nbsp;&middot;&nbsp; AB 747
+      </div>
+    </div>
+  </div>
+
+  <!-- Spacer -->
+  <div style="flex: 1;"></div>
+
+  <!-- Right: version badge -->
+  <div style="
+      font-size: 9px; color: #7a6858;
+      letter-spacing: 1px; text-transform: uppercase;
+      font-weight: 600; text-align: right; flex-shrink: 0;
+  ">BETA</div>
+
+</div>
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +458,7 @@ def _build_demo_panel_html(
     return f"""
 <div id="demo-panel" style="
     position: fixed;
-    top: 10px; left: 10px;
+    top: 68px; left: 10px;
     z-index: 9999;
     width: 308px;
     background: white;
@@ -387,7 +484,7 @@ def _build_demo_panel_html(
     <div style="flex:1; min-width:0;">
       <div style="font-size:10px; color:#868e96; text-transform:uppercase;
                   letter-spacing:0.6px; margin-bottom:2px;">
-        Fire Evacuation Analysis
+        Project Evaluation
       </div>
       <div style="font-size:13px; font-weight:700; color:#212529;
                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
@@ -734,6 +831,6 @@ def _build_demo_legend_html(config: dict) -> str:
   {fhsz_items}
 
   <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
-              font-size:9px; color:#adb5bd;">AB 747 Fire Evac Capacity Analysis</div>
+              font-size:9px; color:#adb5bd;">JOSH &middot; California Stewardship Alliance</div>
 </div>
 """

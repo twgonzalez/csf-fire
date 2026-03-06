@@ -39,16 +39,26 @@ Per the KLD Berkeley study, evacuation demand has three components:
 | Employees (Census LEHD in-commuters) | 1 vehicle/employee | 100% in first hour (daytime) | **employee_vph** |
 | Students (major universities only, city config) | 1 vehicle/student with car | 100% in first hour (session) | **student_vph** |
 
-**Demand formula per road segment:**
+**Demand formula per road segment (two outputs — different uses):**
 
 ```
-baseline_demand_vph = resident_vph + employee_vph + student_vph
+# 1. baseline_demand_vph — used for Standard 4 v/c ratio test (catchment-based)
+#    Source: network path analysis; counts only HUs whose shortest evacuation path
+#    traverses this segment (more precise than a flat buffer).
+baseline_demand_vph = catchment_housing_units × vehicles_per_unit × resident_mobilization
   where:
-    resident_vph   = housing_units_in_buffer × vehicles_per_unit × resident_mobilization
-    employee_vph   = employees_in_buffer × 1.0 × employee_mobilization
-    student_vph    = student_vehicles_in_buffer × 1.0 × student_mobilization
+    catchment_housing_units = HUs in block groups whose Dijkstra path crosses this segment
+    vehicles_per_unit       = 2.5 (Census ACS default)
+    resident_mobilization   = 0.57 (KLD Engineering AB 747 study, Figure 12)
 
-  buffer_radius   = 0.25 miles (quarter-mile, matching KLD methodology)
+# 2. evacuation_demand_vph — informational; citywide planning reference (KLD buffer model)
+#    NOT used for Standard 4. Stored for comparison to KLD study outputs.
+evacuation_demand_vph = resident_vph + employee_vph + student_vph
+  where:
+    resident_vph = housing_units_in_buffer × vehicles_per_unit × resident_mobilization
+    employee_vph = employees_in_buffer × 1.0 × employee_mobilization
+    student_vph  = student_vehicles_in_buffer × 1.0 × student_mobilization
+  buffer_radius  = 0.25 miles (quarter-mile, matching KLD methodology)
 ```
 
 **Scenario variants (min / max demand):**
@@ -108,8 +118,12 @@ The fire zone location is a **severity modifier**, not an entry gate. Any projec
 ```
 DISCRETIONARY REVIEW REQUIRED:
   IF size_met (units ≥ threshold)
-  AND capacity_exceeded (any serving route: baseline_vc ≥ 0.80 OR proposed_vc > 0.80)
+  AND capacity_exceeded (marginal causation: baseline_vc < 0.95 AND proposed_vc ≥ 0.95
+                         on any serving route)
   → Requires full CEQA + fire safety review (AB 747, AB 1600)
+
+  Note: Routes already failing at baseline (vc ≥ 0.95) are recorded in the audit trail
+  but do NOT trigger DISCRETIONARY — the project did not cause that failure.
 
   Severity modifier (fire_zone_modifier = TRUE if project in FHSZ Zone 2/3):
   → Triggers additional fire-specific conditions and higher-priority mitigation
@@ -131,12 +145,20 @@ MINISTERIAL:
 
 ```
 project_vph = dwelling_units × vehicles_per_unit × resident_mobilization
-vehicles_per_serving_route = project_vph / count(serving_routes within radius)
+
+# Worst-case marginal impact test: each serving route is independently evaluated
+# against the project's FULL peak-hour vehicle load (not divided by n_routes).
+# This tests whether any single route would be pushed over the threshold if it
+# absorbed all project vehicles — conservative but legally defensible.
+vehicles_per_route = project_vph   # NOT divided by count(serving_routes)
 
 For each serving route:
-  proposed_demand = baseline_demand_vph + vehicles_per_serving_route
+  proposed_demand = baseline_demand_vph + vehicles_per_route
   proposed_vc = proposed_demand / capacity_vph
-  flagged = (baseline_vc >= vc_threshold) OR (proposed_vc > vc_threshold)
+
+  # Marginal causation test (CEQA significance):
+  flagged = (baseline_vc < vc_threshold) AND (proposed_vc >= vc_threshold)
+  # Routes already failing (baseline_vc >= vc_threshold) are recorded but NOT flagged.
 ```
 
 ---
@@ -374,14 +396,14 @@ los_thresholds:
   E: 0.95
 
 # Determination thresholds (global defaults; overridable per city)
-vc_threshold: 0.80
+vc_threshold: 0.95    # Exact HCM 2022 LOS E/F boundary (not the KLD study's 0.80)
 unit_threshold: 50
 
 determination_tiers:
   discretionary:
     unit_threshold: 50
-    vc_threshold: 0.80
-    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — citywide evacuation impact"
+    vc_threshold: 0.95    # Marginal causation: project causes baseline_vc < 0.95 → proposed_vc ≥ 0.95
+    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — project causes a serving evacuation route to cross the LOS E/F boundary"
   conditional_ministerial:
     unit_threshold: 50
     legal_basis: "General Plan Safety Element consistency and AB 1600 nexus"
@@ -436,7 +458,7 @@ The following parameters are directly sourced from or validated against the KLD 
 | Demand buffer radius | **0.25 miles** | "resident and employee datapoints within a quarter mile buffer" |
 | Freeway capacity | **2,250 pc/h/lane** | Table 2 / HCM Chapter 12 (conservative) |
 | Multilane capacity | **1,900 pc/h/lane** | "conservative estimate of 1,900 pc/h" |
-| V/C threshold | **0.80** | LOS E/F boundary per HCM (LOS F = 0.95, E = 0.60–0.95) |
+| V/C threshold | **0.95** | Exact HCM 2022 LOS E/F boundary — more permissive of infill than the KLD study's 0.80 mid-LOS-E value, and more defensible against HCD challenge as a categorical prohibition |
 | Network origin type | **Block group centroids** | "centroid of each Census block group" |
 | Route selection | **All shortest paths to all exits** | "shortest path from each centroid to each exit" |
 | Connectivity score | **O-D path count per segment** | "total number of O-D paths that traversed each segment" |

@@ -87,8 +87,8 @@ baseline_vc < vc_threshold  AND  proposed_vc >= vc_threshold
 ```
 
 where:
-- `proposed_vc = (baseline_demand + project_vph / n_routes) / capacity`
-- Project vehicles are distributed equally across all serving routes
+- `proposed_vc = (baseline_demand + project_vph) / capacity`
+- The full project vehicle load is tested against each serving route independently (worst-case marginal impact — no division by number of routes)
 
 Routes already failing at baseline (`baseline_vc >= vc_threshold`) are recorded in
 the audit trail for transparency but do NOT trigger DISCRETIONARY — the project did
@@ -172,12 +172,17 @@ to evacuation review." This system explicitly rejects that reasoning.
 
 Under the wildland scenario, DISCRETIONARY review is triggered by capacity impact
 (Standard 4), not by fire zone location. A 200-unit project in flat downtown Berkeley
-that pushes Shattuck Avenue over v/c 0.80 has the same measurable evacuation impact
+that pushes Shattuck Avenue over v/c 0.95 has the same measurable evacuation impact
 as a 200-unit project in the Oakland Hills — because FHSZ residents evacuating through
 that arterial are affected equally regardless of where the project sits.
 
 Fire zone location is recorded as a **severity modifier** in the audit trail — it
 affects required mitigation conditions, not the tier determination.
+
+A project in a Zone 3 fire area that is small or well-served by high-capacity roads
+will still receive ministerial approval. A project outside any fire zone that pushes
+a constrained two-lane road into breakdown will trigger discretionary review.
+The road math decides — not the fire zone designation.
 
 ---
 
@@ -197,7 +202,7 @@ to analyze evacuation route capacity and adopt objective development standards.
 ### Step 2 Parameter
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| unit_threshold | 50 dwelling units | CEQA categorical exemption Class 32 (infill) |
+| unit_threshold | 50 dwelling units | Vehicle-generation floor: minimum units at which project_vph exceeds baseline demand model uncertainty (derived from HCM 2022 capacity arithmetic; city-adopted) |
 
 ### Step 3 Parameters
 | Parameter | Value | Source |
@@ -221,8 +226,9 @@ to analyze evacuation route capacity and adopt objective development standards.
 
 ## 5. Scenario B: Local Evacuation Density (Standard 5 — SB 79)
 
-**Status:** Scaffolded. Disabled by default (`local_density.enabled: false` in
-`config/parameters.yaml`). Must be enabled and the standard adopted before use.
+**Status:** Active. Enabled citywide (`local_density.enabled: true` in
+`config/parameters.yaml`). Applied to all projects regardless of transit proximity
+(GTFS transit proximity gate is a Phase 3 feature — not yet implemented).
 
 **Legal basis:**
 - Government Code §65302(g) — General Plan Safety Element (evacuation route capacity)
@@ -275,14 +281,14 @@ requirement for objective health and safety standards.
 ### Challenge 1: "This is discretionary, not objective."
 **Response:** Every step is an arithmetic comparison against a city-adopted threshold.
 Step 1 checks a polygon dataset. Step 2 is `units >= 50`. Step 3 is a GIS buffer.
-Step 4 is multiplication. Step 5 is `demand / capacity > 0.80`. There is no step
+Step 4 is multiplication. Step 5 is `demand / capacity >= 0.95`. There is no step
 at which a city official exercises judgment. The standard satisfies the definition
 in Government Code §65913.4 and all subsequent ministerial approval statutes.
 
 ### Challenge 2: "The parameters are arbitrary."
 **Response:** No parameter was invented for this system:
 - `vc_threshold = 0.95`: Exact LOS E/F boundary in HCM 2022 (Table for basic freeway/multilane segments and two-lane highways). This is the same threshold used in Caltrans Transportation Analysis Framework and federal guidance. Using 0.95 rather than a lower value makes the standard more permissive of infill and more precisely anchored to the published technical standard.
-- `unit_threshold = 50`: CEQA categorical exemption threshold for infill residential.
+- `unit_threshold = 50`: Vehicle-generation floor — the minimum project size at which peak-hour vehicle load (`units × 2.5 × 0.57`) becomes large enough to produce a measurable change in the v/c ratio of a constrained serving route. Projects below this floor contribute less than the baseline demand model's uncertainty and cannot be shown to cause a measurable impact.
 - `vehicles_per_unit = 2.5`: U.S. Census ACS — the same source used in every trip generation study.
 - `peak_hour_mobilization = 0.57`: KLD Engineering TR-1381, Berkeley AB 747 Study, March 2024, Figure 12.
 - `buffer_radius = 0.25 mi`: KLD Engineering quarter-mile buffer methodology (same study).
@@ -379,7 +385,7 @@ All parameters are configuration values in `config/parameters.yaml` or
 
 | Parameter | Default | Config Key | Source | Who Adopts |
 |-----------|---------|------------|--------|------------|
-| Unit threshold (discretionary) | 50 | `determination_tiers.discretionary.unit_threshold` | CEQA Class 32 categorical exemption | City council |
+| Unit threshold (discretionary) | 50 | `determination_tiers.discretionary.unit_threshold` | Vehicle-generation floor (HCM 2022 capacity arithmetic; city-adopted) | City council |
 | Unit threshold (conditional) | 50 | `determination_tiers.conditional_ministerial.unit_threshold` | Same | City council |
 | V/C threshold | 0.95 | `determination_tiers.discretionary.vc_threshold` | HCM 2022 exact LOS E/F boundary | City council |
 | Vehicles per unit | 2.5 | `vehicles_per_unit` | U.S. Census ACS | U.S. Census (city inherits) |
