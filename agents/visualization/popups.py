@@ -1,7 +1,5 @@
 """
-HTML popup and marker popup builders.
-
-Shared between the evaluation map and the demo map.
+HTML popup and marker popup builders for the demo map.
 """
 from models.project import Project
 from .themes import _TIER_CSS_COLOR, _TIER_BG_COLOR
@@ -101,30 +99,6 @@ def _build_route_impact_popup(
         f'font-size:10px; color:#868e96;">'
         f'Threshold: {vc_threshold:.2f} &nbsp;|&nbsp; LOS: {los}'
         f'</div>'
-        '</div>'
-    )
-
-
-# ---------------------------------------------------------------------------
-# Evaluation map project marker popup
-# ---------------------------------------------------------------------------
-
-def _build_project_popup(project: Project, serving_set: set, vc_threshold: float) -> str:
-    det = project.determination or "UNKNOWN"
-    det_color = _TIER_CSS_COLOR.get(det, "#555555")
-    display_name = project.project_name or "Proposed Project"
-    in_zone = f"Zone {project.fire_zone_level}" if project.in_fire_zone else "Not in FHSZ"
-    return (
-        '<div style="font-family:system-ui,-apple-system,sans-serif; '
-        'font-size:12px; min-width:200px; line-height:1.6;">'
-        f'<div style="font-size:14px; font-weight:700; color:{det_color}; '
-        f'margin-bottom:6px;">{det}</div>'
-        f'<div style="color:#444; font-weight:600;">{display_name}</div>'
-        f'<div style="color:#555;">{project.dwelling_units} dwelling units</div>'
-        f'<div style="color:#555;">{project.location_lat:.4f}, {project.location_lon:.4f}</div>'
-        f'<div style="color:#888; margin-top:4px;">Fire zone: {in_zone}</div>'
-        '<div style="color:#aaa; font-size:10px; margin-top:8px;">'
-        'See project card (top-left) for full details</div>'
         '</div>'
     )
 
