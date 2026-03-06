@@ -273,10 +273,13 @@ def create_demo_map(
                     vc_base, vc_proposed, vc_threshold,
                     project_vph_per_rt, is_flagged,
                 )
-                tip = (
-                    f"{'⚠ causes exceedance' if is_flagged else 'serving route'}"
-                    f" — {name_str} | baseline v/c {vc_base:.3f}"
-                )
+                if is_flagged:
+                    tip = (
+                        f"⚠ causes exceedance — {name_str} "
+                        f"| {vc_base:.3f} → {vc_proposed:.3f} v/c"
+                    )
+                else:
+                    tip = f"serving route — {name_str} | baseline v/c {vc_base:.3f}"
                 folium.GeoJson(
                     mapping(row.geometry),
                     style_function=lambda _, c=seg_color, w=weight, o=opacity: {
