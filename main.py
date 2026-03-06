@@ -228,8 +228,16 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     audit_path = output_dir / det_filename
     generate_audit_trail(project, audit, audit_path)
 
+    # Save determination brief (HTML)
+    from agents.visualization.brief import create_determination_brief
+    brief_filename = f"brief_{lat_str}_{lon_str}_{units}u.html"
+    brief_path = output_dir / brief_filename
+    create_determination_brief(project, audit, config, city_config, brief_path)
+
     _print_determination(project, audit)
     console.print(f"\n  Full audit trail: [cyan]{audit_path}[/cyan]")
+    console.print(f"  Determination brief: [cyan]{brief_path}[/cyan]")
+    console.print(f"  Open with: [dim]open {brief_path}[/dim]")
 
     if generate_map:
         console.print("\n[bold]Generating map...[/bold]")
