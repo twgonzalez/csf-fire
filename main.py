@@ -26,7 +26,13 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 def load_config(city: str) -> tuple[dict, dict]:
-    """Load parameters.yaml and city-specific config."""
+    """Load parameters.yaml and city-specific config, applying city overrides.
+
+    City configs can override any parameter from parameters.yaml by placing it
+    under the ``overrides:`` key in config/cities/{city}.yaml.  Known nested
+    parameters (unit_threshold, vc_threshold) are propagated to all sub-sections
+    so every scenario sees the city-adopted value.  See docs/city_onboarding.md §2d.
+    """
     base_dir = Path(__file__).parent
 
     params_path = base_dir / "config" / "parameters.yaml"
@@ -44,6 +50,27 @@ def load_config(city: str) -> tuple[dict, dict]:
     else:
         with open(city_path) as f:
             city_config = yaml.safe_load(f)
+
+    # Apply city-specific overrides into the shared config dict.
+    # Only parameters explicitly listed under overrides: in the city YAML are applied;
+    # omitted parameters inherit the parameters.yaml defaults unchanged.
+    overrides = city_config.get("overrides") or {}
+    if overrides:
+        config.update(overrides)
+        # unit_threshold has three nested lookup paths (one per scenario type).
+        # Propagate the city override to all of them so every scenario is consistent.
+        if "unit_threshold" in overrides:
+            ut = int(overrides["unit_threshold"])
+            config.setdefault("determination_tiers", {})
+            config["determination_tiers"].setdefault("discretionary", {})["unit_threshold"] = ut
+            config["determination_tiers"].setdefault("conditional_ministerial", {})["unit_threshold"] = ut
+            config.setdefault("local_density", {})["unit_threshold"] = ut
+        # vc_threshold likewise appears in nested scenario configs.
+        if "vc_threshold" in overrides:
+            vct = float(overrides["vc_threshold"])
+            config.setdefault("determination_tiers", {})
+            config["determination_tiers"].setdefault("discretionary", {})["vc_threshold"] = vct
+            config.setdefault("local_density", {})["vc_threshold"] = vct
 
     return config, city_config
 

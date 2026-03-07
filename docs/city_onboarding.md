@@ -251,6 +251,73 @@ universities:
 
 ---
 
+### 2d. Unit Threshold (Standard 2 Scale Gate)
+
+**What it is:** The minimum number of dwelling units at which a project triggers
+evacuation capacity analysis. Projects below this threshold receive **MINISTERIAL**
+approval automatically — no capacity analysis is run.
+
+**Default:** 15 units (set in `config/parameters.yaml`)
+
+**Technical basis:** 15 units × 2.5 veh/unit × 0.57 mobilization = **21.4 peak-hour
+vehicles** — the first integer above the ITE Trip Generation Handbook de minimis of
+10–15 peak-hour trips commonly used in California traffic studies. At this size the
+project's vehicle contribution is statistically distinguishable from background
+traffic variation regardless of road class.
+
+**Statutory anchor:** California Housing Crisis Act (SB 330, Gov. Code §65905.5) applies
+heightened protections to projects of 10+ units, establishing legislative recognition
+that projects of that scale have material impacts. 15 sits just above the ITE de
+minimis within that class.
+
+**When to override:** Most cities should accept the 15-unit default. Consider lowering
+it if your city has a severely constrained road network (e.g., hillside communities
+with limited two-lane evacuation corridors) or if your city council has adopted a
+lower threshold through ordinance.
+
+**When NOT to lower it below 10:** Projects of 1–9 units are squarely in SB 9 /
+single-family territory. A threshold below 10 is harder to defend against an HCD
+challenge that the standard functions as a categorical prohibition on small infill.
+
+**How to set it:**
+
+```yaml
+# config/cities/{city}.yaml
+overrides:
+  unit_threshold: 10   # city-specific value; must be documented in adoption ordinance
+```
+
+JOSH automatically propagates this to all scenario sub-configs (Scenario A wildland,
+Scenario B local density). No other files need to change.
+
+**Legal documentation required:** The adopted threshold must appear in:
+1. The adopting ordinance amending the General Plan Safety Element or Zoning Code
+2. Every determination brief (JOSH includes it automatically in the audit trail)
+3. A staff report section explaining the ITE trip-generation or local study basis
+
+**Defensibility tiers for lower thresholds:**
+
+| Threshold | Basis | Legal comfort |
+|-----------|-------|---------------|
+| 15 (default) | ITE de minimis + SB 330 | Strong — two independent anchors |
+| 10 | SB 330 statutory anchor | Defensible — single statutory anchor |
+| < 10 | Must have local study | Requires city-specific trip-generation analysis |
+
+If you lower the threshold below 15, add a `unit_threshold_basis` note to your city
+config for the audit trail:
+
+```yaml
+overrides:
+  unit_threshold: 10
+unit_threshold_basis: >
+  City council adopted 10-unit threshold per Resolution 2025-XX. Basis: SB 330
+  (Gov. Code §65905.5) applies to 10+ unit projects; 10 × 2.5 × 0.57 = 14.25
+  peak-hour vehicles, above the noise floor of daily traffic variation on
+  constrained hill corridors. See Attachment B of staff report dated [date].
+```
+
+---
+
 ## Step 3 — Validate Against Known Routes
 
 Set known evacuation routes from the city's General Plan Safety Element
@@ -315,7 +382,7 @@ place_fips: ""
 osmnx_place: ""
 analysis_crs: ""           # EPSG:26910 (NorCal) or EPSG:26911 (SoCal)
 
-# Mobilization — choose one option; see Step 2a above
+# Mobilization — choose one option; see §2a above
 mobilization_source: ""    # local_study | comparable_city | state_guidance | conservative_default
 peak_hour_mobilization: 0.70
 mobilization_citation: ""
@@ -330,6 +397,18 @@ universities: []
 
 # Optional — for validation
 known_evacuation_routes: []
+
+# Policy threshold overrides — see §2d (unit_threshold) and parameters.yaml for all options.
+# Any key listed here replaces the parameters.yaml default for this city only.
+# JOSH propagates unit_threshold and vc_threshold to all scenario sub-configs automatically.
+overrides: {}
+# overrides:
+#   unit_threshold: 10   # lower than default (15); requires adoption ordinance basis
+#   vc_threshold: 0.85   # more conservative than HCM 0.95; requires adoption ordinance
+
+# Optional — documents why a non-default unit_threshold was adopted (appears in audit trail)
+# unit_threshold_basis: >
+#   City council Resolution XXXX-XX. Basis: [ITE trip-generation analysis / local study].
 ```
 
 ---
