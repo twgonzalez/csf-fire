@@ -1,4 +1,4 @@
-# Contributing to csa-fire
+# Contributing to JOSH
 
 Thank you for your interest in contributing to JOSH (Jurisdictional Objective Standards for Housing). This project exists to give California cities powerful, transparent tools for legally defensible land use decisions.
 
