@@ -167,8 +167,10 @@ def create_demo_map(
         serving_set  = _osmid_set(project.serving_route_ids)
         flagged_set  = _osmid_set(project.flagged_route_ids)
 
-        num_serving        = max(len(project.serving_route_ids or []), 1)
-        project_vph_per_rt = project.project_vehicles_peak_hour / num_serving
+        # Worst-case marginal impact: full project load tested on each route independently.
+        # Matches the ratio_test() methodology in agents/scenarios/base.py.
+        # DO NOT divide by num_serving — that would contradict the determination engine.
+        project_vph_per_rt = project.project_vehicles_peak_hour
 
         # ── Extract Standard 5 data from audit ──────────────────────────
         if audits and i < len(audits):
