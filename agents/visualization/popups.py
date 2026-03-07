@@ -98,6 +98,7 @@ def _build_route_impact_popup(
         f'<div style="border-top:1px solid #dee2e6; padding-top:6px; '
         f'font-size:10px; color:#868e96;">'
         f'Threshold: {vc_threshold:.2f} &nbsp;|&nbsp; LOS: {los}'
+        f'<br>Worst-case method: full project load tested on each route independently'
         f'</div>'
         '</div>'
     )
