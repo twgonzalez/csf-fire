@@ -134,7 +134,8 @@ def create_demo_map(
     if not projects:
         raise ValueError("No projects to display.")
 
-    vc_threshold = config.get("vc_threshold", 0.80)
+    vc_threshold   = config.get("vc_threshold", 0.80)
+    unit_threshold = config.get("unit_threshold", 15)
     radius_miles = config.get("evacuation_route_radius_miles", 0.5)
     radius_meters = radius_miles * 1609.344
     ld_radius = config.get("local_density", {}).get("radius_miles", 0.25)
@@ -360,7 +361,7 @@ def create_demo_map(
         folium.Marker(
             location=[project.location_lat, project.location_lon],
             popup=folium.Popup(
-                _build_demo_project_popup(project, route_color, vc_threshold),
+                _build_demo_project_popup(project, route_color, vc_threshold, unit_threshold),
                 max_width=320,
             ),
             tooltip=f"{project.project_name} · {tier}",

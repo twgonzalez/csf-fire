@@ -169,6 +169,7 @@ def _build_demo_project_popup(
     project: Project,
     proj_color: str,
     vc_threshold: float,
+    unit_threshold: int = 15,
 ) -> str:
     """Popup shown when clicking a project marker on the demo map."""
     det       = project.determination or "UNKNOWN"
@@ -214,7 +215,7 @@ def _build_demo_project_popup(
         f'</div>'
         '<table style="width:100%; border-collapse:collapse; margin-bottom:10px;">'
         + std_row("Std 2 · Size", project.meets_size_threshold,
-                  f"{project.dwelling_units} units")
+                  f"{project.dwelling_units} of {unit_threshold} units")
         + std_row("Std 3 · Routes", bool(n_srv), f"{n_srv} segs")
         + std_row("Std 4 · Capacity", project.exceeds_capacity_threshold,
                   f"{n_flg} flagged")
