@@ -149,6 +149,19 @@ _ROAD_CLASS_NORMAL_VC: dict = {
     "two_lane":  0.25,
 }
 
+# ---------------------------------------------------------------------------
+# Evacuation capacity heatmap color ramp
+# ---------------------------------------------------------------------------
+
+# Each entry: (upper_vc_bound, hex_color, opacity)
+# Last entry's bound is sentinel 999 (matches all remaining).
+_VC_RAMP = [
+    (0.60, "#adb5bd", 0.25),   # LOS A–D — gray, low opacity
+    (0.80, "#ffc107", 0.55),   # LOS E moderate — yellow
+    (0.95, "#fd7e14", 0.75),   # LOS E high stress — orange
+    (999,  "#dc3545", 0.90),   # LOS F at/over capacity — red
+]
+
 
 # ---------------------------------------------------------------------------
 # Pure classification helpers
@@ -165,6 +178,15 @@ def _vc_background_color(vc: float) -> str:
 def _normal_traffic_vc(road_type: str) -> float:
     """Return an estimated normal-day v/c ratio for a road segment."""
     return _ROAD_CLASS_NORMAL_VC.get(str(road_type or ""), 0.25)
+
+
+def _vc_heatmap_color(vc: float) -> tuple:
+    """Return (color, opacity) for the evacuation capacity heatmap ramp."""
+    for threshold, color, opacity in _VC_RAMP:
+        if vc < threshold:
+            return color, opacity
+    _, color, opacity = _VC_RAMP[-1]
+    return color, opacity
 
 
 def _road_class_bg_color(highway_val) -> str:

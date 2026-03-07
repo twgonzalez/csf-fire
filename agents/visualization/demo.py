@@ -28,7 +28,7 @@ from .themes import (
     _SERVING_ROUTE_NEUTRAL_COLOR, _SERVING_ROUTE_NEUTRAL_WEIGHT, _SERVING_ROUTE_NEUTRAL_OPACITY,
     _FLAGGED_ROUTE_WEIGHT, _FLAGGED_ROUTE_OPACITY,
     _TRAFFIC_BG_BUCKETS,
-    _vc_background_color, _normal_traffic_vc,
+    _vc_background_color, _normal_traffic_vc, _vc_heatmap_color,
 )
 from .helpers import (
     _osmid_set, _osmid_matches, _to_int_safe,
@@ -39,6 +39,58 @@ from .helpers import (
 from .popups import _build_route_impact_popup, _build_demo_project_popup
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Evacuation capacity heatmap layer
+# ---------------------------------------------------------------------------
+
+def _build_capacity_heatmap_layer(
+    roads_gdf: gpd.GeoDataFrame,
+    config: dict,
+) -> folium.FeatureGroup:
+    """
+    Build a FeatureGroup containing all evacuation route segments colored by v/c
+    ratio using the _VC_RAMP scale. Add to the map BEFORE per-project layers so
+    per-project flagged routes render on top.
+    """
+    fg = folium.FeatureGroup(name="Evacuation Capacity", show=True)
+
+    if "is_evacuation_route" not in roads_gdf.columns or "vc_ratio" not in roads_gdf.columns:
+        logger.warning("Heatmap: missing is_evacuation_route or vc_ratio column — skipping.")
+        return fg
+
+    evac_mask = roads_gdf["is_evacuation_route"].fillna(False).astype(bool)
+    evac_routes = roads_gdf[evac_mask]
+
+    for _, row in evac_routes.iterrows():
+        if row.geometry is None or row.geometry.is_empty:
+            continue
+
+        vc = float(row.get("vc_ratio", 0) or 0)
+        color, opacity = _vc_heatmap_color(vc)
+
+        name_raw = row.get("name", "Unnamed") or "Unnamed"
+        if isinstance(name_raw, list):
+            name_str = name_raw[0] if name_raw else "Unnamed"
+        else:
+            name_str = str(name_raw)
+        if name_str in ("nan", "None", ""):
+            name_str = "Unnamed"
+
+        los = str(row.get("los", "?") or "?")
+        tooltip_text = f"{name_str} | v/c {vc:.3f} | LOS {los}"
+
+        folium.GeoJson(
+            mapping(row.geometry),
+            style_function=lambda _, c=color, o=opacity: {
+                "color": c, "weight": 3, "opacity": o,
+            },
+            tooltip=tooltip_text,
+        ).add_to(fg)
+
+    logger.info(f"Heatmap: {evac_mask.sum()} evacuation route segments rendered.")
+    return fg
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +204,11 @@ def create_demo_map(
             },
             tooltip="City Boundary",
         ).add_to(m)
+
+    # ── Layer 4: Evacuation Capacity Heatmap ──────────────────────────────
+    heatmap_fg = _build_capacity_heatmap_layer(roads_wgs84, config)
+    heatmap_fg.add_to(m)
+    heatmap_js_name = heatmap_fg.get_name()
 
     # ── Per-project FeatureGroups ──────────────────────────────────────────
     proj_js_names: list[str] = []
@@ -314,7 +371,9 @@ def create_demo_map(
             proj_ld_data=proj_ld_data,
         )
     ))
-    m.get_root().html.add_child(folium.Element(_build_demo_legend_html(config)))
+    m.get_root().html.add_child(folium.Element(
+        _build_demo_legend_html(config, map_js_name=map_js_name, heatmap_js_name=heatmap_js_name)
+    ))
     m.get_root().html.add_child(folium.Element(_build_global_styles()))
     _add_zoom_weight_scaler(m, ref_zoom=13)
 
@@ -770,7 +829,11 @@ def _build_project_detail_div(
 # Demo legend (bottom-right)
 # ---------------------------------------------------------------------------
 
-def _build_demo_legend_html(config: dict) -> str:
+def _build_demo_legend_html(
+    config: dict,
+    map_js_name: str = "",
+    heatmap_js_name: str = "",
+) -> str:
     vc_threshold = config.get("vc_threshold", 0.80)
 
     route_tier_items = (
@@ -850,7 +913,46 @@ def _build_demo_legend_html(config: dict) -> str:
               letter-spacing:0.5px; margin-bottom:6px;">Fire Hazard Zones</div>
   {fhsz_items}
 
+  <!-- Base Layer toggle -->
+  <div style="margin-top:12px; border-top:1px solid #dee2e6; padding-top:10px;">
+    <div style="font-size:11px; font-weight:600; color:#495057; margin-bottom:6px;
+                text-transform:uppercase; letter-spacing:0.05em;">
+      Base Layer
+    </div>
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px;">
+      <input type="checkbox" id="heatmapToggle" checked
+             onchange="toggleHeatmap(this.checked)">
+      Evacuation Capacity
+    </label>
+    <div style="margin-top:6px; height:8px; border-radius:4px;
+                background: linear-gradient(to right, #adb5bd, #ffc107, #fd7e14, #dc3545);
+                opacity:0.85;">
+    </div>
+    <div style="display:flex; justify-content:space-between; font-size:10px;
+                color:#868e96; margin-top:2px;">
+      <span>LOS A–D</span><span>LOS E</span><span>LOS F</span>
+    </div>
+  </div>
+
   <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
               font-size:9px; color:#adb5bd;">JOSH &middot; California Stewardship Alliance</div>
 </div>
+
+<script>
+(function () {{
+  var MAP_NAME      = '{map_js_name}';
+  var HEATMAP_NAME  = '{heatmap_js_name}';
+
+  window.toggleHeatmap = function (visible) {{
+    var mapObj = window[MAP_NAME];
+    var layer  = window[HEATMAP_NAME];
+    if (!mapObj || !layer) return;
+    if (visible) {{
+      if (!mapObj.hasLayer(layer)) mapObj.addLayer(layer);
+    }} else {{
+      if (mapObj.hasLayer(layer)) mapObj.removeLayer(layer);
+    }}
+  }};
+}})();
+</script>
 """
