@@ -18,11 +18,16 @@ tiger_url: "https://www2.census.gov/geo/tiger/TIGER2023/PLACE/tl_2023_06_place.z
 crs: "EPSG:4326"   # WGS84 for storage
 analysis_crs: "EPSG:26910"  # UTM Zone 10N for distance calculations (meters)
 
-# City-specific parameter overrides (leave empty to use parameters.yaml defaults)
+# City-specific parameter overrides (leave empty to use parameters.yaml defaults).
+# Any key listed here replaces the corresponding value from parameters.yaml for
+# this city only.  unit_threshold and vc_threshold are propagated automatically
+# to all nested scenario configs.  See docs/city_onboarding.md §2d for guidance.
 overrides: {}
 # Example overrides:
-# vc_threshold: 0.75
-# unit_threshold: 25
+#   unit_threshold: 10   # lower than default (15) when city road network is more constrained;
+#                        # must be justified with ITE trip-generation or local study
+#   vc_threshold: 0.85   # more conservative than HCM LOS E/F (0.95) if city council adopts it;
+#                        # requires adoption ordinance before first project application
 
 # ============================================================
 # Employment and Student Demand Parameters
