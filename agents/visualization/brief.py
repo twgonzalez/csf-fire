@@ -67,7 +67,7 @@ def _render_brief(project, audit: dict, config: dict, city_config: dict) -> str:
 
     scenarios = audit.get("scenarios", {})
     wildland  = scenarios.get("wildland_ab747", {})
-    local5    = scenarios.get("local_density_sb79", {})
+    local5    = scenarios.get("sb79_transit", {})
 
     sections = [
         _build_print_css(),
@@ -593,100 +593,90 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         "GIS point-in-polygon — when flagged, project vehicles are modeled at simultaneous departure",
         s3_chip, s3_chip_cls, s3_detail))
 
-    # --- Standard 4: Capacity ratio ---
-    s5 = w_steps.get("step5_ratio_test", {})
-    s4_triggered = s5.get("result", False)
-    flagged_ids  = s5.get("project_caused_exceedance", [])
-    already_ids  = s5.get("already_failing_at_baseline", [])
-    proj_vph     = s5.get("vehicles_per_route", 0)
-    route_details = s5.get("route_details", [])
+    # --- Standard 4: ΔT capacity test (v3.0) ---
+    s5           = w_steps.get("step5_delta_t", {})
+    s4_triggered = s5.get("triggered", False)
+    path_results = s5.get("path_results", [])
+    proj_vph     = s5.get("project_vehicles", 0)
+    egress_min   = s5.get("egress_minutes", 0)
+    max_dt       = s5.get("max_delta_t_minutes", 0.0)
+    hazard_zone  = s5.get("hazard_zone", "non_fhsz")
+    mob_rate     = s5.get("mobilization_rate", 0.25)
+    max_threshold = s5.get("max_marginal_minutes", 10)
 
-    s4_chip = "TRIGGERED" if s4_triggered else ("NOT EVALUATED" if not s1_result else "WITHIN CAPACITY")
+    s4_chip = "TRIGGERED" if s4_triggered else ("NOT EVALUATED" if not s1_result else "WITHIN THRESHOLD")
     s4_chip_cls = "chip-triggered" if s4_triggered else ("chip-na" if not s1_result else "chip-pass")
 
-    flagged_table = ""
-    if route_details and s1_result:
-        # Deduplicate by osmid — OSM road names map to multiple geometry segments
-        seen_osmids: set = set()
-        deduped_details = []
-        for r in route_details:
-            oid = r.get("osmid", "")
-            if oid not in seen_osmids:
-                seen_osmids.add(oid)
-                deduped_details.append(r)
-        # Show: all project-caused exceedances + up to 3 near-threshold examples, truncate rest
-        caused_rows  = [r for r in deduped_details if r.get("project_causes_exceedance")]
-        near_rows    = [r for r in deduped_details
-                        if not r.get("project_causes_exceedance")
-                        and not r.get("baseline_exceeds")
-                        and r.get("proposed_vc", 0) > 0.80][:3]
-        display_rows = caused_rows + near_rows
-        n_omitted    = len(deduped_details) - len(display_rows)
+    flagged_paths = [r for r in path_results if r.get("flagged")]
+    n_flagged     = len(flagged_paths)
 
-        # Baseline always uses 0.57 departure rate; FHSZ elevates project demand only
-        row_mob = s5.get("mob_factor", 0.57)
-        evac_col_header = "Current load (v/c)"
-        # Check if FHSZ departure rate was applied to project demand (step4 field)
-        s4_demand   = w_steps.get("step4_demand", {})
-        fhsz_applied = s4_demand.get("fhsz_mob_applied", False)
-        fhsz_note_row = (
-            " &nbsp;|&nbsp; <span style='color:#c0392b;font-weight:600'>"
-            "FHSZ: project vehicles modeled at 100% simultaneous departure</span>"
-            if fhsz_applied else ""
+    flagged_table = ""
+    if path_results and s1_result:
+        near_paths    = [r for r in path_results
+                         if not r.get("flagged")
+                         and r.get("delta_t_minutes", 0) > max_threshold * 0.70][:3]
+        display_paths = flagged_paths + near_paths
+        n_omitted     = len(path_results) - len(display_paths)
+
+        fhsz_note = (
+            f" &nbsp;|&nbsp; <span style='color:#c0392b;font-weight:600'>"
+            f"FHSZ zone: {hazard_zone} — mob rate {mob_rate:.2f} (Zhao et al. 2022)</span>"
+        )
+        egress_note = (
+            f" &nbsp;|&nbsp; <span style='color:#6f42c1'>Egress: +{egress_min:.1f} min (NFPA 101)</span>"
+            if egress_min > 0 else ""
         )
         flagged_table = (
             f"<br><div style='font-size:11px;color:#6c757d;margin-bottom:4px'>"
-            f"Existing road load assumes 57% staggered departure (normal peak-hour){fhsz_note_row}</div>"
+            f"ΔT = (project vph / bottleneck effective capacity) × 60 + egress"
+            f"{fhsz_note}{egress_note}</div>"
             "<table class='route-table'><thead><tr>"
-            "<th>Route Name</th>"
-            f"<th>{evac_col_header}</th>"
-            "<th>Project adds</th>"
-            "<th>Proposed v/c</th>"
+            "<th>Path ID</th>"
+            "<th>Bottleneck Segment</th>"
+            "<th>Eff. Cap (vph)</th>"
+            "<th>ΔT (min)</th>"
+            "<th>Threshold</th>"
             "<th>Status</th></tr></thead><tbody>"
         )
-        for r in display_rows:
-            nm     = r.get("name") or r.get("osmid", "—")
-            bvc    = r.get("effective_baseline_vc", 0)
-            pvc    = r.get("proposed_vc", 0)
-            adds   = r.get("vehicles_added", 0)
-            causes = r.get("project_causes_exceedance", False)
-            bfail  = r.get("baseline_exceeds", False)
-            if causes:
-                status = "<span style='color:#c0392b;font-weight:700'>⚠ PROJECT CAUSES EXCEEDANCE</span>"
-            elif bfail:
-                status = "<span style='color:#868e96'>pre-existing LOS F</span>"
+        for r in display_paths:
+            pid     = r.get("path_id", "—")
+            bname   = r.get("bottleneck_name") or r.get("bottleneck_osmid", "—")
+            eff_cap = r.get("bottleneck_effective_capacity_vph", 0)
+            dt      = r.get("delta_t_minutes", 0)
+            thr     = r.get("threshold_minutes", max_threshold)
+            flg     = r.get("flagged", False)
+            dt_color = "#c0392b" if flg else "#212529"
+            if flg:
+                status = "<span style='color:#c0392b;font-weight:700'>⚠ EXCEEDS THRESHOLD</span>"
             else:
-                status = "<span style='color:#27ae60'>below threshold</span>"
+                status = "<span style='color:#27ae60'>within threshold</span>"
             flagged_table += (
-                f"<tr><td>{nm}</td>"
-                f"<td style='font-weight:600'>{bvc:.3f}</td>"
-                f"<td style='color:#6f42c1'>+{adds:.0f} vph</td>"
-                f"<td style='font-weight:600'>{pvc:.3f}</td>"
+                f"<tr><td style='font-size:10px;color:#868e96'>{pid}</td>"
+                f"<td>{bname}</td>"
+                f"<td>{eff_cap:,.0f}</td>"
+                f"<td style='font-weight:600;color:{dt_color}'>{dt:.1f}</td>"
+                f"<td>{thr:.0f}</td>"
                 f"<td>{status}</td></tr>"
             )
         if n_omitted > 0:
             flagged_table += (
-                f"<tr><td colspan='5' style='color:#868e96;font-style:italic'>"
-                f"{n_omitted} additional route segments below threshold — omitted for brevity. "
+                f"<tr><td colspan='6' style='color:#868e96;font-style:italic'>"
+                f"{n_omitted} additional paths within threshold — omitted for brevity. "
                 f"See full audit trail.</td></tr>"
             )
         flagged_table += "</tbody></table>"
 
-    already_note = ""
-    if already_ids:
-        already_note = f"<br><em style='color:#868e96;font-size:11px'>Note: {len(already_ids)} route(s) already failing at baseline — not counted as project impact (marginal causation).</em>"
-
     s4_detail = f"""<div class="detail-block" style="border-left-color:{'#c0392b' if s4_triggered else '#dee2e6'};">
-      <strong>Marginal causation test</strong> (threshold: v/c {vc_threshold:.2f} — exact HCM 2022 LOS E/F boundary):<br>
-      Project adds {proj_vph:.0f} vph worst-case per route &nbsp;&middot;&nbsp;
-      {len(flagged_ids)} route{"s" if len(flagged_ids) != 1 else ""} caused to exceed threshold
-      {already_note}
+      <strong>ΔT Standard</strong> (threshold: {max_threshold} min for hazard zone {hazard_zone}):<br>
+      Project vehicles: {proj_vph:.0f} vph &nbsp;&middot;&nbsp;
+      {n_flagged} path{"s" if n_flagged != 1 else ""} exceed threshold
+      (max ΔT: {max_dt:.1f} min)
       {flagged_table}
     </div>""" if s1_result else ""
 
     rows.append(_std_row("4", "#c0392b" if s4_triggered else ("#6c757d" if not s1_result else "#27ae60"),
-        "Capacity Ratio Test (Marginal Causation)",
-        f"Does this project push any route above the v/c {vc_threshold} gridlock threshold?",
+        "ΔT Evacuation Clearance Test",
+        f"Does this project add >{max_threshold} min of marginal clearance time on any serving path?",
         s4_chip, s4_chip_cls, s4_detail))
 
     # --- Standard 5: Local density ---
@@ -773,8 +763,8 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         </div>"""
 
     rows.append(_std_row("5", s5_badge_color,
-        "Local Capacity Test (Standard 5)",
-        "General Plan §65302(g) · SB 79 — local collector/arterial capacity within 0.25 mi",
+        "SB 79 Transit Proximity (Informational)",
+        "SB 79 — transit stop within 0.5 mi; informational flag only, does not affect tier",
         s5_chip, s5_chip_cls, s5_detail))
 
     return f"""<h2 class="section-label">Standards Analysis</h2>
@@ -826,7 +816,7 @@ def _build_determination_box(tier: str, determination: dict,
     for sc_name, sc_tier in sc_tiers.items():
         label = {
             "wildland_ab747":    "Wildland Scenario (Standards 1–4)",
-            "local_density_sb79":"Local Capacity Scenario (Standard 5)",
+            "sb79_transit":      "SB 79 Transit Proximity (Informational)",
         }.get(sc_name, sc_name)
         color = _TIER_CSS_COLOR.get(sc_tier.upper(), "#555")
         sc_rows += f"<div style='font-size:11px;margin-bottom:3px;'>{label}: <strong style='color:{color}'>{sc_tier}</strong></div>"

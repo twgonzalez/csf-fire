@@ -1,21 +1,31 @@
 """
-Evacuation Scenario — Abstract Base and Shared Infrastructure
+Evacuation Scenario — Abstract Base and Shared Infrastructure — JOSH v3.0
 
-Every evacuation capacity standard in this system follows the same five-step algorithm.
-The logic is identical across all scenarios; only the parameters differ. Parameters are
-adopted by the city before any project is submitted (legislative act). The algorithm is
-HCM 2022 mathematics (technical standard). These are structurally separate concerns.
+Every evacuation capacity standard follows the same five-step algorithm.
+v3.0 replaces the v/c marginal causation test (Step 5) with ΔT (marginal
+evacuation clearance time in minutes).
 
-Five-step algorithm (universal):
+Five-step algorithm:
   Step 1 — Applicability Check:  Is this scenario relevant to this location/city?
   Step 2 — Scale Gate:           Is the project large enough to trigger analysis?
-  Step 3 — Route Identification: Which road segments does this scenario evaluate?
+  Step 3 — Route Identification: Which evacuation paths does this scenario evaluate?
   Step 4 — Demand Calculation:   How many vehicles does the project generate?
-  Step 5 — Capacity Ratio Test:  Does demand / capacity exceed the threshold?
+  Step 5 — ΔT Test:              Does project ΔT > max_marginal_minutes on any path?
+
+ΔT formula:
+  ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty
+  where:
+    project_vehicles = units × vpu × mobilization_rate(hazard_zone)
+    egress_penalty   = NFPA 101 penalty for buildings ≥ 4 stories (0 for low-rise)
+
+Key v3.0 change from v2.0:
+  v2.0: flagged = (baseline_vc < 0.95) AND (proposed_vc >= 0.95)  — REPLACED
+  v3.0: flagged = delta_t > max_marginal_minutes(hazard_zone)
+  The baseline condition is eliminated — projects in already-failing zones are tested equally.
 
 Determination tiers (most restrictive wins across all scenarios):
   DISCRETIONARY          — Steps 1+2+5 all triggered
-  CONDITIONAL_MINISTERIAL — Applicable + scale met, but capacity threshold not exceeded
+  CONDITIONAL_MINISTERIAL — Applicable + scale met, but ΔT within threshold
   MINISTERIAL            — Below scale threshold or not applicable
   NOT_APPLICABLE         — Scenario does not apply to this project/city
 """
@@ -26,10 +36,10 @@ from enum import Enum
 from typing import Optional
 
 import geopandas as gpd
-import pandas as pd
 from shapely.geometry import Point
 
 from models.project import Project
+from models.evacuation_path import EvacuationPath
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +50,10 @@ logger = logging.getLogger(__name__)
 
 class Tier(str, Enum):
     """
-    Determination tier. Uses str mixin so Tier.DISCRETIONARY == "DISCRETIONARY" (backward compat).
+    Determination tier. Uses str mixin so Tier.DISCRETIONARY == "DISCRETIONARY".
 
     Rank order (most to least restrictive):
       DISCRETIONARY (3) > CONDITIONAL_MINISTERIAL (2) > MINISTERIAL (1) > NOT_APPLICABLE (0)
-
-    When multiple scenarios are evaluated, the most restrictive tier prevails.
     """
     DISCRETIONARY          = "DISCRETIONARY"
     CONDITIONAL_MINISTERIAL = "CONDITIONAL MINISTERIAL"
@@ -70,17 +78,16 @@ class ScenarioResult:
     """
     Output from one EvacuationScenario.evaluate() call.
 
-    Each step's audit dict is preserved verbatim for the legal record. The steps
-    dict is keyed by step name and contains every input, intermediate, and output
-    used in that step — sufficient to reproduce the result independently.
+    Each step's audit dict is preserved verbatim for the legal record.
     """
-    scenario_name:  str
-    legal_basis:    str
-    tier:           Tier
-    triggered:      bool
-    steps:          dict = field(default_factory=dict)
-    reason:         str  = ""
-    flagged_route_ids: list = field(default_factory=list)
+    scenario_name:    str
+    legal_basis:      str
+    tier:             Tier
+    triggered:        bool
+    steps:            dict = field(default_factory=dict)
+    reason:           str  = ""
+    delta_t_results:  list = field(default_factory=list)   # per-path ΔT dicts
+    max_delta_t:      float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -92,11 +99,7 @@ class EvacuationScenario(ABC):
     Abstract base for all evacuation capacity scenarios.
 
     Subclasses implement check_applicability() and identify_routes().
-    All other steps (scale check, demand calculation, ratio test, evaluate flow)
-    are shared implementations on this base class.
-
-    The evaluate() method runs all five steps in order and returns a ScenarioResult
-    with a complete step-by-step audit dict.
+    compute_delta_t() is a shared implementation on this base class.
     """
 
     def __init__(self, config: dict, city_config: dict):
@@ -109,48 +112,23 @@ class EvacuationScenario(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        """Unique scenario identifier (e.g. 'wildland_ab747')."""
-        ...
+    def name(self) -> str: ...
 
     @property
     @abstractmethod
-    def legal_basis(self) -> str:
-        """Full legal citation for this scenario."""
-        ...
+    def legal_basis(self) -> str: ...
 
     @property
     @abstractmethod
-    def unit_threshold(self) -> int:
-        """Minimum dwelling units that trigger this scenario."""
-        ...
+    def unit_threshold(self) -> int: ...
 
     @property
     @abstractmethod
-    def vc_threshold(self) -> float:
-        """Volume-to-capacity ratio threshold (e.g. 0.95)."""
-        ...
-
-    @property
-    @abstractmethod
-    def fallback_tier(self) -> Tier:
-        """
-        Tier returned when scenario is applicable + scale met, but capacity NOT exceeded.
-        WildlandScenario → CONDITIONAL_MINISTERIAL.
-        LocalDensityScenario → MINISTERIAL.
-        """
-        ...
+    def fallback_tier(self) -> Tier: ...
 
     @abstractmethod
     def check_applicability(self, project: Project, context: dict) -> tuple[bool, dict]:
-        """
-        Step 1: Is this scenario applicable to this project and city?
-
-        Returns:
-            (applicable: bool, detail: dict)
-
-        If False, the scenario returns NOT_APPLICABLE and subsequent steps are skipped.
-        """
+        """Step 1: Is this scenario applicable to this project and city?"""
         ...
 
     @abstractmethod
@@ -161,26 +139,19 @@ class EvacuationScenario(ABC):
         context: dict,
     ) -> tuple[list, dict]:
         """
-        Step 3: Which road segments does this scenario evaluate?
+        Step 3: Which evacuation paths does this scenario evaluate?
 
         Returns:
-            (route_ids: list, detail: dict)
-
-        route_ids are osmid values. detail documents the method, radius, and results.
+            (serving_paths: list[EvacuationPath], detail: dict)
         """
         ...
 
     # ------------------------------------------------------------------
-    # Shared implementations — identical for all scenarios
+    # Shared implementations
     # ------------------------------------------------------------------
 
     def check_scale(self, project: Project) -> tuple[bool, dict]:
-        """
-        Step 2: Is the project large enough to trigger analysis?
-
-        Method: Integer comparison — project.dwelling_units >= self.unit_threshold.
-        Discretion: Zero.
-        """
+        """Step 2: Is the project large enough to trigger analysis?"""
         result = project.dwelling_units >= self.unit_threshold
         return result, {
             "dwelling_units":    project.dwelling_units,
@@ -194,162 +165,140 @@ class EvacuationScenario(ABC):
         """
         Step 4: How many peak-hour vehicles does the project generate?
 
-        Formula: dwelling_units × vehicles_per_unit × peak_hour_mobilization
-        Source:  U.S. Census ACS (vehicles_per_unit) + city-adopted mobilization factor.
-        Discretion: Zero — formula is fixed; inputs are Census-derived or city-adopted.
-
-        Mobilization source is read from city_config.mobilization_source and
-        city_config.mobilization_citation — set these in config/cities/{city}.yaml.
-        See docs/city_onboarding.md for guidance on establishing a defensible factor.
+        Formula: dwelling_units × vehicles_per_unit × mobilization_rate(hazard_zone)
+        Source: Census ACS (vpu) + Zhao et al. 2022 GPS data (mob rates).
         """
-        vpu = self.config.get("vehicles_per_unit", 2.5)
-        # City config overrides parameters.yaml default — allows per-city calibration
-        mob = self.city_config.get(
-            "peak_hour_mobilization",
-            self.config.get("peak_hour_mobilization", 0.57),
-        )
+        vpu      = self.config.get("vehicles_per_unit", 2.5)
+        mob_rates = self.config.get("mobilization_rates", {})
+        hazard_zone = getattr(project, "hazard_zone", "non_fhsz")
+        mob      = mob_rates.get(hazard_zone, 0.25)
+
         project_vph = project.dwelling_units * vpu * mob
 
-        mob_source_type = self.city_config.get("mobilization_source", "conservative_default")
-        mob_citation    = self.city_config.get(
-            "mobilization_citation",
-            "No city-specific study on file — conservative California WUI default applied. "
-            "See docs/city_onboarding.md.",
+        mob_citation = (
+            "Zhao, X., et al. (2022). Estimating wildfire evacuation decision and "
+            "departure timing using large-scale GPS data. Transportation Research Part C."
         )
-        mob_note = self.city_config.get("mobilization_note", "")
 
         return project_vph, {
             "vehicles_per_unit":          vpu,
-            "peak_hour_mobilization":     mob,
-            "mobilization_source_type":   mob_source_type,
-            "formula":                    f"{project.dwelling_units} units × {vpu} veh/unit × {mob:.0%} departure rate",
+            "hazard_zone":                hazard_zone,
+            "mobilization_rate":          mob,
+            "formula":                    f"{project.dwelling_units} × {vpu} × {mob:.2f}",
             "project_vehicles_peak_hour": round(project_vph, 1),
-            "source_vehicles_per_unit":   "U.S. Census ACS",
+            "source_vehicles_per_unit":   "U.S. Census ACS B25044",
             "source_mobilization":        mob_citation,
-            "mobilization_note":          mob_note,
         }
 
-    def _get_mob_factor(self, project: Project) -> float:
-        """
-        Return the mobilization factor for Standard 4/5 ratio test.
-
-        Default: peak_hour_mobilization from config (0.57 — staggered peak-hour departure).
-        WildlandScenario overrides this: returns fhsz_mobilization_factor (1.0) when the
-        project is in FHSZ Zone 2/3 (mandatory simultaneous evacuation).
-        LocalDensityScenario overrides this: returns aadt_peak_hour_factor (0.10).
-        """
-        return float(self.config.get("peak_hour_mobilization", 0.57))
-
-    def ratio_test(
+    def compute_delta_t(
         self,
-        route_ids: list,
-        project_vph: float,
-        roads_gdf: gpd.GeoDataFrame,
-        mob_factor: float = 0.57,
+        project: Project,
+        serving_paths: list,
+        config: dict,
     ) -> tuple[bool, list, dict]:
         """
-        Step 5: Does the project's demand cause any serving route to exceed the v/c threshold?
+        Step 5: ΔT computation for each serving EvacuationPath.
 
-        Marginal causation test — a route is flagged only when the project itself causes the
-        threshold crossing:
-            effective_baseline_vc < threshold  AND  proposed_vc >= threshold
+        ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_minutes
 
-        effective_baseline = catchment_demand_vph × mob_factor
-          - Non-FHSZ wildland (mob=0.57): staggered peak-hour departure
-          - FHSZ wildland (mob=1.00):     mandatory simultaneous evacuation
-          - Local density (mob=0.10):     normal peak-hour conditions (Standard 5)
+        project_vehicles = units × vpu × mobilization_rate(hazard_zone)
+        egress_minutes   = 0 for buildings < threshold_stories;
+                           stories × min_per_story (capped) for taller buildings.
 
-        Routes already failing at the effective baseline are recorded in the audit for
-        transparency but do NOT trigger DISCRETIONARY. This is consistent with standard CEQA
-        significance methodology and prevents the standard from functioning as a categorical
-        prohibition on infill near pre-existing congestion.
+        A path is flagged when ΔT > max_marginal_minutes(hazard_zone).
+
+        No baseline precondition: a path already at LOS F is still tested.
+        The baseline state of the road is irrelevant — ΔT measures only the
+        project's contribution relative to the road's physical capacity.
 
         Returns:
-            (triggered: bool, flagged_ids: list, detail: dict)
-
-        Discretion: Zero — arithmetic comparison against city-adopted threshold.
+            (triggered: bool, delta_t_results: list[dict], detail: dict)
         """
-        vc_threshold = self.vc_threshold
-        # Worst-case marginal impact: each serving route is independently evaluated
-        # against the project's full peak-hour vehicle load. This tests whether any
-        # single route would be pushed over the threshold if it absorbed all project
-        # vehicles — consistent with the marginal causation standard.
-        vehicles_per_route = project_vph
+        hazard_zone = getattr(project, "hazard_zone", "non_fhsz")
+        mob_rates   = config.get("mobilization_rates", {})
+        mob         = mob_rates.get(hazard_zone, 0.25)
+        vpu         = config.get("vehicles_per_unit", 2.5)
+        project_vehicles = project.dwelling_units * vpu * mob
 
-        serving = roads_gdf[
-            roads_gdf["osmid"].apply(
-                lambda o: o in route_ids or
-                (isinstance(o, list) and any(x in route_ids for x in o))
+        # Building egress penalty (NFPA 101 / IBC)
+        ep_cfg = config.get("egress_penalty", {})
+        stories = getattr(project, "stories", 0)
+        egress_minutes = 0.0
+        if stories >= ep_cfg.get("threshold_stories", 4):
+            egress_minutes = min(
+                stories * ep_cfg.get("minutes_per_story", 1.5),
+                ep_cfg.get("max_minutes", 12),
             )
-        ].copy()
 
-        route_results   = []
-        already_failing = []   # effective baseline >= threshold — recorded but NOT a trigger
-        project_caused  = []   # effective baseline < threshold AND proposed >= threshold — flagged
+        max_minutes_cfg = config.get("max_marginal_minutes", {})
+        max_minutes = max_minutes_cfg.get(hazard_zone, 10.0)
 
-        for _, row in serving.iterrows():
-            capacity         = float(row.get("capacity_vph", 0.0))
-            # Raw per-unit demand (no mob baked in); mob_factor applied here at test time
-            catchment_demand = float(row.get("catchment_demand_vph", 0.0))
-            # Keep for audit trail / brief display
-            evac_demand      = float(row.get("baseline_demand_vph", 0.0))
-            normal_demand    = float(row.get("normal_demand_vph", evac_demand))
+        results = []
+        triggered = False
 
-            # Apply mob_factor: converts raw catchment demand to scenario-specific demand
-            # Non-FHSZ ×0.57, FHSZ ×1.00, Standard 5 ×0.10
-            effective_baseline = catchment_demand * mob_factor
-            effective_vc       = effective_baseline / capacity if capacity > 0 else 0.0
+        for path in serving_paths:
+            # EvacuationPath or a plain dict
+            if isinstance(path, EvacuationPath):
+                eff_cap  = path.bottleneck_effective_capacity_vph
+                bn_osmid = path.bottleneck_osmid
+                bn_name  = path.bottleneck_name
+                bn_fhsz  = path.bottleneck_fhsz_zone
+                bn_hcm   = path.bottleneck_hcm_capacity_vph
+                bn_deg   = path.bottleneck_hazard_degradation
+                path_id  = path.path_id
+            else:
+                eff_cap  = float(path.get("bottleneck_effective_capacity_vph", 0))
+                bn_osmid = str(path.get("bottleneck_osmid", ""))
+                bn_name  = str(path.get("bottleneck_name", ""))
+                bn_fhsz  = str(path.get("bottleneck_fhsz_zone", "non_fhsz"))
+                bn_hcm   = float(path.get("bottleneck_hcm_capacity_vph", eff_cap))
+                bn_deg   = float(path.get("bottleneck_hazard_degradation", 1.0))
+                path_id  = str(path.get("path_id", ""))
 
-            proposed_demand = effective_baseline + vehicles_per_route
-            proposed_vc     = proposed_demand / capacity if capacity > 0 else 0.0
+            if eff_cap <= 0:
+                continue
 
-            baseline_exceeds          = effective_vc >= vc_threshold
-            proposed_exceeds          = proposed_vc >= vc_threshold
-            project_causes_exceedance = (not baseline_exceeds) and proposed_exceeds
+            delta_t  = (project_vehicles / eff_cap) * 60 + egress_minutes
+            flagged  = delta_t > max_minutes
 
-            osmid_str = str(row.get("osmid", ""))
-            if baseline_exceeds:
-                already_failing.append(osmid_str)
-            if project_causes_exceedance:
-                project_caused.append(osmid_str)
+            if flagged:
+                triggered = True
 
-            route_results.append({
-                "osmid":                     osmid_str,
-                "name":                      row.get("name", ""),
-                "capacity_vph":              round(capacity, 0),
-                "catchment_demand_vph":      round(catchment_demand, 1),
-                "mob_factor":                mob_factor,
-                # Kept for audit trail reference
-                "evac_demand_vph":           round(evac_demand, 1),
-                "normal_demand_vph":         round(normal_demand, 1),
-                "effective_baseline_demand": round(effective_baseline, 1),
-                "effective_baseline_vc":     round(effective_vc, 4),
-                "baseline_exceeds":          baseline_exceeds,
-                "vehicles_added":            round(vehicles_per_route, 1),
-                "proposed_demand_vph":       round(proposed_demand, 1),
-                "proposed_vc":               round(proposed_vc, 4),
-                "proposed_exceeds":          proposed_exceeds,
-                "project_causes_exceedance": project_causes_exceedance,
+            results.append({
+                "path_id":                       path_id,
+                "bottleneck_osmid":              bn_osmid,
+                "bottleneck_name":               bn_name,
+                "bottleneck_fhsz_zone":          bn_fhsz,
+                "bottleneck_road_type":          getattr(path, "bottleneck_road_type", ""),
+                "bottleneck_hcm_capacity_vph":   round(bn_hcm, 0),
+                "bottleneck_hazard_degradation": bn_deg,
+                "bottleneck_effective_capacity_vph": round(eff_cap, 0),
+                "project_vehicles":              round(project_vehicles, 1),
+                "egress_minutes":                round(egress_minutes, 1),
+                "delta_t_minutes":               round(delta_t, 2),
+                "threshold_minutes":             max_minutes,
+                "hazard_zone":                   hazard_zone,
+                "mobilization_rate":             mob,
+                "flagged":                       flagged,
             })
 
-        any_flagged = bool(project_caused)
-        flagged_ids = list(set(project_caused))
+        max_dt = max((r["delta_t_minutes"] for r in results), default=0.0)
 
         detail = {
-            "vc_threshold":                vc_threshold,
-            "mob_factor":                  mob_factor,
-            "project_vehicles_peak_hour":  round(project_vph, 1),
-            "vehicles_per_route":          round(vehicles_per_route, 1),
-            "serving_routes_evaluated":    len(serving),
-            "already_failing_at_baseline": already_failing,
-            "project_caused_exceedance":   project_caused,
-            "flagged_route_ids":           flagged_ids,
-            "result":                      any_flagged,
-            "triggers_standard":           any_flagged,
-            "method":                      "Marginal causation: effective_baseline_vc < threshold AND proposed_vc >= threshold",
-            "route_details":               route_results,
+            "hazard_zone":            hazard_zone,
+            "mobilization_rate":      mob,
+            "project_vehicles":       round(project_vehicles, 1),
+            "egress_minutes":         round(egress_minutes, 1),
+            "max_marginal_minutes":   max_minutes,
+            "paths_evaluated":        len(results),
+            "triggered":              triggered,
+            "max_delta_t_minutes":    round(max_dt, 2),
+            "method":                 "ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress",
+            "source_mobilization":    "Zhao et al. (2022) Transp. Res. Part C",
+            "source_egress":          "NFPA 101 / IBC",
+            "path_results":           results,
         }
-        return any_flagged, flagged_ids, detail
+        return triggered, results, detail
 
     # ------------------------------------------------------------------
     # Evaluate — runs all 5 steps
@@ -361,79 +310,72 @@ class EvacuationScenario(ABC):
         roads_gdf: gpd.GeoDataFrame,
         context: dict,
     ) -> ScenarioResult:
-        """
-        Run the universal 5-step evacuation capacity algorithm for this scenario.
-
-        Short-circuits at Steps 1 and 2 if not applicable or below scale — avoids
-        unnecessary spatial computation and produces a clean audit record.
-
-        Returns a ScenarioResult with tier, triggered flag, and full step audit.
-        """
+        """Run the universal 5-step algorithm. Returns ScenarioResult."""
         steps: dict = {}
 
-        # ── Step 1: Applicability ──────────────────────────────────────
+        # Step 1: Applicability
         applicable, step1 = self.check_applicability(project, context)
         steps["step1_applicability"] = step1
 
         if not applicable:
             return ScenarioResult(
-                scenario_name  = self.name,
-                legal_basis    = self.legal_basis,
-                tier           = Tier.NOT_APPLICABLE,
-                triggered      = False,
-                steps          = steps,
-                reason         = step1.get("note", "Scenario not applicable to this project/city."),
+                scenario_name = self.name,
+                legal_basis   = self.legal_basis,
+                tier          = Tier.NOT_APPLICABLE,
+                triggered     = False,
+                steps         = steps,
+                reason        = step1.get("note", "Scenario not applicable."),
             )
 
-        # ── Step 2: Scale Gate ─────────────────────────────────────────
+        # Step 2: Scale Gate
         scale_met, step2 = self.check_scale(project)
         steps["step2_scale"] = step2
 
         if not scale_met:
             return ScenarioResult(
-                scenario_name  = self.name,
-                legal_basis    = self.legal_basis,
-                tier           = Tier.MINISTERIAL,
-                triggered      = False,
-                steps          = steps,
-                reason         = (
+                scenario_name = self.name,
+                legal_basis   = self.legal_basis,
+                tier          = Tier.MINISTERIAL,
+                triggered     = False,
+                steps         = steps,
+                reason        = (
                     f"Project has {project.dwelling_units} dwelling units, "
-                    f"below the {self.unit_threshold}-unit threshold for this scenario. "
+                    f"below the {self.unit_threshold}-unit threshold. "
                     f"Ministerial approval eligible."
                 ),
             )
 
-        # ── Step 3: Route Identification ───────────────────────────────
-        route_ids, step3 = self.identify_routes(project, roads_gdf, context)
+        # Step 3: Route Identification
+        serving_paths, step3 = self.identify_routes(project, roads_gdf, context)
         steps["step3_routes"] = step3
 
-        # ── Step 4: Demand Calculation ─────────────────────────────────
+        # Step 4: Demand Calculation
         project_vph, step4 = self.calculate_demand(project)
         steps["step4_demand"] = step4
 
-        # ── Step 5: Capacity Ratio Test ────────────────────────────────
-        mob_factor = self._get_mob_factor(project)
-        triggered, flagged_ids, step5 = self.ratio_test(
-            route_ids, project_vph, roads_gdf, mob_factor=mob_factor,
+        # Step 5: ΔT Test
+        triggered, delta_t_results, step5 = self.compute_delta_t(
+            project, serving_paths, self.config
         )
-        steps["step5_ratio_test"] = step5
+        steps["step5_delta_t"] = step5
 
-        # ── Determination ──────────────────────────────────────────────
         if triggered:
-            tier = Tier.DISCRETIONARY
+            tier   = Tier.DISCRETIONARY
             reason = self._reason_discretionary(project, step5)
         else:
-            tier = self.fallback_tier
+            tier   = self.fallback_tier
             reason = self._reason_fallback(project, step3, step5)
 
+        max_dt = step5.get("max_delta_t_minutes", 0.0)
         return ScenarioResult(
-            scenario_name     = self.name,
-            legal_basis       = self.legal_basis,
-            tier              = tier,
-            triggered         = triggered,
-            steps             = steps,
-            reason            = reason,
-            flagged_route_ids = flagged_ids,
+            scenario_name   = self.name,
+            legal_basis     = self.legal_basis,
+            tier            = tier,
+            triggered       = triggered,
+            steps           = steps,
+            reason          = reason,
+            delta_t_results = delta_t_results,
+            max_delta_t     = max_dt,
         )
 
     # ------------------------------------------------------------------
@@ -441,19 +383,24 @@ class EvacuationScenario(ABC):
     # ------------------------------------------------------------------
 
     def _reason_discretionary(self, project: Project, step5: dict) -> str:
-        n_flagged = len(step5.get("flagged_route_ids", []))
+        max_dt     = step5.get("max_delta_t_minutes", 0.0)
+        threshold  = step5.get("max_marginal_minutes", 0.0)
+        hz         = step5.get("hazard_zone", "non_fhsz")
+        n_paths    = sum(1 for r in step5.get("path_results", []) if r.get("flagged"))
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
-            f"{n_flagged} serving route(s) exceed the v/c threshold of {self.vc_threshold:.2f} "
-            f"under the {self.name} demand scenario. "
+            f"{n_paths} serving route(s) exceed the ΔT threshold of {threshold:.0f} min "
+            f"(hazard zone: {hz}, max ΔT: {max_dt:.1f} min). "
             f"Discretionary review required. Legal basis: {self.legal_basis}."
         )
 
     def _reason_fallback(self, project: Project, step3: dict, step5: dict) -> str:
-        n_routes = step3.get("serving_route_count", 0)
+        n_paths   = step3.get("serving_route_count", 0)
+        max_dt    = step5.get("max_delta_t_minutes", 0.0)
+        threshold = step5.get("max_marginal_minutes", 0.0)
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
-            f"has {n_routes} serving route(s). "
-            f"V/C threshold ({self.vc_threshold:.2f}) not exceeded under the {self.name} scenario. "
+            f"has {n_paths} serving route(s). "
+            f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.0f} min). "
             f"Tier: {self.fallback_tier.value}. Legal basis: {self.legal_basis}."
         )

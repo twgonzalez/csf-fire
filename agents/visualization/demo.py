@@ -231,7 +231,13 @@ def create_demo_map(
         route_color  = _TIER_ROUTE_COLOR.get(tier, "#7f7f7f")
         route_flagged_color = _TIER_ROUTE_COLOR_FLAGGED.get(tier, "#555")
         serving_set  = _osmid_set(project.serving_route_ids)
-        flagged_set  = _osmid_set(project.flagged_route_ids)
+        # v3.0: derive flagged segments from ΔT results (bottleneck osmids of flagged paths)
+        _flagged_osmids = [
+            str(r.get("bottleneck_osmid", ""))
+            for r in (project.delta_t_results or [])
+            if r.get("flagged")
+        ]
+        flagged_set  = _osmid_set(_flagged_osmids)
 
         # Worst-case marginal impact: full project load tested on each route independently.
         # Matches the ratio_test() methodology in agents/scenarios/base.py.
@@ -240,12 +246,12 @@ def create_demo_map(
 
         # ── Extract Standard 5 data from audit ──────────────────────────
         if audits and i < len(audits):
-            ld = audits[i].get("scenarios", {}).get("local_density_sb79", {})
+            ld = audits[i].get("scenarios", {}).get("sb79_transit", {})
         else:
             ld = {}
         ld_tier      = ld.get("tier", "NOT_APPLICABLE")
         ld_step3     = ld.get("steps", {}).get("step3_routes", {})
-        ld_step5     = ld.get("steps", {}).get("step5_ratio_test", {})
+        ld_step5     = ld.get("steps", {}).get("step5_delta_t", {})
         ld_serving_set = _osmid_set([r["osmid"] for r in ld_step3.get("serving_routes", [])])
         ld_flagged_set = _osmid_set(ld_step5.get("flagged_route_ids", []))
         ld_n_serving   = ld_step3.get("serving_route_count", len(ld_serving_set))
