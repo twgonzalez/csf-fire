@@ -150,11 +150,25 @@ _ROAD_CLASS_NORMAL_VC: dict = {
 }
 
 # ---------------------------------------------------------------------------
-# Evacuation capacity heatmap color ramp
+# Evacuation capacity heatmap color ramp — v3.0 ΔT Standard
 # ---------------------------------------------------------------------------
 
-# Each entry: (upper_vc_bound, hex_color, opacity)
-# Last entry's bound is sentinel 999 (matches all remaining).
+# Each entry: (upper_effective_capacity_vph_bound, hex_color, opacity)
+# Inverted from v2.0 v/c ramp: LOW effective_capacity = RED (bottleneck danger),
+# HIGH effective_capacity = GRAY (ample headroom, not a constraint).
+#
+# Thresholds calibrated to Berkeley road network:
+#   VHFHSZ two-lane (900 vph × 0.35 degradation) ≈ 315 vph → "severe" bucket
+#   High FHSZ two-lane (900–1125 vph × 0.50) ≈ 450–563 vph → "low" bucket
+#   Non-FHSZ two-lane ≈ 900–1700 vph → "moderate/ample" buckets
+_EFFECTIVE_CAPACITY_RAMP = [
+    (350,  "#dc3545", 0.90),   # Severely constrained — red   (< 350 vph)
+    (700,  "#fd7e14", 0.75),   # Low capacity — orange        (350–700 vph)
+    (1200, "#ffc107", 0.55),   # Moderate capacity — yellow   (700–1200 vph)
+    (9999, "#adb5bd", 0.25),   # Ample capacity — gray        (> 1200 vph)
+]
+
+# Legacy v/c ramp kept for informational use (not used for any determination).
 _VC_RAMP = [
     (0.60, "#adb5bd", 0.25),   # LOS A–D — gray, low opacity
     (0.80, "#ffc107", 0.55),   # LOS E moderate — yellow
@@ -181,12 +195,50 @@ def _normal_traffic_vc(road_type: str) -> float:
 
 
 def _vc_heatmap_color(vc: float) -> tuple:
-    """Return (color, opacity) for the evacuation capacity heatmap ramp."""
+    """Return (color, opacity) for the v/c heatmap ramp (informational only)."""
     for threshold, color, opacity in _VC_RAMP:
         if vc < threshold:
             return color, opacity
     _, color, opacity = _VC_RAMP[-1]
     return color, opacity
+
+
+def _effective_capacity_heatmap_color(eff_cap: float) -> tuple:
+    """
+    Return (color, opacity) for the evacuation capacity heatmap — v3.0 ΔT Standard.
+
+    Low effective_capacity_vph (road is a bottleneck) → red/prominent.
+    High effective_capacity_vph (road has headroom) → gray/subdued.
+    Used by the 'Evacuation Capacity' heatmap layer in the demo map.
+    """
+    for threshold, color, opacity in _EFFECTIVE_CAPACITY_RAMP:
+        if eff_cap < threshold:
+            return color, opacity
+    _, color, opacity = _EFFECTIVE_CAPACITY_RAMP[-1]
+    return color, opacity
+
+
+def _delta_t_color(delta_t: float, threshold: float) -> tuple:
+    """
+    Return (color, opacity) for a route segment colored by ΔT vs. its threshold.
+
+    Used for serving route segments to visualize project impact:
+      green  = comfortable (ΔT < 40% of threshold)
+      yellow = moderate    (40–75% of threshold)
+      orange = approaching (75–100% of threshold)
+      red    = exceeded    (> 100% of threshold — DISCRETIONARY trigger)
+    """
+    if threshold <= 0:
+        return "#adb5bd", 0.40
+    ratio = delta_t / threshold
+    if ratio >= 1.0:
+        return "#dc3545", 0.90   # red — threshold exceeded
+    elif ratio >= 0.75:
+        return "#fd7e14", 0.80   # orange — approaching threshold
+    elif ratio >= 0.40:
+        return "#ffc107", 0.65   # yellow — moderate impact
+    else:
+        return "#28a745", 0.45   # green — comfortable headroom
 
 
 def _road_class_bg_color(highway_val) -> str:

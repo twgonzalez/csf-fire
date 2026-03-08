@@ -1,30 +1,43 @@
 """
 HTML popup and marker popup builders for the demo map.
+
+v3.0 ΔT Standard: all route popups show effective_capacity_vph and ΔT clearance
+time rather than v/c ratios. v/c and LOS remain informational footnotes only.
 """
 from models.project import Project
 from .themes import _TIER_CSS_COLOR, _TIER_BG_COLOR
 
 
 # ---------------------------------------------------------------------------
-# v/c bar widget
+# ΔT bar widget — v3.0
 # ---------------------------------------------------------------------------
 
-def _vc_bar_html(vc: float, threshold: float) -> str:
-    """HTML progress bar for a v/c ratio (capped at 150% for display)."""
-    pct = min(vc / 1.5 * 100, 100)
-    thresh_pct = min(threshold / 1.5 * 100, 100)
+def _delta_t_bar_html(delta_t: float, threshold: float) -> str:
+    """
+    HTML progress bar showing ΔT position relative to its threshold.
 
-    if vc >= threshold:
-        bar_color = "#e74c3c"
-    elif vc >= 0.60:
-        bar_color = "#e67e22"
+    Bar fills left-to-right: full bar = at threshold. Overflow = red cap at 100%.
+    A vertical tick marks the threshold at 100% width.
+    Color: green (< 50%), yellow (50–75%), orange (75–100%), red (> 100%).
+    """
+    if threshold <= 0:
+        threshold = 10.0
+    ratio = delta_t / threshold
+    pct = min(ratio * 100, 100)
+
+    if ratio >= 1.0:
+        bar_color = "#dc3545"   # red — exceeded
+    elif ratio >= 0.75:
+        bar_color = "#fd7e14"   # orange — approaching
+    elif ratio >= 0.50:
+        bar_color = "#ffc107"   # yellow — moderate
     else:
-        bar_color = "#27ae60"
+        bar_color = "#28a745"   # green — comfortable
 
     return (
         f'<div style="position:relative; background:#e9ecef; border-radius:4px; '
         f'height:10px; overflow:visible; margin:4px 0 10px;">'
-        f'<div style="position:absolute; left:{thresh_pct:.1f}%; top:-3px; '
+        f'<div style="position:absolute; right:0; top:-3px; '
         f'width:2px; height:16px; background:#6c757d; z-index:2;"></div>'
         f'<div style="width:{pct:.1f}%; background:{bar_color}; height:100%; '
         f'border-radius:4px; position:relative; z-index:1;"></div>'
@@ -33,42 +46,113 @@ def _vc_bar_html(vc: float, threshold: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Route impact popup (shared by evaluation and demo maps)
+# Route ΔT popup — v3.0 (serving route segments on per-project layer)
 # ---------------------------------------------------------------------------
 
-def _build_route_impact_popup(
+def _build_route_delta_t_popup(
     name_str: str,
-    los: str,
-    cap: float,
-    demand_base: float,
-    demand_proposed: float,
-    vc_base: float,
-    vc_proposed: float,
-    vc_threshold: float,
-    project_vph: float,
+    eff_cap: float,
+    hcm_cap: float,
+    fhsz_zone: str,
+    hazard_degradation: float,
+    delta_t_result: "dict | None",
     is_flagged: bool,
-    already_failing: bool = False,
 ) -> str:
-    """HTML popup showing baseline vs proposed v/c impact for a serving route."""
-    if is_flagged:
-        status_html = (
-            '<div style="color:#c0392b; font-weight:700; font-size:11px; '
-            'margin-bottom:10px;">⚠ Capacity exceeded — Standard 4 triggered</div>'
+    """
+    Popup shown when clicking a serving route segment on the per-project layer.
+
+    If this segment is the bottleneck of a ΔT-evaluated path (delta_t_result
+    is not None), the full ΔT formula is shown. Otherwise the segment is shown
+    as an analysis footprint with its effective capacity.
+
+    Replaces _build_route_impact_popup() from v2.0.
+    """
+    if is_flagged and delta_t_result:
+        status_color = "#c0392b"
+        status_icon  = "⚠"
+        status_text  = (
+            f"ΔT threshold exceeded — "
+            f"{delta_t_result['delta_t_minutes']:.1f} min "
+            f"&gt; {delta_t_result['threshold_minutes']:.0f} min limit"
         )
-    elif already_failing:
-        status_html = (
-            '<div style="color:#868e96; font-weight:600; font-size:11px; '
-            f'margin-bottom:10px;">ℹ Pre-existing congestion — baseline v/c {vc_base:.3f} '
-            f'already ≥ {vc_threshold:.2f} before this project</div>'
+    elif delta_t_result:
+        ratio = (delta_t_result["delta_t_minutes"] /
+                 max(delta_t_result["threshold_minutes"], 0.001))
+        if ratio >= 0.75:
+            status_color = "#e67e22"
+            status_icon  = "◑"
+        else:
+            status_color = "#27ae60"
+            status_icon  = "✓"
+        status_text = (
+            f"ΔT within threshold — "
+            f"{delta_t_result['delta_t_minutes']:.1f} min "
+            f"of {delta_t_result['threshold_minutes']:.0f} min limit"
         )
     else:
-        status_html = (
-            '<div style="color:#27ae60; font-weight:600; font-size:11px; '
-            'margin-bottom:10px;">✓ Within capacity threshold</div>'
-        )
+        status_color = "#868e96"
+        status_icon  = "—"
+        status_text  = "Serving route — not a bottleneck segment for this project"
 
-    delta_vc = vc_proposed - vc_base
-    delta_str = f"+{delta_vc:.3f}" if delta_vc >= 0 else f"{delta_vc:.3f}"
+    # Hazard zone label
+    _zone_labels = {
+        "vhfhsz":       "Very High FHSZ",
+        "high_fhsz":    "High FHSZ",
+        "moderate_fhsz": "Moderate FHSZ",
+        "non_fhsz":     "Non-FHSZ",
+    }
+    zone_label = _zone_labels.get(str(fhsz_zone or "non_fhsz"), str(fhsz_zone))
+    deg_pct    = f"{hazard_degradation * 100:.0f}%"
+
+    capacity_rows = (
+        '<table style="width:100%; border-collapse:collapse; font-size:11px; '
+        'color:#555; margin-bottom:10px;">'
+        f'<tr><td style="padding:2px 0;">HCM raw capacity</td>'
+        f'<td style="text-align:right; font-weight:600;">{hcm_cap:.0f} vph</td></tr>'
+        f'<tr><td style="padding:2px 0;">Hazard zone</td>'
+        f'<td style="text-align:right; font-weight:600; color:#555;">{zone_label}</td></tr>'
+        f'<tr><td style="padding:2px 0;">Degradation factor</td>'
+        f'<td style="text-align:right; font-weight:600;">{deg_pct} of HCM</td></tr>'
+        f'<tr><td style="padding:2px 0; font-weight:700; color:#212529;">'
+        f'Effective capacity</td>'
+        f'<td style="text-align:right; font-weight:700; color:#1c4a6e;">'
+        f'{eff_cap:.0f} vph</td></tr>'
+        '</table>'
+    )
+
+    if delta_t_result:
+        dt   = delta_t_result["delta_t_minutes"]
+        thr  = delta_t_result["threshold_minutes"]
+        pveh = delta_t_result.get("project_vehicles", 0)
+        egr  = delta_t_result.get("egress_minutes", 0)
+        mob  = delta_t_result.get("mobilization_rate", 0.25)
+        hz   = delta_t_result.get("hazard_zone", "non_fhsz")
+        delta_t_rows = (
+            f'<div style="font-weight:700; font-size:11px; color:#444; margin-bottom:2px;">'
+            f'ΔT = {dt:.1f} min &nbsp;'
+            f'<span style="font-weight:400; color:#868e96;">(threshold {thr:.0f} min)</span>'
+            f'</div>'
+            f'{_delta_t_bar_html(dt, thr)}'
+            '<table style="width:100%; border-collapse:collapse; font-size:10px; '
+            'color:#666; margin-bottom:8px;">'
+            f'<tr><td style="padding:1px 0;">Mob rate ({hz})</td>'
+            f'<td style="text-align:right;">{mob:.0%}</td></tr>'
+            f'<tr><td style="padding:1px 0;">Project vehicles</td>'
+            f'<td style="text-align:right;">{pveh:.1f} vph</td></tr>'
+            f'<tr><td style="padding:1px 0;">Vehicle ΔT</td>'
+            f'<td style="text-align:right;">{(pveh / max(eff_cap, 1)) * 60:.1f} min</td></tr>'
+            + (
+                f'<tr><td style="padding:1px 0;">Egress penalty</td>'
+                f'<td style="text-align:right;">+{egr:.1f} min</td></tr>'
+                if egr > 0 else ""
+            )
+            + '</table>'
+        )
+    else:
+        delta_t_rows = (
+            '<div style="font-size:10px; color:#868e96; font-style:italic; '
+            'margin-bottom:8px;">Select a project to see ΔT impact on this route.</div>'
+        )
 
     return (
         '<div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'
@@ -76,63 +160,64 @@ def _build_route_impact_popup(
         'color:#333; line-height:1.5;">'
         f'<div style="font-weight:700; font-size:13px; margin-bottom:4px; color:#111;">'
         f'{name_str[:45]}</div>'
-        f'{status_html}'
-        '<table style="width:100%; border-collapse:collapse; font-size:11px; '
-        'color:#555; margin-bottom:12px;">'
-        f'<tr><td style="padding:2px 0;">Capacity</td>'
-        f'<td style="text-align:right; font-weight:600;">{cap:.0f} vph</td></tr>'
-        f'<tr><td style="padding:2px 0;">Baseline demand</td>'
-        f'<td style="text-align:right; font-weight:600;">{demand_base:.0f} vph</td></tr>'
-        f'<tr><td style="padding:2px 0;">Project adds</td>'
-        f'<td style="text-align:right; font-weight:600; color:#7c55b8;">+{project_vph:.1f} vph</td></tr>'
-        f'<tr><td style="padding:2px 0;">Proposed demand</td>'
-        f'<td style="text-align:right; font-weight:600;">{demand_proposed:.0f} vph</td></tr>'
-        '</table>'
-        f'<div style="font-weight:600; font-size:11px; color:#444; margin-bottom:2px;">'
-        f'Baseline v/c &nbsp; <span style="font-weight:700;">{vc_base:.3f}</span></div>'
-        f'{_vc_bar_html(vc_base, vc_threshold)}'
-        f'<div style="font-weight:600; font-size:11px; color:#444; margin-bottom:2px;">'
-        f'Proposed v/c &nbsp; <span style="font-weight:700;">{vc_proposed:.3f}</span> '
-        f'<span style="color:#7c55b8; font-size:10px;">({delta_str})</span></div>'
-        f'{_vc_bar_html(vc_proposed, vc_threshold)}'
-        f'<div style="border-top:1px solid #dee2e6; padding-top:6px; '
+        f'<div style="color:{status_color}; font-weight:600; font-size:11px; '
+        f'margin-bottom:10px;">{status_icon} {status_text}</div>'
+        + capacity_rows
+        + delta_t_rows
+        + f'<div style="border-top:1px solid #dee2e6; padding-top:6px; '
         f'font-size:10px; color:#868e96;">'
-        f'Threshold: {vc_threshold:.2f} &nbsp;|&nbsp; LOS: {los}'
-        f'<br>Worst-case method: full project load tested on each route independently'
+        f'ΔT = (project vehicles ÷ effective capacity) × 60 + egress penalty<br>'
+        f'Source: HCM 2022 + Zhao et al. 2022 + NFPA 101'
         f'</div>'
         '</div>'
     )
 
 
 # ---------------------------------------------------------------------------
-# Heatmap baseline popup (citywide layer — no project context)
+# Heatmap baseline popup — v3.0 (citywide evacuation capacity layer)
 # ---------------------------------------------------------------------------
 
 def _build_heatmap_route_popup(
     name_str: str,
-    los: str,
-    cap: float,
-    demand_base: float,
+    eff_cap: float,
+    hcm_cap: float,
+    fhsz_zone: str,
+    hazard_degradation: float,
     vc_base: float,
-    vc_threshold: float,
+    los: str,
 ) -> str:
     """
     Popup shown when clicking an evacuation route segment on the heatmap base
-    layer. Shows baseline capacity state only — no project comparison.
-    Visual style matches _build_route_impact_popup() for consistency.
+    layer. Shows effective_capacity_vph as the primary metric — the actual
+    bottleneck capacity used in the ΔT formula.
+
+    v/c and LOS are shown as informational footnotes.
     """
-    if vc_base >= vc_threshold:
+    _zone_labels = {
+        "vhfhsz":        "Very High FHSZ",
+        "high_fhsz":     "High FHSZ",
+        "moderate_fhsz": "Moderate FHSZ",
+        "non_fhsz":      "Non-FHSZ",
+    }
+    zone_label = _zone_labels.get(str(fhsz_zone or "non_fhsz"), str(fhsz_zone))
+    deg_pct    = f"{hazard_degradation * 100:.0f}%"
+
+    if eff_cap < 350:
         status_color = "#c0392b"
         status_icon  = "⚠"
-        status_text  = f"At/over capacity — v/c {vc_base:.3f} ≥ {vc_threshold:.2f}"
-    elif vc_base >= 0.60:
+        status_text  = f"Severely constrained — {eff_cap:.0f} vph effective"
+    elif eff_cap < 700:
         status_color = "#e67e22"
         status_icon  = "◑"
-        status_text  = f"Moderate stress — v/c {vc_base:.3f}"
+        status_text  = f"Low capacity — {eff_cap:.0f} vph effective"
+    elif eff_cap < 1200:
+        status_color = "#e0a800"
+        status_icon  = "◔"
+        status_text  = f"Moderate capacity — {eff_cap:.0f} vph effective"
     else:
         status_color = "#27ae60"
         status_icon  = "✓"
-        status_text  = f"Within capacity — v/c {vc_base:.3f}"
+        status_text  = f"Ample capacity — {eff_cap:.0f} vph effective"
 
     return (
         '<div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'
@@ -143,19 +228,22 @@ def _build_heatmap_route_popup(
         f'<div style="color:{status_color}; font-weight:600; font-size:11px; '
         f'margin-bottom:10px;">{status_icon} {status_text}</div>'
         '<table style="width:100%; border-collapse:collapse; font-size:11px; '
-        'color:#555; margin-bottom:12px;">'
-        f'<tr><td style="padding:2px 0;">Capacity</td>'
-        f'<td style="text-align:right; font-weight:600;">{cap:.0f} vph</td></tr>'
-        f'<tr><td style="padding:2px 0;">Baseline demand</td>'
-        f'<td style="text-align:right; font-weight:600;">{demand_base:.0f} vph</td></tr>'
+        'color:#555; margin-bottom:8px;">'
+        f'<tr><td style="padding:2px 0;">HCM raw capacity</td>'
+        f'<td style="text-align:right; font-weight:600;">{hcm_cap:.0f} vph</td></tr>'
+        f'<tr><td style="padding:2px 0;">Hazard zone</td>'
+        f'<td style="text-align:right; font-weight:600;">{zone_label}</td></tr>'
+        f'<tr><td style="padding:2px 0;">Degradation factor</td>'
+        f'<td style="text-align:right; font-weight:600;">{deg_pct} of HCM</td></tr>'
+        f'<tr><td style="padding:2px 0; font-weight:700; color:#212529;">'
+        f'Effective capacity</td>'
+        f'<td style="text-align:right; font-weight:700; color:#1c4a6e;">'
+        f'{eff_cap:.0f} vph</td></tr>'
         '</table>'
-        f'<div style="font-weight:600; font-size:11px; color:#444; margin-bottom:2px;">'
-        f'Baseline v/c &nbsp; <span style="font-weight:700;">{vc_base:.3f}</span></div>'
-        f'{_vc_bar_html(vc_base, vc_threshold)}'
         f'<div style="border-top:1px solid #dee2e6; padding-top:6px; '
         f'font-size:10px; color:#868e96;">'
-        f'Threshold: {vc_threshold:.2f} &nbsp;|&nbsp; LOS: {los}'
-        f'<br>Select a project to see baseline → projected impact'
+        f'v/c {vc_base:.3f} &nbsp;|&nbsp; LOS {los} &nbsp;(informational — not used in ΔT determination)'
+        f'<br>Select a project to see ΔT clearance time impact'
         f'</div>'
         '</div>'
     )
@@ -181,8 +269,9 @@ def _build_demo_project_popup(
       §1 — Analysis Scope (Stds 1–3): prerequisite conditions — compact, neutral
       §2 — Capacity Tests (Stds 4–5): decision drivers — prominent, full color
 
-    worst_wildland_route / worst_local_route: dict with keys
-        name, baseline_vc, proposed_vc — shown inline when triggered.
+    worst_wildland_route: dict with keys
+        name, delta_t_minutes, threshold_minutes, flagged — shown inline.
+    worst_local_route: unused in v3.0 (SB 79 has no route details); pass None.
     """
     det       = project.determination or "UNKNOWN"
     det_color = _TIER_CSS_COLOR.get(det, "#555")
@@ -232,20 +321,20 @@ def _build_demo_project_popup(
         )
 
     # ── §2 Capacity chips (Stds 4–5) ──────────────────────────────────────
-    _TRIGGERED  = ("⚠ TRIGGERED",       "#fff3cd", "#856404")
-    _WITHIN_CAP = ("✓ WITHIN CAPACITY", "#e8f5e9", "#27ae60")
-    _NOT_EVAL   = ("— NOT EVALUATED",   "#f1f3f5", "#868e96")
-    _NA         = ("N/A",               "#f1f3f5", "#868e96")
+    _TRIGGERED  = ("⚠ TRIGGERED",            "#fff3cd", "#856404")
+    _WITHIN_THR = ("✓ ΔT WITHIN THRESHOLD",  "#e8f5e9", "#27ae60")
+    _NOT_EVAL   = ("— NOT EVALUATED",         "#f1f3f5", "#868e96")
+    _NA         = ("N/A",                     "#f1f3f5", "#868e96")
 
-    # Std 4: wildland evac capacity
+    # Std 4: ΔT clearance time test
     if not met_size:
         s4 = _NOT_EVAL
     elif project.capacity_exceeded:
         s4 = _TRIGGERED
     else:
-        s4 = _WITHIN_CAP
+        s4 = _WITHIN_THR
 
-    # Std 5: local density capacity
+    # Std 5: SB 79 transit proximity — informational flag, never triggers
     ld_applicable = ld_tier not in ("NOT_APPLICABLE", "")
     if not met_size:
         s5 = _NOT_EVAL
@@ -254,7 +343,7 @@ def _build_demo_project_popup(
     elif ld_triggered:
         s5 = _TRIGGERED
     else:
-        s5 = _WITHIN_CAP
+        s5 = _NA   # SB 79 is always N/A for tier — informational only
 
     def _cap_chip(label, bg, fg):
         return (
@@ -264,16 +353,20 @@ def _build_demo_project_popup(
         )
 
     def _route_line(route):
+        """Show ΔT result for the worst-case evacuation path."""
         if not route:
             return ""
-        nm  = route["name"]
+        nm  = route.get("name", "Bottleneck segment")
         nm  = nm[:25] + "…" if len(nm) > 25 else nm
-        bvc = route["baseline_vc"]
-        pvc = route["proposed_vc"]
+        dt  = route.get("delta_t_minutes", 0.0)
+        thr = route.get("threshold_minutes", 10.0)
+        flagged = route.get("flagged", False)
+        clr = "#856404" if flagged else "#27ae60"
+        icon = "⚠" if flagged else "✓"
         return (
-            f'<div style="font-size:10px;color:#856404;padding-left:6px;'
+            f'<div style="font-size:10px;color:{clr};padding-left:6px;'
             f'margin-top:2px;font-style:italic;">'
-            f'{nm}: {bvc:.3f} → {pvc:.3f} v/c</div>'
+            f'{icon} {nm}: ΔT {dt:.1f} min (limit {thr:.0f} min)</div>'
         )
 
     scope_html = (
@@ -286,10 +379,10 @@ def _build_demo_project_popup(
         f'<div style="margin-bottom:7px;">'
         f'<div style="display:flex;justify-content:space-between;align-items:center;">'
         f'<span style="font-size:11px;color:#343a40;font-weight:600;">'
-        f'Std 4 &middot; Evac Capacity</span>'
+        f'Std 4 &middot; ΔT Clearance</span>'
         + _cap_chip(*s4)
         + f'</div>'
-        + (_route_line(worst_wildland_route) if project.capacity_exceeded else "")
+        + (_route_line(worst_wildland_route) if worst_wildland_route else "")
         + f'</div>'
     )
 
@@ -300,7 +393,6 @@ def _build_demo_project_popup(
         f'Std 5 &middot; SB 79 Transit</span>'
         + _cap_chip(*s5)
         + f'</div>'
-        + (_route_line(worst_local_route) if ld_triggered else "")
         + f'</div>'
     )
 
