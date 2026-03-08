@@ -10,7 +10,8 @@ Zhao et al. (2022) GPS-empirical mobilization rates.
   Standard 3 — FHSZ Modifier:      GIS point-in-polygon; sets hazard_zone string which
                                     controls mobilization_rate and ΔT threshold
   Standard 4 — ΔT Test:            ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress
-                                    Project is DISCRETIONARY if ΔT > max_marginal_minutes for hazard_zone
+                                    Project is DISCRETIONARY if ΔT > threshold for hazard_zone
+                                    threshold = safe_egress_window(zone) × max_project_share
 
 Key v3.0 changes from v2.0:
   - No baseline precondition: routes already at LOS F are tested equally
@@ -20,7 +21,7 @@ Key v3.0 changes from v2.0:
   - Returns EvacuationPath objects (not osmid lists) from identify_routes()
 
 Three-tier output:
-  DISCRETIONARY           — size threshold met AND ΔT > max_marginal_minutes on any serving path
+  DISCRETIONARY           — size threshold met AND ΔT > threshold (safe_egress_window × max_project_share) on any serving path
   CONDITIONAL MINISTERIAL — size threshold met AND ΔT within threshold on all paths
   MINISTERIAL             — below size threshold
 """
@@ -42,7 +43,7 @@ _LEGAL_BASIS = (
     "Zhao, X., et al. (2022) — GPS-empirical mobilization rates (44M records, Kincade Fire)"
 )
 
-# HAZ_CLASS integer → canonical hazard_zone key (matches mobilization_rates and max_marginal_minutes)
+# HAZ_CLASS integer → canonical hazard_zone key (matches mobilization_rates and safe_egress_window)
 _HAZ_CLASS_TO_ZONE = {
     3: "vhfhsz",
     2: "high_fhsz",
@@ -58,7 +59,7 @@ class WildlandScenario(EvacuationScenario):
     Standard 1 (size) gates the analysis.
     Standard 3 (FHSZ modifier) sets project.hazard_zone which controls:
       - mobilization_rate (Zhao et al. 2022 GPS-empirical tiered lookup)
-      - ΔT threshold (max_marginal_minutes by hazard zone)
+      - ΔT threshold (safe_egress_window × max_project_share by hazard zone)
       - capacity degradation factor (applied upstream in Agent 2 to road segments)
     Standard 4 (ΔT test) uses compute_delta_t() from base class.
     """
@@ -91,7 +92,7 @@ class WildlandScenario(EvacuationScenario):
 
         The GIS point-in-polygon test determines project.hazard_zone, which controls:
           - mobilization_rate via config["mobilization_rates"][hazard_zone]
-          - ΔT threshold via config["max_marginal_minutes"][hazard_zone]
+          - ΔT threshold via config["safe_egress_window"][hazard_zone] × config["max_project_share"]
           - (capacity degradation already applied to roads upstream in Agent 2)
 
         Method: GIS point-in-polygon test against CAL FIRE FHSZ zones.
@@ -247,7 +248,7 @@ class WildlandScenario(EvacuationScenario):
 
     def _reason_discretionary(self, project: Project, step5: dict) -> str:
         max_dt    = step5.get("max_delta_t_minutes", 0.0)
-        threshold = step5.get("max_marginal_minutes", 0.0)
+        threshold = step5.get("threshold_minutes", 0.0)
         hz        = step5.get("hazard_zone", "non_fhsz")
         mob       = step5.get("mobilization_rate", 0.25)
         n_paths   = sum(1 for r in step5.get("path_results", []) if r.get("flagged"))
@@ -258,7 +259,7 @@ class WildlandScenario(EvacuationScenario):
         )
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold (Standard 1) and "
-            f"{n_paths} serving path(s) exceed the ΔT threshold of {threshold:.0f} min "
+            f"{n_paths} serving path(s) exceed the ΔT threshold of {threshold:.2f} min "
             f"(max ΔT: {max_dt:.1f} min). "
             f"{fire_note}"
             f"Discretionary review required. Legal basis: {self.legal_basis}."
@@ -267,7 +268,7 @@ class WildlandScenario(EvacuationScenario):
     def _reason_fallback(self, project: Project, step3: dict, step5: dict) -> str:
         n_paths   = step3.get("serving_paths_count", 0)
         max_dt    = step5.get("max_delta_t_minutes", 0.0)
-        threshold = step5.get("max_marginal_minutes", 0.0)
+        threshold = step5.get("threshold_minutes", 0.0)
         hz        = step5.get("hazard_zone", "non_fhsz")
         mob       = step5.get("mobilization_rate", 0.25)
         fire_note = (
@@ -278,7 +279,7 @@ class WildlandScenario(EvacuationScenario):
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
             f"has {n_paths} serving path(s). "
-            f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.0f} min). "
+            f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.2f} min). "
             f"{fire_note}"
             f"Ministerial approval eligible with mandatory evacuation conditions. "
             f"Legal basis: {self.legal_basis}."

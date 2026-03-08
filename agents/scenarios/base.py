@@ -10,7 +10,8 @@ Five-step algorithm:
   Step 2 — Scale Gate:           Is the project large enough to trigger analysis?
   Step 3 — Route Identification: Which evacuation paths does this scenario evaluate?
   Step 4 — Demand Calculation:   How many vehicles does the project generate?
-  Step 5 — ΔT Test:              Does project ΔT > max_marginal_minutes on any path?
+  Step 5 — ΔT Test:              Does project ΔT > threshold on any path?
+                                 threshold = safe_egress_window(zone) × max_project_share
 
 ΔT formula:
   ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty
@@ -20,7 +21,8 @@ Five-step algorithm:
 
 Key v3.0 change from v2.0:
   v2.0: flagged = (baseline_vc < 0.95) AND (proposed_vc >= 0.95)  — REPLACED
-  v3.0: flagged = delta_t > max_marginal_minutes(hazard_zone)
+  v3.0: flagged = delta_t > threshold(hazard_zone)
+        where threshold = safe_egress_window(hazard_zone) × max_project_share  [v3.1 derived]
   The baseline condition is eliminated — projects in already-failing zones are tested equally.
 
 Determination tiers (most restrictive wins across all scenarios):
@@ -205,7 +207,8 @@ class EvacuationScenario(ABC):
         egress_minutes   = 0 for buildings < threshold_stories;
                            stories × min_per_story (capped) for taller buildings.
 
-        A path is flagged when ΔT > max_marginal_minutes(hazard_zone).
+        A path is flagged when ΔT > threshold(hazard_zone),
+        where threshold = safe_egress_window(hazard_zone) × max_project_share (v3.1 derived).
 
         No baseline precondition: a path already at LOS F is still tested.
         The baseline state of the road is irrelevant — ΔT measures only the
@@ -230,8 +233,9 @@ class EvacuationScenario(ABC):
                 ep_cfg.get("max_minutes", 12),
             )
 
-        max_minutes_cfg = config.get("max_marginal_minutes", {})
-        max_minutes = max_minutes_cfg.get(hazard_zone, 10.0)
+        safe_window = config.get("safe_egress_window", {}).get(hazard_zone, 120.0)
+        max_project_share = config.get("max_project_share", 0.05)
+        max_minutes = safe_window * max_project_share
 
         results = []
         triggered = False
@@ -276,7 +280,9 @@ class EvacuationScenario(ABC):
                 "project_vehicles":              round(project_vehicles, 1),
                 "egress_minutes":                round(egress_minutes, 1),
                 "delta_t_minutes":               round(delta_t, 2),
-                "threshold_minutes":             max_minutes,
+                "safe_egress_window_minutes":    safe_window,
+                "max_project_share":             max_project_share,
+                "threshold_minutes":             round(max_minutes, 4),
                 "hazard_zone":                   hazard_zone,
                 "mobilization_rate":             mob,
                 "flagged":                       flagged,
@@ -285,18 +291,21 @@ class EvacuationScenario(ABC):
         max_dt = max((r["delta_t_minutes"] for r in results), default=0.0)
 
         detail = {
-            "hazard_zone":            hazard_zone,
-            "mobilization_rate":      mob,
-            "project_vehicles":       round(project_vehicles, 1),
-            "egress_minutes":         round(egress_minutes, 1),
-            "max_marginal_minutes":   max_minutes,
-            "paths_evaluated":        len(results),
-            "triggered":              triggered,
-            "max_delta_t_minutes":    round(max_dt, 2),
-            "method":                 "ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress",
-            "source_mobilization":    "Zhao et al. (2022) Transp. Res. Part C",
-            "source_egress":          "NFPA 101 / IBC",
-            "path_results":           results,
+            "hazard_zone":                hazard_zone,
+            "mobilization_rate":          mob,
+            "project_vehicles":           round(project_vehicles, 1),
+            "egress_minutes":             round(egress_minutes, 1),
+            "safe_egress_window_minutes": safe_window,
+            "max_project_share":          max_project_share,
+            "threshold_minutes":          round(max_minutes, 4),
+            "paths_evaluated":            len(results),
+            "triggered":                  triggered,
+            "max_delta_t_minutes":        round(max_dt, 2),
+            "method":                     "ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress",
+            "source_mobilization":        "Zhao et al. (2022) Transp. Res. Part C",
+            "source_egress":              "NFPA 101 / IBC",
+            "source_threshold":           "NIST TN 2135 (safe_egress_window) × max_project_share (policy)",
+            "path_results":               results,
         }
         return triggered, results, detail
 
@@ -384,12 +393,12 @@ class EvacuationScenario(ABC):
 
     def _reason_discretionary(self, project: Project, step5: dict) -> str:
         max_dt     = step5.get("max_delta_t_minutes", 0.0)
-        threshold  = step5.get("max_marginal_minutes", 0.0)
+        threshold  = step5.get("threshold_minutes", 0.0)
         hz         = step5.get("hazard_zone", "non_fhsz")
         n_paths    = sum(1 for r in step5.get("path_results", []) if r.get("flagged"))
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
-            f"{n_paths} serving route(s) exceed the ΔT threshold of {threshold:.0f} min "
+            f"{n_paths} serving route(s) exceed the ΔT threshold of {threshold:.2f} min "
             f"(hazard zone: {hz}, max ΔT: {max_dt:.1f} min). "
             f"Discretionary review required. Legal basis: {self.legal_basis}."
         )
@@ -397,10 +406,10 @@ class EvacuationScenario(ABC):
     def _reason_fallback(self, project: Project, step3: dict, step5: dict) -> str:
         n_paths   = step3.get("serving_route_count", 0)
         max_dt    = step5.get("max_delta_t_minutes", 0.0)
-        threshold = step5.get("max_marginal_minutes", 0.0)
+        threshold = step5.get("threshold_minutes", 0.0)
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
             f"has {n_paths} serving route(s). "
-            f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.0f} min). "
+            f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.2f} min). "
             f"Tier: {self.fallback_tier.value}. Legal basis: {self.legal_basis}."
         )

@@ -615,7 +615,7 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
     max_dt       = s5.get("max_delta_t_minutes", 0.0)
     hazard_zone  = s5.get("hazard_zone", "non_fhsz")
     mob_rate     = s5.get("mobilization_rate", 0.25)
-    max_threshold = s5.get("max_marginal_minutes", 10)
+    max_threshold = s5.get("threshold_minutes", 6.0)
 
     s4_chip = "TRIGGERED" if s4_triggered else ("NOT EVALUATED" if not s1_result else "WITHIN THRESHOLD")
     s4_chip_cls = "chip-triggered" if s4_triggered else ("chip-na" if not s1_result else "chip-pass")
@@ -860,7 +860,7 @@ def _conditions_discretionary(wildland: dict, local5: dict) -> str:
     s5          = wildland.get("steps", {}).get("step5_delta_t", {})
     path_results = s5.get("path_results", [])
     max_dt      = s5.get("max_delta_t_minutes", 0.0)
-    threshold   = s5.get("max_marginal_minutes", 10)
+    threshold   = s5.get("threshold_minutes", 6.0)
     hazard_zone = s5.get("hazard_zone", "non_fhsz")
     flagged_paths = [r for r in path_results if r.get("flagged")]
 
@@ -872,7 +872,7 @@ def _conditions_discretionary(wildland: dict, local5: dict) -> str:
             bname = r.get("bottleneck_name") or r.get("bottleneck_osmid", "—")
             dt    = r.get("delta_t_minutes", 0)
             thr   = r.get("threshold_minutes", threshold)
-            parts.append(f"Path {pid} — bottleneck: {bname} (ΔT {dt:.1f} min vs {thr:.0f}-min threshold)")
+            parts.append(f"Path {pid} — bottleneck: {bname} (ΔT {dt:.1f} min vs {thr:.2f}-min threshold)")
         route_list = "; ".join(parts)
         n_more = len(flagged_paths) - len(parts)
         if n_more > 0:
@@ -929,12 +929,13 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
     ut  = config.get("unit_threshold", 15)
     vpu = config.get("vehicles_per_unit", 2.5)
 
-    # v3.0 parameters
-    mob_rates   = config.get("mobilization_rates", {})
-    haz_deg     = config.get("hazard_degradation", {})
-    max_min     = config.get("max_marginal_minutes", {})
-    egress_cfg  = config.get("egress_penalty", {})
-    vc_t        = config.get("vc_threshold", 0.95)
+    # v3.0 / v3.1 parameters
+    mob_rates    = config.get("mobilization_rates", {})
+    haz_deg      = config.get("hazard_degradation", {})
+    safe_egress  = config.get("safe_egress_window", {})
+    max_share    = config.get("max_project_share", 0.05)
+    egress_cfg   = config.get("egress_penalty", {})
+    vc_t         = config.get("vc_threshold", 0.95)
 
     mob_vhf  = mob_rates.get("vhfhsz", 0.75)
     mob_hi   = mob_rates.get("high_fhsz", 0.57)
@@ -945,10 +946,15 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
     deg_hi   = haz_deg.get("high_fhsz", 0.50)
     deg_mod  = haz_deg.get("moderate_fhsz", 0.75)
 
-    thr_vhf  = max_min.get("vhfhsz", 3)
-    thr_hi   = max_min.get("high_fhsz", 5)
-    thr_mod  = max_min.get("moderate_fhsz", 8)
-    thr_non  = max_min.get("non_fhsz", 10)
+    # Derived thresholds: safe_egress_window × max_project_share
+    win_vhf  = safe_egress.get("vhfhsz", 45)
+    win_hi   = safe_egress.get("high_fhsz", 90)
+    win_mod  = safe_egress.get("moderate_fhsz", 120)
+    win_non  = safe_egress.get("non_fhsz", 120)
+    thr_vhf  = win_vhf * max_share
+    thr_hi   = win_hi  * max_share
+    thr_mod  = win_mod * max_share
+    thr_non  = win_non * max_share
 
     egr_thr  = egress_cfg.get("threshold_stories", 4)
     egr_mps  = egress_cfg.get("minutes_per_story", 1.5)
@@ -971,7 +977,7 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
     ΔT = (project_vehicles / bottleneck_effective_capacity_vph) &times; 60 + egress_penalty<br>
     project_vehicles = units &times; {vpu} vpu &times; mobilization_rate(hazard_zone)<br>
     egress_penalty = min(stories &times; {egr_mps}, {egr_max}) min &nbsp;[if stories &ge; {egr_thr}; else 0]<br>
-    Flagged when ΔT &gt; max_marginal_minutes(hazard_zone)
+    Flagged when ΔT &gt; threshold(hazard_zone) = safe_egress_window × max_project_share
   </div>
 
   <table>
@@ -1007,16 +1013,20 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
           <td><strong>1.00&times;</strong></td><td>No degradation</td></tr>
       <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
               font-size:11px; letter-spacing:0.5px;">
-          ΔT Thresholds (max_marginal_minutes by hazard zone)
+          ΔT Thresholds — derived as safe_egress_window × {max_share*100:.0f}% (NIST TN 2135)
       </td></tr>
       <tr><td>&nbsp;&nbsp;Very High FHSZ</td>
-          <td><strong>{thr_vhf} min</strong></td><td>Protective for high-risk zones</td></tr>
+          <td><strong>{thr_vhf:.2f} min</strong></td>
+          <td>{win_vhf} min × {max_share*100:.0f}% — NIST TN 2135 (Camp Fire)</td></tr>
       <tr><td>&nbsp;&nbsp;High FHSZ</td>
-          <td><strong>{thr_hi} min</strong></td><td></td></tr>
+          <td><strong>{thr_hi:.2f} min</strong></td>
+          <td>{win_hi} min × {max_share*100:.0f}%</td></tr>
       <tr><td>&nbsp;&nbsp;Moderate FHSZ</td>
-          <td><strong>{thr_mod} min</strong></td><td></td></tr>
+          <td><strong>{thr_mod:.2f} min</strong></td>
+          <td>{win_mod} min × {max_share*100:.0f}%</td></tr>
       <tr><td>&nbsp;&nbsp;Non-FHSZ</td>
-          <td><strong>{thr_non} min</strong></td><td></td></tr>
+          <td><strong>{thr_non:.2f} min</strong></td>
+          <td>{win_non} min × {max_share*100:.0f}% (FEMA standard)</td></tr>
       <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
               font-size:11px; letter-spacing:0.5px;">
           Building Egress Penalty (NFPA 101 / IBC)

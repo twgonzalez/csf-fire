@@ -72,18 +72,53 @@ hazard_degradation:
     non_fhsz: 1.00
 
 # ============================================================
-# ΔT Thresholds (minutes) by Hazard Zone
-# Graduated by hazard severity — shorter safe egress windows in higher-risk zones.
-# These are defaults; cities can adjust in Safety Element adoption ordinances.
-# Even without adopted thresholds, the raw ΔT number constitutes substantial evidence
-# of a "specific adverse impact" under HAA §65589.5(j)(1).
+# Safe Egress Windows by Hazard Zone (minutes)
+# Source: NIST TN 2135 (Camp Fire timeline), TN 2252 (NETTRA), TN 2262 (ESCAPE)
+#
+#   VHFHSZ (45 min):  Fire ignited 6:20 AM; spot fires in Paradise by 8:00 AM;
+#                     fire front hit eastern Paradise at 8:40 AM → 40 min from
+#                     first spot fires to fire front arrival + 5 min for modern
+#                     WEA alert systems (not available in 2018).
+#   High FHSZ (90 min): Fire spread ~1-2 mph vs 3-5 mph in VHFHSZ under Santa
+#                       Ana winds. Approximately 2× the VHFHSZ window.
+#   Moderate FHSZ (120 min): Lower fire intensity, greater distance from typical
+#                            ignition points.
+#   Non-FHSZ (120 min): Standard FEMA emergency planning window for no-notice events.
 # ============================================================
 
-max_marginal_minutes:
-  vhfhsz: 3
-  high_fhsz: 5
-  moderate_fhsz: 8
-  non_fhsz: 10
+safe_egress_window:
+  vhfhsz: 45         # NIST Camp Fire: spot fires to fire front = 40 min
+                      # + 5 min for modern WEA alert systems (not available in 2018)
+  high_fhsz: 90      # Fire spread ~1-2 mph vs 3-5 mph VHFHSZ; ~2× window
+  moderate_fhsz: 120  # Lower intensity, greater distance from typical ignition
+  non_fhsz: 120      # General emergency planning window (FEMA standard)
+  citation: >
+    Maranghides, A., et al. (2021). A Case Study of the Camp Fire —
+    Fire Progression Timeline. NIST Technical Note 2135.
+    Maranghides, A., et al. (2023). A Case Study of the Camp Fire —
+    NETTRA. NIST Technical Note 2252.
+    Maranghides, A., et al. (2023, updated 2025). WUI Fire Evacuation
+    and Sheltering Considerations (ESCAPE). NIST Technical Note 2262.
+
+# ============================================================
+# Maximum Project Share of Safe Egress Window
+# Single policy value — all zone thresholds derived from this × safe_egress_window
+# Justification: standard engineering significance threshold (5%); at 5%, a road
+# can absorb ~20 equal-sized projects before new development alone exhausts the
+# safe window. Structural ceiling: 20 × 5% = 100%.
+# ============================================================
+
+max_project_share: 0.05  # 5% — standard engineering significance threshold
+                         # Allows ~20 projects before new development alone
+                         # exhausts the evacuation window
+
+# DERIVED thresholds — computed at runtime from safe_egress_window × max_project_share
+#   vhfhsz:        45 × 0.05 = 2.25 min
+#   high_fhsz:     90 × 0.05 = 4.50 min
+#   moderate_fhsz: 120 × 0.05 = 6.00 min
+#   non_fhsz:      120 × 0.05 = 6.00 min
+# The max_marginal_minutes key has been removed. All code computes thresholds
+# at runtime as: safe_egress_window[zone] × max_project_share
 
 # ============================================================
 # Vehicles Per Housing Unit

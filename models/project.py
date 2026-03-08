@@ -44,7 +44,7 @@ class Project:
     project_vehicles_peak_hour: float = 0.0  # dwelling_units × vpu × mob
     egress_minutes: float = 0.0           # NFPA 101 building egress penalty
     delta_t_results: list = field(default_factory=list)  # per-path ΔT audit dicts
-    capacity_exceeded: bool = False       # True if any path ΔT > max_marginal_minutes
+    capacity_exceeded: bool = False       # True if any path ΔT > threshold (safe_egress_window × max_project_share)
 
     # SB 79 transit flag (informational — does not affect tier)
     sb79_transit_flag: bool = False
