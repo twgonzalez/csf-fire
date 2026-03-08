@@ -258,6 +258,40 @@ def create_demo_map(
             "n_flagged": ld_n_flagged,
         })
 
+        # ── Worst-case route for popup inline display ─────────────────────
+        # Wildland (Std 4): find the flagged route with highest proposed v/c
+        worst_wildland_route: "dict | None" = None
+        if flagged_set and "osmid" in roads_wgs84.columns:
+            is_flagged_mask = roads_wgs84["osmid"].apply(
+                lambda o: _osmid_matches(o, flagged_set)
+            )
+            flagged_roads = roads_wgs84[is_flagged_mask]
+            if not flagged_roads.empty:
+                cap_s = flagged_roads["capacity_vph"].fillna(1).clip(lower=0.001)
+                dem_s = flagged_roads["baseline_demand_vph"].fillna(0)
+                pvc_s = (dem_s + project_vph_per_rt) / cap_s
+                best_idx = pvc_s.idxmax()
+                row_w = flagged_roads.loc[best_idx]
+                cap_w = float(row_w.get("capacity_vph", 1) or 1)
+                dem_w = float(row_w.get("baseline_demand_vph", 0) or 0)
+                worst_wildland_route = {
+                    "name": str(row_w.get("name", "Unnamed") or "Unnamed"),
+                    "baseline_vc": dem_w / max(cap_w, 0.001),
+                    "proposed_vc": (dem_w + project_vph_per_rt) / max(cap_w, 0.001),
+                }
+
+        # Local density (Std 5): pull worst route from audit route_details
+        worst_local_route: "dict | None" = None
+        ld_route_details = ld_step5.get("route_details", [])
+        caused = [r for r in ld_route_details if r.get("project_causes_exceedance")]
+        if caused:
+            worst_ld = max(caused, key=lambda r: r.get("proposed_vc", 0))
+            worst_local_route = {
+                "name": str(worst_ld.get("name") or worst_ld.get("osmid", "Unnamed")),
+                "baseline_vc": float(worst_ld.get("baseline_vc", 0)),
+                "proposed_vc": float(worst_ld.get("proposed_vc", 0)),
+            }
+
         # ── Wildland project FeatureGroup ────────────────────────────────
         proj_group = folium.FeatureGroup(
             name=f"{project.project_name or f'Project {i+1}'} — {tier}",
@@ -361,7 +395,13 @@ def create_demo_map(
         folium.Marker(
             location=[project.location_lat, project.location_lon],
             popup=folium.Popup(
-                _build_demo_project_popup(project, route_color, vc_threshold, unit_threshold),
+                _build_demo_project_popup(
+                    project, route_color, vc_threshold, unit_threshold,
+                    worst_wildland_route=worst_wildland_route,
+                    worst_local_route=worst_local_route,
+                    ld_tier=ld_tier,
+                    ld_triggered=ld_triggered,
+                ),
                 max_width=320,
             ),
             tooltip=f"{project.project_name} · {tier}",

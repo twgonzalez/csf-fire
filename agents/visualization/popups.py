@@ -170,65 +170,163 @@ def _build_demo_project_popup(
     proj_color: str,
     vc_threshold: float,
     unit_threshold: int = 15,
+    worst_wildland_route: "dict | None" = None,
+    worst_local_route: "dict | None" = None,
+    ld_tier: str = "NOT_APPLICABLE",
+    ld_triggered: bool = False,
 ) -> str:
-    """Popup shown when clicking a project marker on the demo map."""
+    """Popup shown when clicking a project marker on the demo map.
+
+    Two-section layout (UI/UX best practice for hierarchical info):
+      §1 — Analysis Scope (Stds 1–3): prerequisite conditions — compact, neutral
+      §2 — Capacity Tests (Stds 4–5): decision drivers — prominent, full color
+
+    worst_wildland_route / worst_local_route: dict with keys
+        name, baseline_vc, proposed_vc — shown inline when triggered.
+    """
     det       = project.determination or "UNKNOWN"
     det_color = _TIER_CSS_COLOR.get(det, "#555")
     bg_color  = _TIER_BG_COLOR.get(det, "#fafafa")
 
-    def std_row(label, triggered, detail=""):
-        chip_bg    = "#fde8e8" if triggered else "#e8f5e9"
-        chip_color = "#c0392b" if triggered else "#27ae60"
-        return (
-            f'<tr><td style="padding:3px 0; color:#555; font-size:11px;">{label}</td>'
-            f'<td style="text-align:right; padding:3px 0;">'
-            f'<span style="padding:1px 7px; border-radius:9px; font-size:10px; '
-            f'font-weight:700; background:{chip_bg}; color:{chip_color};">'
-            f'{"YES" if triggered else "NO"}</span></td>'
-            f'<td style="padding:3px 0 3px 8px; font-size:10px; color:#868e96;">{detail}</td></tr>'
-        )
-
-    n_srv   = len(project.serving_route_ids or [])
-    n_flg   = len(project.flagged_route_ids or [])
-    in_zone = (
-        f"Zone {project.fire_zone_level}" if project.in_fire_zone
-        else "Not in FHSZ"
-    )
+    n_srv     = len(project.serving_route_ids or [])
+    met_size  = project.meets_size_threshold
+    radius_mi = project.search_radius_miles
+    in_zone   = f"Zone {project.fire_zone_level}" if project.in_fire_zone else "Not in FHSZ"
     reason_short = (project.determination_reason or "").split(".")[0] + "."
 
+    # ── §1 Scope icons (Stds 1–3) ─────────────────────────────────────────
+    # Std 1: city has FHSZ — always true when wildland analysis ran
+    s1_icon, s1_clr = "✓", "#1a56db"
+    # Std 2: size gate
+    s2_icon = "✓" if met_size else "✗"
+    s2_clr  = "#1a56db" if met_size else "#adb5bd"
+    s2_text = f"{project.dwelling_units} of {unit_threshold} units"
+    # Std 3: serving routes (gated on size threshold)
+    if not met_size:
+        s3_icon, s3_clr, s3_text = "—", "#adb5bd", "not evaluated"
+    elif n_srv > 0:
+        s3_icon, s3_clr = "✓", "#1a56db"
+        s3_text = f"{n_srv} routes · {radius_mi} mi"
+    else:
+        s3_icon, s3_clr, s3_text = "✗", "#adb5bd", "no routes found"
+
+    _SL = (
+        "font-size:9px;font-weight:700;letter-spacing:1.2px;"
+        "text-transform:uppercase;color:#adb5bd;margin-bottom:5px;"
+    )
+
+    def _scope_row(icon, clr, text):
+        return (
+            f'<div style="display:flex;align-items:baseline;gap:6px;'
+            f'font-size:10px;color:#555;margin-bottom:2px;">'
+            f'<span style="color:{clr};font-weight:700;min-width:10px;'
+            f'flex-shrink:0;">{icon}</span>'
+            f'<span>{text}</span></div>'
+        )
+
+    # ── §2 Capacity chips (Stds 4–5) ──────────────────────────────────────
+    _TRIGGERED  = ("⚠ TRIGGERED",       "#fff3cd", "#856404")
+    _WITHIN_CAP = ("✓ WITHIN CAPACITY", "#e8f5e9", "#27ae60")
+    _NOT_EVAL   = ("— NOT EVALUATED",   "#f1f3f5", "#868e96")
+    _NA         = ("N/A",               "#f1f3f5", "#868e96")
+
+    # Std 4: wildland evac capacity
+    if not met_size:
+        s4 = _NOT_EVAL
+    elif project.exceeds_capacity_threshold:
+        s4 = _TRIGGERED
+    else:
+        s4 = _WITHIN_CAP
+
+    # Std 5: local density capacity
+    ld_applicable = ld_tier not in ("NOT_APPLICABLE", "")
+    if not met_size:
+        s5 = _NOT_EVAL
+    elif not ld_applicable:
+        s5 = _NA
+    elif ld_triggered:
+        s5 = _TRIGGERED
+    else:
+        s5 = _WITHIN_CAP
+
+    def _cap_chip(label, bg, fg):
+        return (
+            f'<span style="padding:2px 8px;border-radius:9px;font-size:10px;'
+            f'font-weight:700;background:{bg};color:{fg};'
+            f'white-space:nowrap;flex-shrink:0;">{label}</span>'
+        )
+
+    def _route_line(route):
+        if not route:
+            return ""
+        nm  = route["name"]
+        nm  = nm[:25] + "…" if len(nm) > 25 else nm
+        bvc = route["baseline_vc"]
+        pvc = route["proposed_vc"]
+        return (
+            f'<div style="font-size:10px;color:#856404;padding-left:6px;'
+            f'margin-top:2px;font-style:italic;">'
+            f'{nm}: {bvc:.3f} → {pvc:.3f} v/c</div>'
+        )
+
+    scope_html = (
+        _scope_row(s1_icon, s1_clr, "FHSZ city")
+        + _scope_row(s2_icon, s2_clr, s2_text)
+        + _scope_row(s3_icon, s3_clr, s3_text)
+    )
+
+    s4_html = (
+        f'<div style="margin-bottom:7px;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+        f'<span style="font-size:11px;color:#343a40;font-weight:600;">'
+        f'Std 4 &middot; Wildland Evac</span>'
+        + _cap_chip(*s4)
+        + f'</div>'
+        + (_route_line(worst_wildland_route) if project.exceeds_capacity_threshold else "")
+        + f'</div>'
+    )
+
+    s5_html = (
+        f'<div>'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+        f'<span style="font-size:11px;color:#343a40;font-weight:600;">'
+        f'Std 5 &middot; Local Density</span>'
+        + _cap_chip(*s5)
+        + f'</div>'
+        + (_route_line(worst_local_route) if ld_triggered else "")
+        + f'</div>'
+    )
+
     return (
-        '<div style="font-family:system-ui,-apple-system,sans-serif; '
-        'font-size:12px; min-width:270px; max-width:310px; line-height:1.5;">'
-        f'<div style="background:{bg_color}; margin:-14px -16px 12px; '
-        f'padding:10px 14px; border-bottom:1px solid #dee2e6; '
-        f'border-radius:8px 8px 0 0;">'
-        f'<div style="font-size:15px; font-weight:700; color:{det_color};">{det}</div>'
-        f'<div style="font-size:11px; color:#444; margin-top:1px;">'
-        f'{project.project_name or "Project"}'
+        '<div style="font-family:system-ui,-apple-system,sans-serif;'
+        'font-size:12px;min-width:280px;max-width:310px;line-height:1.5;">'
+
+        # Header: determination + project name + units/zone
+        f'<div style="background:{bg_color};margin:-14px -16px 0;'
+        f'padding:10px 14px;border-radius:8px 8px 0 0;border-bottom:1px solid #dee2e6;">'
+        f'<div style="font-size:15px;font-weight:700;color:{det_color};">{det}</div>'
+        f'<div style="font-size:11px;color:#444;margin-top:1px;">'
+        f'{project.project_name or "Project"}</div>'
+        f'<div style="font-size:10px;color:#6c757d;margin-top:2px;">'
+        f'{project.dwelling_units} units &nbsp;&middot;&nbsp; {in_zone}</div>'
         f'</div>'
-        f'</div>'
-        f'<div style="font-size:11px; color:#555; margin-bottom:10px;">'
-        f'{project.address or ""}'
-        f'<br>{project.dwelling_units} dwelling units'
-        f' &nbsp;·&nbsp; {project.location_lat:.4f}, {project.location_lon:.4f}'
-        f'<br>Fire zone: {in_zone}'
-        f'</div>'
-        '<table style="width:100%; border-collapse:collapse; margin-bottom:10px;">'
-        + std_row("Std 2 · Size", project.meets_size_threshold,
-                  f"{project.dwelling_units} of {unit_threshold} units")
-        + std_row("Std 3 · Routes", bool(n_srv), f"{n_srv} segs")
-        + std_row("Std 4 · Capacity", project.exceeds_capacity_threshold,
-                  f"{n_flg} flagged")
-        + '</table>'
-        f'<div style="font-size:11px; color:#444; border-top:1px solid #f1f3f5; '
-        f'padding-top:8px; margin-top:4px;">'
-        f'Peak vehicles generated: '
-        f'<strong style="color:{proj_color};">'
-        f'{project.project_vehicles_peak_hour:.0f} vph</strong>'
-        f'</div>'
-        f'<div style="font-size:10px; color:#868e96; margin-top:6px; '
-        f'font-style:italic; line-height:1.4;">'
-        f'{reason_short[:180]}'
-        f'</div>'
+
+        # §1 Analysis Scope — subdued gray background, compact rows
+        f'<div style="background:#f8f9fa;padding:7px 14px 5px;border-bottom:1px solid #e9ecef;">'
+        f'<div style="{_SL}">Analysis Scope &nbsp;&middot;&nbsp; Stds 1–3</div>'
+        + scope_html
+        + '</div>'
+
+        # §2 Capacity Tests — white background, prominent chips + route detail
+        f'<div style="padding:8px 14px 6px;">'
+        f'<div style="{_SL}">Capacity Tests &nbsp;&middot;&nbsp; Stds 4–5</div>'
+        + s4_html
+        + s5_html
+        + '</div>'
+
+        # Footer: short determination reason
+        f'<div style="font-size:10px;color:#868e96;border-top:1px solid #f1f3f5;'
+        f'padding:5px 14px 8px;font-style:italic;line-height:1.4;">'
+        f'{reason_short[:160]}</div>'
         '</div>'
     )
