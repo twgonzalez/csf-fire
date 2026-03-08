@@ -231,13 +231,25 @@ class EvacuationScenario(ABC):
 
     def _get_surge_multiplier(self, project: Project) -> float:
         """
-        Return the FHSZ evacuation surge multiplier for this project.
+        Return the mobilization-ratio multiplier for Standard 4.
 
-        Default implementation: always 1.0 (no adjustment).
-        WildlandScenario overrides this to apply the city-configured multiplier
-        when the project site is within FHSZ Zone 2 or 3.
+        Computed as fhsz_mobilization_factor / peak_hour_mobilization when the
+        project is in FHSZ Zone 2/3; otherwise 1.0 (no adjustment).
+
+        Default implementation: always 1.0.
+        WildlandScenario overrides this when project.in_fire_zone is True.
         """
         return 1.0
+
+    def _get_demand_column(self) -> str:
+        """
+        Return the roads_gdf column to use as baseline demand in ratio_test().
+
+        Default: 'baseline_demand_vph' — evacuation-scenario demand (Standard 4).
+        LocalDensityScenario overrides this to 'normal_demand_vph' — normal
+        peak-hour demand appropriate for Standard 5 (non-evacuation conditions).
+        """
+        return "baseline_demand_vph"
 
     def ratio_test(
         self,
@@ -245,6 +257,7 @@ class EvacuationScenario(ABC):
         project_vph: float,
         roads_gdf: gpd.GeoDataFrame,
         surge_multiplier: float = 1.0,
+        demand_column: str = "baseline_demand_vph",
     ) -> tuple[bool, list, dict]:
         """
         Step 5: Does the project's demand cause any serving route to exceed the v/c threshold?
@@ -287,12 +300,16 @@ class EvacuationScenario(ABC):
 
         for _, row in serving.iterrows():
             capacity        = float(row.get("capacity_vph", 0.0))
-            baseline_demand = float(row.get("baseline_demand_vph", 0.0))
+            # Read demand from the scenario-specified column (evac or normal)
+            scenario_demand = float(row.get(demand_column, 0.0))
+            # Always read both for display in the brief
+            evac_demand     = float(row.get("baseline_demand_vph", 0.0))
+            normal_demand   = float(row.get("normal_demand_vph", scenario_demand))
 
-            # Apply surge multiplier: scales baseline demand to model simultaneous evacuation.
-            # For non-FHSZ projects (or cities without an adopted multiplier), surge = 1.0
-            # and this has no effect — formula collapses to the standard marginal causation test.
-            effective_baseline = baseline_demand * surge_multiplier
+            # Apply FHSZ mobilization ratio: scales evac baseline to model simultaneous
+            # mandatory evacuation.  For non-FHSZ or Standard 5, surge_multiplier = 1.0
+            # and this has no effect.
+            effective_baseline = scenario_demand * surge_multiplier
             effective_vc       = effective_baseline / capacity if capacity > 0 else 0.0
 
             proposed_demand = effective_baseline + vehicles_per_route
@@ -312,7 +329,9 @@ class EvacuationScenario(ABC):
                 "osmid":                     osmid_str,
                 "name":                      row.get("name", ""),
                 "capacity_vph":              round(capacity, 0),
-                "baseline_demand_vph":       round(baseline_demand, 1),
+                # All three demand columns for brief display
+                "normal_demand_vph":         round(normal_demand, 1),
+                "evac_demand_vph":           round(evac_demand, 1),
                 "surge_multiplier":          surge_multiplier,
                 "effective_baseline_demand": round(effective_baseline, 1),
                 "effective_baseline_vc":     round(effective_vc, 4),
@@ -404,8 +423,12 @@ class EvacuationScenario(ABC):
         steps["step4_demand"] = step4
 
         # ── Step 5: Capacity Ratio Test ────────────────────────────────
-        surge = self._get_surge_multiplier(project)
-        triggered, flagged_ids, step5 = self.ratio_test(route_ids, project_vph, roads_gdf, surge_multiplier=surge)
+        surge        = self._get_surge_multiplier(project)
+        demand_col   = self._get_demand_column()
+        triggered, flagged_ids, step5 = self.ratio_test(
+            route_ids, project_vph, roads_gdf,
+            surge_multiplier=surge, demand_column=demand_col,
+        )
         steps["step5_ratio_test"] = step5
 
         # ── Determination ──────────────────────────────────────────────

@@ -617,32 +617,52 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         display_rows = caused_rows + near_rows
         n_omitted    = len(deduped_details) - len(display_rows)
 
-        flagged_table = "<br><table class='route-table'><thead><tr>" \
-            "<th>Route Name</th><th>Baseline v/c</th><th>Project adds</th>" \
-            "<th>Proposed v/c</th><th>Status</th></tr></thead><tbody>"
+        # Show three demand columns: normal / evac (×0.57) / evac+surge (×mob_factor)
+        has_surge = any(r.get("surge_multiplier", 1.0) != 1.0 for r in display_rows)
+        surge_header = "<th>Evac+surge v/c</th>" if has_surge else ""
+        flagged_table = (
+            "<br><table class='route-table'><thead><tr>"
+            "<th>Route Name</th>"
+            "<th>Normal v/c</th>"
+            "<th>Evac v/c (×0.57)</th>"
+            f"{surge_header}"
+            "<th>Project adds</th>"
+            "<th>Proposed v/c</th>"
+            "<th>Status</th></tr></thead><tbody>"
+        )
         for r in display_rows:
-            nm   = r.get("name") or r.get("osmid", "—")
-            bvc  = r.get("effective_baseline_vc", r.get("baseline_vc", 0))
-            pvc  = r.get("proposed_vc", 0)
-            adds = r.get("vehicles_added", 0)
-            causes = r.get("project_causes_exceedance", False)
-            bfail  = r.get("baseline_exceeds", False)
+            nm        = r.get("name") or r.get("osmid", "—")
+            cap       = r.get("capacity_vph", 1)
+            nd        = r.get("normal_demand_vph", 0)
+            ed        = r.get("evac_demand_vph", 0)
+            surge_m   = r.get("surge_multiplier", 1.0)
+            normal_vc = nd / cap if cap > 0 else 0
+            evac_vc   = ed / cap if cap > 0 else 0
+            bvc       = r.get("effective_baseline_vc", 0)
+            pvc       = r.get("proposed_vc", 0)
+            adds      = r.get("vehicles_added", 0)
+            causes    = r.get("project_causes_exceedance", False)
+            bfail     = r.get("baseline_exceeds", False)
             if causes:
                 status = "<span style='color:#c0392b;font-weight:700'>⚠ PROJECT CAUSES EXCEEDANCE</span>"
             elif bfail:
                 status = "<span style='color:#868e96'>pre-existing LOS F</span>"
             else:
                 status = "<span style='color:#27ae60'>below threshold</span>"
+            surge_cell = f"<td style='font-weight:600;color:#c0392b'>{bvc:.3f}</td>" if has_surge else ""
             flagged_table += (
                 f"<tr><td>{nm}</td>"
-                f"<td style='font-weight:600'>{bvc:.3f}</td>"
+                f"<td>{normal_vc:.3f}</td>"
+                f"<td>{evac_vc:.3f}</td>"
+                f"{surge_cell}"
                 f"<td style='color:#6f42c1'>+{adds:.0f} vph</td>"
                 f"<td style='font-weight:600'>{pvc:.3f}</td>"
                 f"<td>{status}</td></tr>"
             )
         if n_omitted > 0:
+            ncols = 7 if has_surge else 6
             flagged_table += (
-                f"<tr><td colspan='5' style='color:#868e96;font-style:italic'>"
+                f"<tr><td colspan='{ncols}' style='color:#868e96;font-style:italic'>"
                 f"{n_omitted} additional route segments below threshold — omitted for brevity. "
                 f"See full audit trail.</td></tr>"
             )
@@ -708,12 +728,14 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
             l5_display = l5_caused + l5_near
             l5_omitted = len(l5_deduped) - len(l5_display)
             l5_table = "<br><table class='route-table'><thead><tr>" \
-                "<th>Local Route</th><th>Road Type</th><th>Baseline v/c</th>" \
+                "<th>Local Route</th><th>Road Type</th>" \
+                "<th>Normal v/c (×0.10)</th>" \
                 "<th>Project adds</th><th>Proposed v/c</th><th>Status</th></tr></thead><tbody>"
             for r in l5_display:
                 nm   = r.get("name") or r.get("osmid", "—")
                 rt   = r.get("road_type", "—")
-                bvc  = r.get("effective_baseline_vc", r.get("baseline_vc", 0))
+                # Standard 5 uses normal_demand_vph; effective_baseline_vc reflects that
+                bvc  = r.get("effective_baseline_vc", 0)
                 pvc  = r.get("proposed_vc", 0)
                 adds = r.get("vehicles_added", 0)
                 causes = r.get("project_causes_exceedance", False)

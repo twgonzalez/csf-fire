@@ -13,17 +13,20 @@
 # an arbitrary mid-LOS-E value, and harder for HCD to challenge as a categorical prohibition.
 vc_threshold: 0.95
 
-# FHSZ Evacuation Surge Multiplier
-# Applied to baseline demand on serving routes when the project site is within FHSZ Zone 2 or 3.
-# Models simultaneous mass evacuation demand (wildfire) vs. staggered peak-hour departure.
-# Default 1.0 = no adjustment (Standard 4 uses peak-hour mobilization only).
-# Legal basis: CAL FIRE / Cal OES evacuation planning guidance distinguishes peak-hour
-# staggered departure (mobilization factor 0.40–0.75) from simultaneous mandatory evacuation.
-# City-specific studies (e.g., KLD Engineering) may support values of 1.25–2.0 for
-# compressed departure windows observed in Northern California wildfire evacuations.
-# Override in config/cities/{city}.yaml under overrides: to activate for a specific city.
-# Requires adoption ordinance and supporting study before use in project determinations.
-fhsz_surge_multiplier: 1.0
+# FHSZ Mobilization Factor
+# When a project site is within FHSZ Zone 2 or 3, mandatory evacuation orders produce
+# near-simultaneous departure rather than the staggered peak-hour departure modeled by
+# peak_hour_mobilization.  Standard 4 replaces the base mobilization factor with this
+# value when in_fire_zone == True.
+#
+# Effective surge on baseline demand = fhsz_mobilization_factor / peak_hour_mobilization
+#   e.g. 1.0 / 0.57 ≈ 1.754× — more conservative than an arbitrary 1.5× multiplier and
+#   logically bounded: mobilization can never exceed 100% of households.
+#
+# Default: 1.0 (100% simultaneous departure under mandatory order).
+# Override per city in config/cities/{city}.yaml if a local study supports a different value.
+# Legal basis: CAL FIRE / Cal OES evacuation planning guidance; AB 747 §65302.15.
+fhsz_mobilization_factor: 1.0
 
 # Minimum dwelling units triggering Standards review
 # Basis: 15 units × 2.5 vph/unit × 0.57 mobilization = 21.4 peak-hour trips,
