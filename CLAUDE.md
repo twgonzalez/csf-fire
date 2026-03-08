@@ -93,10 +93,12 @@ output/{city}/          # Results (git-ignored)
 | `hazard_degradation.vhfhsz` | 0.35 | HCM Exhibit 10-15/10-17 + NIST Camp Fire |
 | `hazard_degradation.high_fhsz` | 0.50 | HCM composite |
 | `hazard_degradation.moderate_fhsz` | 0.75 | HCM composite |
-| `max_marginal_minutes.vhfhsz` | 3 | ΔT threshold for Very High FHSZ |
-| `max_marginal_minutes.high_fhsz` | 5 | ΔT threshold for High FHSZ |
-| `max_marginal_minutes.moderate_fhsz` | 8 | ΔT threshold for Moderate FHSZ |
-| `max_marginal_minutes.non_fhsz` | 10 | ΔT threshold for non-FHSZ |
+| `safe_egress_window.vhfhsz` | 45 min | NIST TN 2135 (Camp Fire timeline) |
+| `safe_egress_window.high_fhsz` | 90 min | Fire spread ~2× VHFHSZ window |
+| `safe_egress_window.moderate_fhsz` | 120 min | Standard emergency planning |
+| `safe_egress_window.non_fhsz` | 120 min | FEMA standard |
+| `max_project_share` | 0.05 | Standard 5% engineering significance threshold |
+| Derived ΔT thresholds (v3.1) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
 | `egress_penalty.threshold_stories` | 4 | NFPA 101 / IBC |
 | `egress_penalty.minutes_per_story` | 1.5 | NFPA 101 |
 | `egress_penalty.max_minutes` | 12 | NFPA 101 cap |
@@ -136,7 +138,7 @@ All standards are algorithmic — zero discretion allowed. Do NOT add "professio
 4. **Standard 4 (ΔT Test)**: `ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty`
    - `project_vehicles = units × vpu × mobilization_rate(hazard_zone)`
    - `egress_penalty = 0` for stories < 4; `min(stories × 1.5, 12)` for ≥ 4 stories
-   - Flagged when `ΔT > max_marginal_minutes(hazard_zone)`
+   - Flagged when `ΔT > threshold(hazard_zone)` where `threshold = safe_egress_window × max_project_share`
    - **No baseline precondition** — routes already at LOS F are tested equally
 5. **Standard 5**: SB 79 transit proximity flag — **informational only**, never raises tier
 

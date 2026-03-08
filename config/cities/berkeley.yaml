@@ -26,6 +26,15 @@ overrides: {}
 #   unit_threshold: 10   # lower than default (15) when city network is more constrained
 #   vehicles_per_unit: 2.3  # if city-specific ACS differs from 2.5 default
 
+# Safe egress window overrides (uncomment to override global defaults in parameters.yaml)
+# Use only if city has commissioned fire behavior study with specific timelines
+# or faces conditions materially different from the NIST Camp Fire baseline.
+# safe_egress_window:
+#   vhfhsz: 30        # Example: canyon terrain with Santa Ana wind exposure
+#   high_fhsz: 60     # Example: denser urban fuels with faster spread
+#   moderate_fhsz: 90
+#   non_fhsz: 120
+
 # ============================================================
 # Employment and Student Demand Parameters
 # Source: KLD Engineering AB 747 Study (Berkeley, March 2024)

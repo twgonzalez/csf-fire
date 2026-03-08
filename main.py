@@ -420,7 +420,7 @@ def _print_determination(project, audit: dict):
                 step_parts.append(f"Paths: {s3.get('serving_paths_count', 0)}")
             if s5:
                 step_parts.append(
-                    f"ΔT max {s5.get('max_delta_t_minutes', 0):.1f}/{s5.get('max_marginal_minutes', 10)} min"
+                    f"ΔT max {s5.get('max_delta_t_minutes', 0):.1f}/{s5.get('threshold_minutes', 6.0):.2f} min"
                 )
             fz = s1.get("fire_zone_severity_modifier", {})
             if fz:

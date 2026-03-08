@@ -339,6 +339,14 @@ def generate_audit_trail(
         # Step 5: ΔT
         s5 = steps.get("step5_delta_t", {})
         if s5:
+            safe_win  = s5.get("safe_egress_window_minutes", "")
+            share_pct = s5.get("max_project_share", 0.05)
+            threshold = s5.get("threshold_minutes", "")
+            threshold_str = (
+                f"{threshold:.2f} min "
+                f"({safe_win} min window × {share_pct * 100:.0f}%, NIST TN 2135)"
+                if safe_win else f"{threshold} min"
+            )
             lines += [
                 "",
                 "  STEP 5 — ΔT TEST (Standard 4)",
@@ -349,7 +357,9 @@ def generate_audit_trail(
                 f"  Project Vehicles: {s5.get('project_vehicles', 0):.1f} vph",
                 f"  Egress Penalty: {s5.get('egress_minutes', 0):.1f} min "
                 f"(NFPA 101/IBC; applies to buildings >= 4 stories)",
-                f"  ΔT Threshold: {s5.get('max_marginal_minutes', 10)} min",
+                f"  Safe Egress Window: {safe_win} min ({s5.get('hazard_zone', 'non_fhsz')}, NIST TN 2135)",
+                f"  Max Project Share:  {share_pct * 100:.0f}%",
+                f"  ΔT Threshold:       {threshold_str}",
                 f"  Paths Evaluated: {s5.get('paths_evaluated', 0)}",
                 f"  Max ΔT: {s5.get('max_delta_t_minutes', 0):.2f} min",
                 f"  Triggered: {'YES — DISCRETIONARY' if s5.get('triggered') else 'NO'}",
@@ -366,6 +376,13 @@ def generate_audit_trail(
                     " *** ΔT EXCEEDS THRESHOLD — DISCRETIONARY ***"
                     if r.get("flagged") else " [within threshold]"
                 )
+                r_safe_win = r.get("safe_egress_window_minutes", "")
+                r_share    = r.get("max_project_share", 0.05)
+                r_thresh   = r.get("threshold_minutes", "")
+                r_thresh_str = (
+                    f"{r_thresh:.2f} min ({r_safe_win} min × {r_share * 100:.0f}%)"
+                    if r_safe_win else f"{r_thresh} min"
+                )
                 lines.append(
                     f"    Bottleneck: {bn_name}{flag}"
                 )
@@ -380,7 +397,7 @@ def generate_audit_trail(
                     f"{r.get('bottleneck_effective_capacity_vph', 0):.0f} vph) x 60 "
                     f"+ {r.get('egress_minutes', 0):.1f} min egress "
                     f"= {r.get('delta_t_minutes', 0):.2f} min  "
-                    f"(threshold: {r.get('threshold_minutes', 10)} min)"
+                    f"(threshold: {r_thresh_str})"
                 )
 
         lines += [
@@ -420,6 +437,17 @@ def generate_audit_trail(
         ),
     }.get(det, det)
 
+    # Extract threshold derivation from wildland scenario step5 for PARAMETERS APPLIED
+    _wl_s5 = (
+        audit.get("scenarios", {})
+             .get("wildland_ab747", {})
+             .get("steps", {})
+             .get("step5_delta_t", {})
+    )
+    _safe_win  = _wl_s5.get("safe_egress_window_minutes", "")
+    _share_pct = _wl_s5.get("max_project_share", 0.05)
+    _threshold = _wl_s5.get("threshold_minutes", "")
+
     lines += [
         "",
         "=" * 70,
@@ -437,6 +465,10 @@ def generate_audit_trail(
         f"  Vehicles per Unit:  2.5 (U.S. Census ACS B25044)",
         f"  Egress Penalty:     {getattr(project, 'egress_minutes', 0.0):.1f} min "
         f"(NFPA 101/IBC — {getattr(project, 'stories', 0)} stories)",
+        f"  Safe Egress Window: {_safe_win} min ({hz}, per NIST TN 2135)",
+        f"  Max Project Share:  {_share_pct * 100:.0f}%",
+        f"  ΔT Threshold:       {_threshold:.2f} min ({_safe_win} × {_share_pct * 100:.0f}%)"
+        if _safe_win and _threshold else f"  ΔT Threshold:       {_threshold} min",
         f"  Max ΔT (project):   {max_dt:.2f} min",
         "",
         "  Determination Tier:",
