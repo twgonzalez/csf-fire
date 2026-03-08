@@ -246,7 +246,7 @@ class WildlandScenario(EvacuationScenario):
             "vehicles_per_unit":          vpu,
             "peak_hour_mobilization":     mob,
             "mobilization_source_type":   mob_source_type,
-            "formula":                    f"{project.dwelling_units} units × {vpu} veh/unit × {mob} mob factor",
+            "formula":                    f"{project.dwelling_units} units × {vpu} veh/unit × {mob:.0%} departure rate",
             "project_vehicles_peak_hour": round(project_vph, 1),
             "source_vehicles_per_unit":   "U.S. Census ACS",
             "source_mobilization":        mob_citation,
