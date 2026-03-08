@@ -484,7 +484,6 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
     l5_tier  = local5.get("tier", "NOT_APPLICABLE")
     l5_applicable = l5_tier != "NOT_APPLICABLE"
 
-    vc_threshold = config.get("vc_threshold", 0.95)
     unit_threshold = config.get("unit_threshold", 15)
 
     rows = []
@@ -497,13 +496,13 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
     s1_chip_cls = "chip-scope" if s1_result else "chip-na"
     s1_detail = f"""<div class="detail-block">
       {du} dwelling units proposed &nbsp;&ge;&nbsp; {unit_threshold} unit threshold
-      (basis: ITE de minimis — {unit_threshold} units &times; 2.5 vpu &times; 57% peak-hour departure =
-      {round(unit_threshold * 2.5 * 0.57, 1)} peak-hour trips, exceeding the ITE Trip Generation
-      Handbook de minimis of 10–15 trips; statutory anchor: SB 330, Gov. Code §65905.5)
+      (ITE de minimis basis: {unit_threshold} units &times; 2.5 vpu &times; 0.57 ITE peak-hour factor =
+      {round(unit_threshold * 2.5 * 0.57, 1)} peak-hour trips — exceeds ITE Trip Generation
+      Handbook de minimis of 10–15 trips; statutory anchor: SB 330, Gov. Code §65905.5.
+      Note: evacuation mobilization rates differ by hazard zone — see Standard 3.)
     </div>""" if s1_result else f"""<div class="detail-block">
       {du} dwelling units proposed &nbsp;&lt;&nbsp; {unit_threshold} unit threshold —
-      project is below the ITE de minimis for measurable evacuation impact
-      ({unit_threshold} &times; 2.5 &times; 57% = {round(unit_threshold * 2.5 * 0.57, 1)} vph).
+      project is below the ITE de minimis for measurable evacuation impact.
       Standards 2–5 are not evaluated.
     </div>"""
 
@@ -524,23 +523,34 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
 
     route_rows_html = ""
     if s3_routes:
-        route_rows_html = "<br><table class='route-table'><thead><tr>" \
-            "<th>Route Name</th><th>Type</th><th>Capacity (vph)</th>" \
-            "<th>Baseline v/c</th><th>LOS</th></tr></thead><tbody>"
+        route_rows_html = (
+            "<br><div style='font-size:10px;color:#6c757d;margin-bottom:3px'>"
+            "Eff. capacity = HCM raw capacity &times; hazard degradation factor. "
+            "v/c shown for reference only — not used in v3.0 determination.</div>"
+            "<table class='route-table'><thead><tr>"
+            "<th>Route Name</th><th>FHSZ Zone</th>"
+            "<th>Eff. Cap (vph)</th><th>Baseline v/c</th><th>LOS</th></tr></thead><tbody>"
+        )
         for r in s3_routes[:10]:
-            nm  = r.get("name") or r.get("osmid", "—")
-            los = r.get("los", "—")
-            cap = r.get("capacity_vph", 0)
-            vc  = r.get("vc_ratio", 0)
-            rt  = r.get("road_type", "—")
+            nm   = r.get("name") or r.get("osmid", "—")
+            los  = r.get("los", "—")
+            eff  = r.get("effective_capacity_vph", r.get("capacity_vph", 0))
+            vc   = r.get("vc_ratio", 0)
+            zone = r.get("fhsz_zone", "non_fhsz")
+            deg  = r.get("hazard_degradation", 1.0)
+            deg_note = f" ({deg:.2f}×)" if deg < 1.0 else ""
             route_rows_html += (
-                f"<tr><td>{nm}</td><td>{rt}</td>"
-                f"<td>{cap:,.0f}</td>"
-                f"<td style='font-weight:600'>{vc:.3f}</td>"
+                f"<tr><td>{nm}</td>"
+                f"<td style='font-size:10px'>{zone}{deg_note}</td>"
+                f"<td style='font-weight:600'>{eff:,.0f}</td>"
+                f"<td style='color:#868e96'>{vc:.3f}</td>"
                 f"<td>{los}</td></tr>"
             )
         if len(s3_routes) > 10:
-            route_rows_html += f"<tr><td colspan='5' style='color:#868e96'>… and {len(s3_routes)-10} more</td></tr>"
+            route_rows_html += (
+                f"<tr><td colspan='5' style='color:#868e96'>"
+                f"… and {len(s3_routes)-10} more</td></tr>"
+            )
         route_rows_html += "</tbody></table>"
 
     s2_detail = f"""<div class="detail-block">
@@ -554,13 +564,13 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         f"Network buffer {radius} mi — GIS intersection with identified evacuation routes",
         s2_chip, s2_chip_cls, s2_detail))
 
-    # --- Standard 3: FHSZ Modifier ---
+    # --- Standard 3: FHSZ Hazard Zone (v3.0) ---
     s1_applicability = w_steps.get("step1_applicability", {})
-    fz_mod    = s1_applicability.get("fire_zone_severity_modifier", {})
-    fz_result = s1_applicability.get("std3_fhsz_modifier", fz_mod.get("result", False))
-    fz_desc   = s1_applicability.get("std3_zone_level", fz_mod.get("zone_description", "Not in FHSZ"))
-    fz_level  = fz_mod.get("zone_level", 0)
-    mob_factor_val = s1_applicability.get("std3_mob_factor_active", 0.57)
+    fz_result   = s1_applicability.get("std3_fhsz_flagged", False)
+    fz_desc     = s1_applicability.get("std3_zone_desc", "Not in FHSZ")
+    fz_level    = s1_applicability.get("std3_zone_level", 0)
+    hazard_zone = s1_applicability.get("std3_hazard_zone", "non_fhsz")
+    mob_rate    = s1_applicability.get("std3_mobilization_rate", 0.25)
 
     if not s1_result:
         s3_chip = "NOT EVALUATED"
@@ -573,24 +583,27 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         s3_badge_color = "#c0392b"
         s3_detail = f"""<div class="detail-block" style="border-left-color:#c0392b;">
           <strong>Project site:</strong> {fz_desc} (source: CAL FIRE OSFM)<br>
-          <strong>Fire hazard zone:</strong> Project is within a mapped fire hazard severity zone.
-          The analysis assumes all residents depart simultaneously — wildfire conditions require
-          immediate, coordinated evacuation and may restrict egress to a single direction.
-          Existing road demand is modeled at normal staggered departure rates.
+          <strong>Hazard zone:</strong> <code>{hazard_zone}</code> &nbsp;&middot;&nbsp;
+          <strong>Mobilization rate:</strong> {mob_rate:.2f}
+          (Zhao et al. 2022 GPS-empirical, 44M records, Kincade Fire)<br>
+          Road capacity is additionally degraded by zone-specific factors
+          (vhfhsz=0.35, high_fhsz=0.50, moderate_fhsz=0.75) applied upstream by Agent 2
+          (HCM Exhibit 10-15/10-17 composite + NIST Camp Fire validation).
         </div>"""
     else:
         s3_chip = "NOT IN FHSZ"
         s3_chip_cls = "chip-na"
         s3_badge_color = "#6c757d"
         s3_detail = f"""<div class="detail-block">
-          Project site is not within a designated fire hazard severity zone — residents are
-          assumed to depart at staggered times consistent with normal peak-hour traffic (57%
-          of households in any given hour).
+          Project site is not within a designated fire hazard severity zone —
+          <strong>hazard_zone:</strong> <code>non_fhsz</code> &nbsp;&middot;&nbsp;
+          <strong>mobilization rate:</strong> {mob_rate:.2f}
+          (shadow evacuation baseline, Zhao et al. 2022). No road capacity degradation applied.
         </div>"""
 
     rows.append(_std_row("3", s3_badge_color,
-        "FHSZ Modifier",
-        "GIS point-in-polygon — when flagged, project vehicles are modeled at simultaneous departure",
+        "FHSZ Hazard Zone",
+        "GIS point-in-polygon — sets hazard_zone controlling mobilization rate and ΔT threshold",
         s3_chip, s3_chip_cls, s3_detail))
 
     # --- Standard 4: ΔT capacity test (v3.0) ---
@@ -679,88 +692,37 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
         f"Does this project add >{max_threshold} min of marginal clearance time on any serving path?",
         s4_chip, s4_chip_cls, s4_detail))
 
-    # --- Standard 5: Local density ---
-    l5_triggered = local5.get("triggered", False)
-    l5_s3 = l5_steps.get("step3_routes", {})
-    l5_s5 = l5_steps.get("step5_ratio_test", {})
-    l5_n_routes  = l5_s3.get("serving_route_count", 0)
-    l5_radius    = l5_s3.get("radius_miles", 0.25)
-    l5_flagged   = l5_s5.get("project_caused_exceedance", [])
-    l5_details   = l5_s5.get("route_details", [])
-    l5_proj_vph  = l5_s5.get("vehicles_per_route", 0)
+    # --- Standard 5: SB 79 Transit Proximity (v3.0 — informational only) ---
+    # Sb79TransitScenario always returns NOT_APPLICABLE — never raises tier.
+    # GTFS integration pending Phase 3; flag currently always False.
+    l5_near_transit = local5.get("steps", {}).get("near_transit", False)
+    l5_radius_sb79  = local5.get("steps", {}).get("radius_miles", 0.5)
 
     if not s1_result:
-        # Below scale threshold — Standard 5 not evaluated
         s5_chip = "NOT EVALUATED"
         s5_chip_cls = "chip-na"
         s5_badge_color = "#adb5bd"
         s5_detail = ""
     elif not l5_applicable:
+        # sb79_transit always returns NOT_APPLICABLE — this is always the branch taken
+        s5_chip = "INFORMATIONAL"
+        s5_chip_cls = "chip-na"
+        s5_badge_color = "#adb5bd"
+        gtfs_note = (
+            "GTFS data not yet integrated (Phase 3) — transit proximity flag pending."
+        )
+        s5_detail = f"""<div class="detail-block">
+          <strong>SB 79 transit proximity ({l5_radius_sb79} mi radius):</strong>
+          {"Near transit — flag set (informational)" if l5_near_transit else "No Tier 1/2 transit within radius."}<br>
+          <em style="font-size:11px; color:#868e96;">{gtfs_note if not l5_near_transit else ""}
+          This flag is informational only — it does not affect the determination tier.</em>
+        </div>"""
+    else:
+        # Future: if a non-NOT_APPLICABLE scenario replaces sb79_transit
         s5_chip = "N/A"
         s5_chip_cls = "chip-na"
         s5_badge_color = "#adb5bd"
         s5_detail = ""
-    else:
-        s5_chip = "TRIGGERED" if l5_triggered else "WITHIN CAPACITY"
-        s5_chip_cls = "chip-triggered" if l5_triggered else "chip-pass"
-        s5_badge_color = "#c0392b" if l5_triggered else "#27ae60"
-
-        l5_table = ""
-        if l5_details:
-            seen_l5: set = set()
-            l5_deduped = []
-            for r in l5_details:
-                oid = r.get("osmid", "")
-                if oid not in seen_l5:
-                    seen_l5.add(oid)
-                    l5_deduped.append(r)
-            l5_caused = [r for r in l5_deduped if r.get("project_causes_exceedance")]
-            l5_near   = [r for r in l5_deduped
-                         if not r.get("project_causes_exceedance")
-                         and not r.get("baseline_exceeds")
-                         and r.get("proposed_vc", 0) > 0.80][:3]
-            l5_display = l5_caused + l5_near
-            l5_omitted = len(l5_deduped) - len(l5_display)
-            l5_table = "<br><table class='route-table'><thead><tr>" \
-                "<th>Local Route</th><th>Road Type</th>" \
-                "<th>Normal v/c (×0.10)</th>" \
-                "<th>Project adds</th><th>Proposed v/c</th><th>Status</th></tr></thead><tbody>"
-            for r in l5_display:
-                nm   = r.get("name") or r.get("osmid", "—")
-                rt   = r.get("road_type", "—")
-                # Standard 5 uses normal_demand_vph; effective_baseline_vc reflects that
-                bvc  = r.get("effective_baseline_vc", 0)
-                pvc  = r.get("proposed_vc", 0)
-                adds = r.get("vehicles_added", 0)
-                causes = r.get("project_causes_exceedance", False)
-                bfail  = r.get("baseline_exceeds", False)
-                if causes:
-                    status = "<span style='color:#c0392b;font-weight:700'>⚠ TRIGGERED</span>"
-                elif bfail:
-                    status = "<span style='color:#868e96'>pre-existing</span>"
-                else:
-                    status = "<span style='color:#27ae60'>OK</span>"
-                l5_table += (
-                    f"<tr><td>{nm}</td><td>{rt}</td>"
-                    f"<td style='font-weight:600'>{bvc:.3f}</td>"
-                    f"<td style='color:#6f42c1'>+{adds:.0f} vph</td>"
-                    f"<td style='font-weight:600'>{pvc:.3f}</td>"
-                    f"<td>{status}</td></tr>"
-                )
-            if l5_omitted > 0:
-                l5_table += (
-                    f"<tr><td colspan='6' style='color:#868e96;font-style:italic'>"
-                    f"{l5_omitted} additional segments omitted. See full audit trail.</td></tr>"
-                )
-            l5_table += "</tbody></table>"
-
-        s5_detail = f"""<div class="detail-block" style="border-left-color:{'#c0392b' if l5_triggered else '#dee2e6'};">
-          <strong>Local collector/arterial proximity:</strong>
-          {l5_n_routes} route{"s" if l5_n_routes != 1 else ""} within {l5_radius} mi
-          &nbsp;&middot;&nbsp; {len(l5_flagged)} triggered<br>
-          Project adds {l5_proj_vph:.0f} vph per route (worst-case)
-          {l5_table}
-        </div>"""
 
     rows.append(_std_row("5", s5_badge_color,
         "SB 79 Transit Proximity (Informational)",
@@ -793,9 +755,7 @@ def _std_row(num: str, badge_color: str, title: str, subtitle: str,
 def _build_determination_box(tier: str, determination: dict,
                               wildland: dict, local5: dict) -> str:
     tc = _TIER_CSS_COLOR.get(tier, "#555")
-    reason = (determination.get("reason", "")
-              .replace("100% mobilization", "100% simultaneous departure")
-              .replace("mobilization", "departure rate"))
+    reason = determination.get("reason", "")
 
     # Collect legal basis from all triggered scenarios
     bases = []
@@ -896,47 +856,61 @@ def _conditions_conditional(fz_level: int) -> str:
 
 
 def _conditions_discretionary(wildland: dict, local5: dict) -> str:
-    # Collect flagged route names from both scenarios
-    all_flagged_routes = []
-    for sc in [wildland, local5]:
-        rd = sc.get("steps", {}).get("step5_ratio_test", {}).get("route_details", [])
-        for r in rd:
-            if r.get("project_causes_exceedance"):
-                nm = r.get("name") or r.get("osmid", "route")
-                bvc = r.get("baseline_vc", 0)
-                pvc = r.get("proposed_vc", 0)
-                all_flagged_routes.append(f"{nm} (v/c {bvc:.3f} → {pvc:.3f})")
+    # Collect flagged path summaries from v3.0 ΔT step
+    s5          = wildland.get("steps", {}).get("step5_delta_t", {})
+    path_results = s5.get("path_results", [])
+    max_dt      = s5.get("max_delta_t_minutes", 0.0)
+    threshold   = s5.get("max_marginal_minutes", 10)
+    hazard_zone = s5.get("hazard_zone", "non_fhsz")
+    flagged_paths = [r for r in path_results if r.get("flagged")]
 
-    route_note = ""
-    if all_flagged_routes:
-        route_list = "; ".join(all_flagged_routes[:3])
-        route_note = f"<p style='margin:10px 0 0; font-size:12px; color:#495057;'>" \
-            f"<strong>Capacity impact identified on:</strong> {route_list}</p>"
+    path_note = ""
+    if flagged_paths:
+        parts = []
+        for r in flagged_paths[:3]:
+            pid   = r.get("path_id", "—")
+            bname = r.get("bottleneck_name") or r.get("bottleneck_osmid", "—")
+            dt    = r.get("delta_t_minutes", 0)
+            thr   = r.get("threshold_minutes", threshold)
+            parts.append(f"Path {pid} — bottleneck: {bname} (ΔT {dt:.1f} min vs {thr:.0f}-min threshold)")
+        route_list = "; ".join(parts)
+        n_more = len(flagged_paths) - len(parts)
+        if n_more > 0:
+            route_list += f"; and {n_more} more paths"
+        path_note = (
+            f"<p style='margin:10px 0 0; font-size:12px; color:#495057;'>"
+            f"<strong>ΔT exceedance identified on {len(flagged_paths)} path(s):</strong> "
+            f"{route_list}</p>"
+        )
 
     return f"""<p style="margin:0 0 10px;">
       This project <strong>requires discretionary review</strong> under AB 747
       (Gov. Code §65302.15). The objective standards analysis has determined that this project
-      would cause one or more serving evacuation routes to exceed the HCM 2022 LOS E/F capacity
-      boundary (v/c 0.95).
+      would add more than {threshold} minutes of marginal evacuation clearance time (ΔT)
+      on one or more serving evacuation paths in hazard zone <code>{hazard_zone}</code>
+      (maximum ΔT: {max_dt:.1f} min).
     </p>
-    {route_note}
+    {path_note}
     <ol>
       <li><strong>Environmental Impact Report (EIR)</strong> required under CEQA
-      (Pub. Resources Code §21100) — evacuation capacity must be analyzed as a
-      significant transportation impact.</li>
-      <li><strong>Traffic Impact Analysis (Evacuation Focus):</strong> Applicant shall commission
-      a study conforming to the KLD Engineering AB 747 methodology, analyzing peak-hour evacuation
-      demand on all serving routes within 0.5 miles, under baseline and proposed conditions.</li>
+      (Pub. Resources Code §21100) — evacuation clearance time impact must be analyzed
+      as a significant transportation impact.</li>
+      <li><strong>Evacuation Clearance Time Analysis:</strong> Applicant shall commission
+      a study conforming to the JOSH v3.0 ΔT methodology (AB 747 / Gov. Code §65302.15),
+      analyzing marginal evacuation clearance time on all serving paths within 0.5 miles,
+      using Zhao et al. (2022) GPS-empirical mobilization rates and HCM 2022
+      hazard-degraded capacity factors.</li>
       <li><strong>Public Hearing</strong> before the Planning Commission is required prior to any
       project approval (Gov. Code §65905).</li>
       <li><strong>Fire Department Review:</strong> Submit project plans to the Fire Marshal for
       review of evacuation access, egress widths, and compliance with Fire Code §503.</li>
       <li><strong>Mitigation Measures or Project Redesign:</strong> Applicant must demonstrate
-      — through the TIA — either (a) that mitigation measures reduce proposed v/c below 0.95
-      on all serving routes, or (b) that the project scope is reduced to below the capacity
-      threshold, to qualify for ministerial review.</li>
-      <li>Approval is not ministerial until Standard 4 capacity impact is mitigated or the project
-      is redesigned to fall below the v/c threshold on all serving evacuation routes.</li>
+      — through the clearance time analysis — either (a) that mitigation measures reduce ΔT
+      below {threshold} minutes on all serving paths, or (b) that the project scope
+      (units, stories, or both) is reduced to fall within the ΔT threshold, to qualify for
+      ministerial review.</li>
+      <li>Approval is not ministerial until Standard 4 ΔT impact is mitigated or the project
+      is redesigned to fall within the ΔT threshold on all serving evacuation paths.</li>
     </ol>"""
 
 
@@ -946,89 +920,125 @@ def _conditions_discretionary(wildland: dict, local5: dict) -> str:
 
 def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
     algo    = audit.get("algorithm", {})
-    version = algo.get("version", "2.0")
+    version = algo.get("version", "3.0 (ΔT Standard)")
     name    = algo.get("name", "Universal 5-Step Evacuation Capacity Algorithm")
     ev_date = audit.get("evaluation_date", "")
     if "T" in ev_date:
         ev_date = ev_date.split("T")[0]
 
-    vc_t  = config.get("vc_threshold", 0.95)
-    ut    = config.get("unit_threshold", 15)
-    vpu   = config.get("vehicles_per_unit", 2.5)
+    ut  = config.get("unit_threshold", 15)
+    vpu = config.get("vehicles_per_unit", 2.5)
 
-    # Mobilization factor — read from city_config (city-specific) or fall back to parameters.yaml
-    mob             = city_config.get("peak_hour_mobilization", config.get("peak_hour_mobilization", 0.57))
-    mob_source_type = city_config.get("mobilization_source", "conservative_default")
-    mob_citation    = city_config.get("mobilization_citation", "")
-    mob_note        = city_config.get("mobilization_note", "")
+    # v3.0 parameters
+    mob_rates   = config.get("mobilization_rates", {})
+    haz_deg     = config.get("hazard_degradation", {})
+    max_min     = config.get("max_marginal_minutes", {})
+    egress_cfg  = config.get("egress_penalty", {})
+    vc_t        = config.get("vc_threshold", 0.95)
 
-    # Source type label and warning HTML
-    _SOURCE_LABELS = {
-        "local_study":          "Local empirical study",
-        "comparable_city":      "Comparable city transfer",
-        "state_guidance":       "OPR / CAL OES state guidance",
-        "conservative_default": "Conservative default — no local study",
-    }
-    mob_label = _SOURCE_LABELS.get(mob_source_type, mob_source_type)
+    mob_vhf  = mob_rates.get("vhfhsz", 0.75)
+    mob_hi   = mob_rates.get("high_fhsz", 0.57)
+    mob_mod  = mob_rates.get("moderate_fhsz", 0.40)
+    mob_non  = mob_rates.get("non_fhsz", 0.25)
 
-    if mob_source_type == "local_study":
-        mob_warning = ""
-        mob_source_td = f"{mob_label} — {mob_citation}" if mob_citation else mob_label
-    else:
-        _warning_text = {
-            "comparable_city":
-                "Peak-hour departure rate transferred from a comparable city. "
-                "A local empirical study is recommended before impact fee adoption.",
-            "state_guidance":
-                "Peak-hour departure rate derived from OPR/CAL OES state guidance range. "
-                "A local empirical study is recommended before impact fee adoption.",
-            "conservative_default":
-                "No city-specific departure rate study is on file. "
-                "A conservative default has been applied intentionally. "
-                "Commission a local AB 747 PeMS study before adopting impact fees. "
-                "See docs/city_onboarding.md for options.",
-        }.get(mob_source_type, "Peak-hour departure rate source requires documentation.")
-        mob_warning = f"""<div style="margin-top:12px; padding:10px 14px;
-            background:#fff8e1; border-left:4px solid #f59e0b; border-radius:0 6px 6px 0;
-            font-size:11px; color:#78350f;">
-          <strong>⚠ Departure Rate Assumption:</strong> {_warning_text}
-        </div>"""
-        mob_source_td = mob_label + (f" — {mob_citation}" if mob_citation else "")
+    deg_vhf  = haz_deg.get("vhfhsz", 0.35)
+    deg_hi   = haz_deg.get("high_fhsz", 0.50)
+    deg_mod  = haz_deg.get("moderate_fhsz", 0.75)
+
+    thr_vhf  = max_min.get("vhfhsz", 3)
+    thr_hi   = max_min.get("high_fhsz", 5)
+    thr_mod  = max_min.get("moderate_fhsz", 8)
+    thr_non  = max_min.get("non_fhsz", 10)
+
+    egr_thr  = egress_cfg.get("threshold_stories", 4)
+    egr_mps  = egress_cfg.get("minutes_per_story", 1.5)
+    egr_max  = egress_cfg.get("max_minutes", 12)
 
     lat_str = f"{audit.get('project', {}).get('location_lat', ''):.4f}".replace(".", "_").replace("-", "n")
     lon_str = f"{audit.get('project', {}).get('location_lon', ''):.4f}".replace(".", "_").replace("-", "n")
     audit_file = f"determination_{lat_str}_{lon_str}.txt"
-
-    mob_note_html = (
-        f'<tr><td colspan="3" style="font-style:italic; color:#868e96; font-size:10px;">'
-        f'{mob_note}</td></tr>'
-    ) if mob_note else ""
 
     return f"""<h2 class="section-label">Methodology &amp; Parameters</h2>
 <div class="methodology-box">
   <div style="margin-bottom:8px;">
     <strong>{name}</strong> &nbsp;(v{version}) &nbsp;&middot;&nbsp; Evaluated: {ev_date}
   </div>
+
+  <div style="font-size:11px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase;
+              color:#495057; margin:12px 0 6px;">Core Formula</div>
+  <div style="font-family:monospace; font-size:12px; background:#f1f3f5; padding:8px 12px;
+              border-radius:4px; color:#212529; margin-bottom:12px;">
+    ΔT = (project_vehicles / bottleneck_effective_capacity_vph) &times; 60 + egress_penalty<br>
+    project_vehicles = units &times; {vpu} vpu &times; mobilization_rate(hazard_zone)<br>
+    egress_penalty = min(stories &times; {egr_mps}, {egr_max}) min &nbsp;[if stories &ge; {egr_thr}; else 0]<br>
+    Flagged when ΔT &gt; max_marginal_minutes(hazard_zone)
+  </div>
+
   <table>
     <thead><tr><th>Parameter</th><th>Value</th><th>Source</th></tr></thead>
     <tbody>
-      <tr><td>V/C threshold (LOS E/F boundary)</td><td><strong>{vc_t:.2f}</strong></td>
-          <td>HCM 2022 — exact LOS E/F boundary</td></tr>
-      <tr><td>Unit threshold (project scale gate)</td><td><strong>{ut}</strong></td>
-          <td>ITE de minimis ({ut} &times; 2.5 &times; 57% = {round(ut * 2.5 * 0.57, 1)} vph);
-              SB 330, Gov. Code §65905.5</td></tr>
+      <tr><td>Unit threshold (Standard 1 scale gate)</td><td><strong>{ut}</strong></td>
+          <td>ITE de minimis; SB 330, Gov. Code §65905.5</td></tr>
       <tr><td>Vehicles per dwelling unit</td><td><strong>{vpu}</strong></td>
-          <td>U.S. Census ACS</td></tr>
-      <tr><td>Peak-hour departure rate</td><td><strong>{mob:.0%}</strong></td>
-          <td>{mob_source_td}</td></tr>
-      {mob_note_html}
-      <tr><td>Evacuation route radius</td><td><strong>0.5 mi</strong></td>
-          <td>Standard 2 — network buffer methodology</td></tr>
-      <tr><td>Impact method</td><td><strong>Worst-case per route</strong></td>
-          <td>Full project_vph tested against each route independently</td></tr>
+          <td>U.S. Census ACS B25044</td></tr>
+      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
+              font-size:11px; letter-spacing:0.5px;">
+          Mobilization Rates by Hazard Zone (Zhao et al. 2022, 44M GPS records, Kincade Fire)
+      </td></tr>
+      <tr><td>&nbsp;&nbsp;Very High FHSZ (vhfhsz)</td>
+          <td><strong>{mob_vhf:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
+      <tr><td>&nbsp;&nbsp;High FHSZ (high_fhsz)</td>
+          <td><strong>{mob_hi:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
+      <tr><td>&nbsp;&nbsp;Moderate FHSZ (moderate_fhsz)</td>
+          <td><strong>{mob_mod:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
+      <tr><td>&nbsp;&nbsp;Non-FHSZ (non_fhsz)</td>
+          <td><strong>{mob_non:.2f}</strong></td><td>Zhao et al. 2022 (shadow evacuation)</td></tr>
+      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
+              font-size:11px; letter-spacing:0.5px;">
+          Hazard Capacity Degradation Factors (HCM Exhibit 10-15/10-17 + NIST Camp Fire)
+      </td></tr>
+      <tr><td>&nbsp;&nbsp;Very High FHSZ</td>
+          <td><strong>{deg_vhf:.2f}&times;</strong></td><td>HCM composite + NIST validation</td></tr>
+      <tr><td>&nbsp;&nbsp;High FHSZ</td>
+          <td><strong>{deg_hi:.2f}&times;</strong></td><td>HCM composite</td></tr>
+      <tr><td>&nbsp;&nbsp;Moderate FHSZ</td>
+          <td><strong>{deg_mod:.2f}&times;</strong></td><td>HCM composite</td></tr>
+      <tr><td>&nbsp;&nbsp;Non-FHSZ</td>
+          <td><strong>1.00&times;</strong></td><td>No degradation</td></tr>
+      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
+              font-size:11px; letter-spacing:0.5px;">
+          ΔT Thresholds (max_marginal_minutes by hazard zone)
+      </td></tr>
+      <tr><td>&nbsp;&nbsp;Very High FHSZ</td>
+          <td><strong>{thr_vhf} min</strong></td><td>Protective for high-risk zones</td></tr>
+      <tr><td>&nbsp;&nbsp;High FHSZ</td>
+          <td><strong>{thr_hi} min</strong></td><td></td></tr>
+      <tr><td>&nbsp;&nbsp;Moderate FHSZ</td>
+          <td><strong>{thr_mod} min</strong></td><td></td></tr>
+      <tr><td>&nbsp;&nbsp;Non-FHSZ</td>
+          <td><strong>{thr_non} min</strong></td><td></td></tr>
+      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
+              font-size:11px; letter-spacing:0.5px;">
+          Building Egress Penalty (NFPA 101 / IBC)
+      </td></tr>
+      <tr><td>&nbsp;&nbsp;Threshold</td>
+          <td><strong>&ge; {egr_thr} stories</strong></td><td>NFPA 101</td></tr>
+      <tr><td>&nbsp;&nbsp;Rate</td>
+          <td><strong>{egr_mps} min/story</strong></td><td>NFPA 101</td></tr>
+      <tr><td>&nbsp;&nbsp;Maximum</td>
+          <td><strong>{egr_max} min</strong></td><td>NFPA 101 cap</td></tr>
+      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
+              font-size:11px; letter-spacing:0.5px;">
+          Other
+      </td></tr>
+      <tr><td>Evacuation route radius (Standard 2)</td>
+          <td><strong>0.5 mi</strong></td><td>Network buffer methodology</td></tr>
+      <tr><td>v/c threshold (LOS E/F boundary)</td>
+          <td><strong>{vc_t:.2f}</strong></td>
+          <td>HCM 2022 — <em>informational only</em>; not used for v3.0 determination</td></tr>
     </tbody>
   </table>
-  {mob_warning}
+
   <div style="margin-top:12px; font-size:11px;">
     Full reproducible audit trail (all inputs, intermediates, and outputs):
     <a href="{audit_file}" style="font-family:monospace; font-size:10px; background:#f1f3f5;
