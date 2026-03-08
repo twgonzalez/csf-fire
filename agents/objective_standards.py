@@ -258,13 +258,12 @@ def generate_audit_trail(
         if "note" in s1:
             lines.append(f"  Note: {s1['note']}")
 
-        # Standard 3: FHSZ modifier (surge multiplier applied in Std 4 when flagged)
+        # Standard 3: FHSZ modifier (elevates project departure rate in Std 4 when flagged)
         if "fire_zone_severity_modifier" in s1:
             fz = s1["fire_zone_severity_modifier"]
-            surge = s1.get("std3_surge_multiplier_active", 1.0)
             lines.append(
                 f"  Standard 3 (FHSZ Modifier): {fz.get('zone_description', 'Not in FHSZ')} "
-                f"({'IN FIRE ZONE — surge multiplier ' + str(surge) + '× applied in Std 4' if fz.get('result') else 'not in FHSZ — surge multiplier not applied'})"
+                f"({'IN FIRE ZONE — 100% simultaneous departure rate applied to project vehicles' if fz.get('result') else 'not in FHSZ — standard 57% departure rate applies'})"
             )
 
         # Step 2: Scale Gate
@@ -294,9 +293,21 @@ def generate_audit_trail(
                 f"  Radius: {s3.get('radius_miles')} miles ({s3.get('radius_meters')} m)",
                 f"  Routes found: {s3.get('serving_route_count', 0)}",
             ]
+            # Deduplicate OSM segments by road name — one named road = many OSM rows
+            _name_seg_count: dict[str, int] = {}
             for r in s3.get("serving_routes", []):
+                rname = r.get("name") or str(r["osmid"])
+                _name_seg_count[rname] = _name_seg_count.get(rname, 0) + 1
+            _seen_s3: set[str] = set()
+            for r in s3.get("serving_routes", []):
+                rname = r.get("name") or str(r["osmid"])
+                if rname in _seen_s3:
+                    continue
+                _seen_s3.add(rname)
+                seg_count = _name_seg_count[rname]
+                seg_note = f" ({seg_count} OSM segments)" if seg_count > 1 else ""
                 lines.append(
-                    f"    - {r.get('name') or r['osmid']}: "
+                    f"    - {rname}{seg_note}: "
                     f"v/c={r.get('vc_ratio', 0):.4f}, LOS={r.get('los', '')}, "
                     f"cap={r.get('capacity_vph', 0):.0f} vph, "
                     f"demand={r.get('baseline_demand_vph', 0):.1f} vph"
@@ -312,12 +323,29 @@ def generate_audit_trail(
                 f"  Formula: {s4.get('formula', '')}",
                 f"  Project vehicles (peak hour): {s4.get('project_vehicles_peak_hour', 0):.1f} vph",
                 f"  Source (vehicles/unit): {s4.get('source_vehicles_per_unit', '')}",
-                f"  Source (mobilization):  {s4.get('source_mobilization', '')}",
+                f"  Source (departure rate): {s4.get('source_mobilization', '')}",
             ]
 
         # Step 5: Capacity Ratio Test
         s5 = steps.get("step5_ratio_test", {})
         if s5:
+            # Build osmid→name lookup for human-readable route summaries
+            _osmid_to_name = {
+                r.get("osmid"): (r.get("name") or str(r.get("osmid", "")))
+                for r in s5.get("route_details", [])
+            }
+
+            def _fmt_osmid_list(osmid_list):
+                if not osmid_list:
+                    return "none"
+                names, seen = [], set()
+                for oid in osmid_list:
+                    n = _osmid_to_name.get(oid, str(oid))
+                    if n not in seen:
+                        seen.add(n)
+                        names.append(n)
+                return ", ".join(names)
+
             lines += [
                 "",
                 "  STEP 5 — CAPACITY RATIO TEST",
@@ -326,12 +354,24 @@ def generate_audit_trail(
                 f"  Method: {s5.get('method', '')}",
                 f"  Project vehicles per route: {s5.get('vehicles_per_route', 0):.1f} vph",
                 f"  Routes evaluated: {s5.get('serving_routes_evaluated', 0)}",
-                f"  Already failing at baseline (not caused by project): {s5.get('already_failing_at_baseline', [])}",
-                f"  Project-caused exceedance (triggers DISCRETIONARY): {s5.get('project_caused_exceedance', [])}",
+                f"  Already failing at baseline (not caused by project): {_fmt_osmid_list(s5.get('already_failing_at_baseline', []))}",
+                f"  Project-caused exceedance (triggers DISCRETIONARY): {_fmt_osmid_list(s5.get('project_caused_exceedance', []))}",
                 "",
                 "  Route-by-Route Results:",
             ]
+            # Deduplicate by road name — OSM splits one road into many geometry segments
+            _name_seg_count_s5: dict[str, int] = {}
             for r in s5.get("route_details", []):
+                rname = r.get("name") or str(r.get("osmid", ""))
+                _name_seg_count_s5[rname] = _name_seg_count_s5.get(rname, 0) + 1
+            _seen_s5: set[str] = set()
+            for r in s5.get("route_details", []):
+                rname = r.get("name") or str(r.get("osmid", ""))
+                if rname in _seen_s5:
+                    continue
+                _seen_s5.add(rname)
+                seg_count = _name_seg_count_s5[rname]
+                seg_note = f" ({seg_count} segments)" if seg_count > 1 else ""
                 # Only mark routes the PROJECT causes to cross the threshold (marginal causation).
                 # Routes already failing at baseline are noted separately — they do not trigger DISCRETIONARY.
                 if r.get("project_causes_exceedance"):
@@ -340,14 +380,14 @@ def generate_audit_trail(
                     flag = " [pre-existing LOS F — not caused by project]"
                 else:
                     flag = ""
-                lines.append(f"    {r.get('name') or r['osmid']}:{flag}")
-                evac_d  = r.get("evac_demand_vph", r.get("baseline_demand_vph", 0.0))
-                surge_m = r.get("surge_multiplier", 1.0)
-                eff_d   = r.get("effective_baseline_demand", evac_d)
+                lines.append(f"    {rname}{seg_note}:{flag}")
+                evac_d = r.get("evac_demand_vph", r.get("baseline_demand_vph", 0.0))
+                mob_f  = r.get("mob_factor", 0.57)
+                eff_d  = r.get("effective_baseline_demand", evac_d)
                 lines.append(
                     f"      Normal demand: {r.get('normal_demand_vph', 0.0):.1f} vph  "
                     f"Evac demand: {evac_d:.1f} vph  "
-                    f"Effective baseline: {eff_d:.1f} vph (×{surge_m:.3f}), "
+                    f"Effective baseline: {eff_d:.1f} vph ({mob_f:.0%} departure rate), "
                     f"v/c={r.get('effective_baseline_vc', 0):.4f} {'[EXCEEDS]' if r['baseline_exceeds'] else '[OK]'}"
                 )
                 lines.append(
