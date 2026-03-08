@@ -896,7 +896,7 @@ def _conditions_discretionary(wildland: dict, local5: dict) -> str:
       (Pub. Resources Code §21100) — evacuation clearance time impact must be analyzed
       as a significant transportation impact.</li>
       <li><strong>Evacuation Clearance Time Analysis:</strong> Applicant shall commission
-      a study conforming to the JOSH v3.0 ΔT methodology (AB 747 / Gov. Code §65302.15),
+      a study conforming to the JOSH v3.1 ΔT methodology (AB 747 / Gov. Code §65302.15),
       analyzing marginal evacuation clearance time on all serving paths within 0.5 miles,
       using Zhao et al. (2022) GPS-empirical mobilization rates and HCM 2022
       hazard-degraded capacity factors.</li>

@@ -1,16 +1,17 @@
 """
-Agent 3: Objective Standards Engine — Orchestrator — JOSH v3.0
+Agent 3: Objective Standards Engine — Orchestrator — JOSH v3.1
 
 Runs all applicable evacuation capacity scenarios against a proposed project
 and returns the most restrictive tier determination.
 
-Architecture (v3.0):
+Architecture (v3.1):
   Each scenario implements the universal 5-step algorithm:
     1. Applicability check
     2. Scale gate
     3. Route identification (returns list[EvacuationPath])
     4. Demand calculation
     5. ΔT test (project_vehicles / bottleneck_effective_capacity) × 60 + egress)
+       Threshold derived at runtime: safe_egress_window[zone] × max_project_share
 
   The orchestrator runs all scenarios, then applies "most restrictive wins":
     DISCRETIONARY (3) > CONDITIONAL MINISTERIAL (2) > MINISTERIAL (1)
@@ -20,6 +21,11 @@ Architecture (v3.0):
 Active scenarios:
   A. WildlandScenario     — Standards 1–4 (AB 747, Gov. Code §65302.15)
   B. Sb79TransitScenario  — Standard 5 (SB 79 transit proximity, informational only)
+
+Key v3.1 changes from v3.0:
+  - max_marginal_minutes config key removed; thresholds derived at runtime
+  - safe_egress_window × max_project_share replaces static 3/5/8/10 values
+  - Audit trail shows derivation chain (window × share = threshold) per path
 
 Key v3.0 changes from v2.0:
   - LocalDensityScenario replaced by Sb79TransitScenario (informational only)
@@ -194,8 +200,9 @@ def generate_audit_trail(
     """
     Write a human-readable audit trail document for legal compliance.
 
-    v3.0 format: shows ΔT per path (not v/c comparison), bottleneck data,
+    v3.1 format: shows ΔT per path (not v/c comparison), bottleneck data,
     hazard degradation, mobilization rate, egress penalty.
+    Thresholds derived at runtime: safe_egress_window × max_project_share.
 
     Returns the text content (also written to output_path).
     """
@@ -209,7 +216,7 @@ def generate_audit_trail(
     lines = [
         "=" * 70,
         "FIRE EVACUATION CAPACITY ANALYSIS — PROJECT DETERMINATION",
-        "JOSH v3.0 (ΔT Standard)",
+        "JOSH v3.1 (ΔT Standard — Derived Thresholds)",
         "=" * 70,
         f"Date:           {audit['evaluation_date']}",
         f"Project:        {project.project_name or 'Unnamed'}",

@@ -982,7 +982,7 @@ def _build_demo_legend_html(
   </div>
 
   <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
-              font-size:9px; color:#adb5bd;">JOSH v3.0 &middot; California Stewardship Alliance</div>
+              font-size:9px; color:#adb5bd;">JOSH v3.1 &middot; California Stewardship Alliance</div>
 </div>
 
 <script>
