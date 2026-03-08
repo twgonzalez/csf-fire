@@ -341,9 +341,14 @@ def generate_audit_trail(
                 else:
                     flag = ""
                 lines.append(f"    {r.get('name') or r['osmid']}:{flag}")
+                evac_d  = r.get("evac_demand_vph", r.get("baseline_demand_vph", 0.0))
+                surge_m = r.get("surge_multiplier", 1.0)
+                eff_d   = r.get("effective_baseline_demand", evac_d)
                 lines.append(
-                    f"      Baseline: {r['baseline_demand_vph']:.1f} vph, "
-                    f"v/c={r.get('effective_baseline_vc', r.get('baseline_vc', 0)):.4f} {'[EXCEEDS]' if r['baseline_exceeds'] else '[OK]'}"
+                    f"      Normal demand: {r.get('normal_demand_vph', 0.0):.1f} vph  "
+                    f"Evac demand: {evac_d:.1f} vph  "
+                    f"Effective baseline: {eff_d:.1f} vph (×{surge_m:.3f}), "
+                    f"v/c={r.get('effective_baseline_vc', 0):.4f} {'[EXCEEDS]' if r['baseline_exceeds'] else '[OK]'}"
                 )
                 lines.append(
                     f"      Proposed: {r['proposed_demand_vph']:.1f} vph (+{r['vehicles_added']:.1f}), "

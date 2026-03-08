@@ -48,8 +48,10 @@ class LocalDensityScenario(EvacuationScenario):
 
     When active:
       - Serving routes = collector/arterial roads within local_density.radius_miles
-      - Demand = project vehicles added to existing baseline_demand_vph
-      - No FHSZ surge multiplier (Standard 5 is FHSZ-agnostic)
+      - Demand = project vehicles added to normal_demand_vph (catchment × vpu × 0.10)
+        NOT the evacuation baseline (catchment × vpu × 0.57) — Standard 5 tests
+        ordinary traffic conditions, not evacuation scenarios
+      - No FHSZ mobilization adjustment (Standard 5 is FHSZ-agnostic)
       - Ratio test uses shared marginal causation test from base class
     """
 
@@ -78,6 +80,10 @@ class LocalDensityScenario(EvacuationScenario):
     @property
     def fallback_tier(self) -> Tier:
         return Tier.MINISTERIAL
+
+    def _get_demand_column(self) -> str:
+        """Standard 5 uses normal peak-hour demand, not evacuation demand."""
+        return "normal_demand_vph"
 
     # ------------------------------------------------------------------
     # Step 1: Applicability

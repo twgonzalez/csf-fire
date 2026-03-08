@@ -23,14 +23,16 @@ analysis_crs: "EPSG:26910"  # UTM Zone 10N for distance calculations (meters)
 # this city only.  unit_threshold and vc_threshold are propagated automatically
 # to all nested scenario configs.  See docs/city_onboarding.md §2d for guidance.
 overrides:
-  # FHSZ Surge Multiplier — Berkeley-specific
-  # Applied to baseline demand when the project site is in FHSZ Zone 2 or 3.
-  # Basis: KLD Engineering TR-1381 (Berkeley, March 2024) documents compressed departure
-  # windows during the 1991 Oakland–Berkeley Hills Fire. Simultaneous mandatory evacuation
-  # produces roughly 1.5× the staggered peak-hour demand used in normal traffic analysis.
-  # Source: KLD TR-1381 Figure 14 — observed departure rate during mandatory evacuation order.
+  # FHSZ Mobilization Factor — Berkeley-specific
+  # When the project site is in FHSZ Zone 2 or 3, Standard 4 uses this mobilization factor
+  # instead of peak_hour_mobilization (0.57).  A mandatory evacuation order produces
+  # near-simultaneous departure: 1.0 = 100% of households mobilize in the peak hour.
+  # Basis: KLD Engineering TR-1381 (Berkeley, March 2024), Figure 14 — observed departure
+  # rate during mandatory evacuation order (1991 Oakland–Berkeley Hills Fire).
+  # Effective multiplier on baseline demand: 1.0 / 0.57 ≈ 1.754× (logically bounded at 1.0;
+  # cannot exceed 100% simultaneous departure).
   # Requires Berkeley City Council adoption ordinance before use in project determinations.
-  fhsz_surge_multiplier: 1.5
+  fhsz_mobilization_factor: 1.0
 # Example additional overrides:
 #   unit_threshold: 10   # lower than default (15) when city road network is more constrained;
 #                        # must be justified with ITE trip-generation or local study

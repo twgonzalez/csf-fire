@@ -107,21 +107,22 @@ class WildlandScenario(EvacuationScenario):
         project.in_fire_zone    = fire_zone_result
         project.fire_zone_level = fire_zone_detail.get("zone_level", 0)
 
-        # Surge multiplier activated by Standard 3 flag; used in Standard 4 ratio test
-        surge = float(self.config.get("fhsz_surge_multiplier", 1.0)) if fire_zone_result else 1.0
+        # Mobilization ratio activated by Standard 3 flag; used in Standard 4 ratio test
+        surge = self._fhsz_mob_ratio() if fire_zone_result else 1.0
 
         return True, {
-            "result":                      True,
-            "method":                      "Always applicable; site FHSZ check via GIS point-in-polygon",
-            "std3_fhsz_modifier":          fire_zone_result,
-            "std3_zone_level":             fire_zone_detail.get("zone_description", "Not in FHSZ"),
+            "result":                       True,
+            "method":                       "Always applicable; site FHSZ check via GIS point-in-polygon",
+            "std3_fhsz_modifier":           fire_zone_result,
+            "std3_zone_level":              fire_zone_detail.get("zone_description", "Not in FHSZ"),
             "std3_surge_multiplier_active": surge,
-            "fire_zone_severity_modifier": fire_zone_detail,
+            "fire_zone_severity_modifier":  fire_zone_detail,
             "note": (
                 f"Standard 3 flagged: project in FHSZ Zone {project.fire_zone_level} — "
-                f"surge multiplier {surge}× will be applied in Standard 4."
+                f"mobilization factor raised to {self.config.get('fhsz_mobilization_factor', 1.0):.0%} "
+                f"(ratio {surge:.3f}×) for Standard 4."
                 if fire_zone_result else
-                "Standard 3: project not in FHSZ — surge multiplier not applied (1.0×)."
+                "Standard 3: project not in FHSZ — base mobilization factor applies (no adjustment)."
             ),
         }
 
@@ -189,20 +190,29 @@ class WildlandScenario(EvacuationScenario):
         return serving_ids, detail
 
     # ------------------------------------------------------------------
-    # FHSZ surge multiplier — applied when project is in fire zone
+    # FHSZ mobilization ratio — applied when project is in fire zone
     # ------------------------------------------------------------------
+
+    def _fhsz_mob_ratio(self) -> float:
+        """fhsz_mobilization_factor / peak_hour_mobilization — the ratio applied to baseline demand."""
+        fhsz_mob = float(self.config.get("fhsz_mobilization_factor", 1.0))
+        base_mob  = float(self.config.get("peak_hour_mobilization", 0.57))
+        return fhsz_mob / base_mob if base_mob > 0 else 1.0
 
     def _get_surge_multiplier(self, project: Project) -> float:
         """
-        Return the city-adopted FHSZ evacuation surge multiplier.
+        Return the mobilization-ratio multiplier for Standard 4.
 
-        Only applied when the project site is within FHSZ Zone 2 or 3.
-        Value is read from config (merged parameters.yaml + city overrides).
-        Default 1.0 if city has not adopted a multiplier.
+        When the project is in FHSZ Zone 2 or 3, mandatory evacuation produces
+        near-simultaneous departure (fhsz_mobilization_factor, default 1.0 = 100%).
+        The ratio fhsz_mobilization_factor / peak_hour_mobilization is applied to the
+        baseline demand so the ratio test reflects the mandatory-evacuation scenario.
+
+        Non-FHSZ projects: returns 1.0 (no adjustment — staggered baseline applies).
         """
         if not project.in_fire_zone:
             return 1.0
-        return float(self.config.get("fhsz_surge_multiplier", 1.0))
+        return self._fhsz_mob_ratio()
 
     # ------------------------------------------------------------------
     # Override reason builders to include fire zone context
@@ -210,13 +220,13 @@ class WildlandScenario(EvacuationScenario):
 
     def _reason_discretionary(self, project: Project, step5: dict) -> str:
         n_flagged = len(step5.get("flagged_route_ids", []))
-        surge = float(self.config.get("fhsz_surge_multiplier", 1.0))
+        fhsz_mob  = float(self.config.get("fhsz_mobilization_factor", 1.0))
         fire_note = (
             f"Standard 3 flagged: project is in FHSZ Zone {project.fire_zone_level} — "
-            f"surge multiplier {surge}× applied in Standard 4. "
+            f"mobilization factor raised to {fhsz_mob:.0%} (mandatory evacuation) in Standard 4. "
             if project.in_fire_zone else
             "Standard 3: project is not within a designated FHSZ zone — "
-            "surge multiplier not applied; capacity impact alone triggers DISCRETIONARY. "
+            "base mobilization factor applies; capacity impact alone triggers DISCRETIONARY. "
         )
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold (Standard 1) and "
@@ -239,12 +249,12 @@ class WildlandScenario(EvacuationScenario):
             if n_routes > 0 else
             "has no serving routes within the search radius but adds vehicles to the evacuation network"
         )
-        surge = float(self.config.get("fhsz_surge_multiplier", 1.0))
+        fhsz_mob  = float(self.config.get("fhsz_mobilization_factor", 1.0))
         fhsz_note = (
             f"Standard 3 flagged: FHSZ Zone {project.fire_zone_level} — "
-            f"surge multiplier {surge}× applied in Standard 4 evaluation. "
+            f"mobilization factor raised to {fhsz_mob:.0%} in Standard 4 evaluation. "
             if project.in_fire_zone else
-            "Standard 3: not in FHSZ — surge multiplier not applied. "
+            "Standard 3: not in FHSZ — base mobilization factor applies. "
         )
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold (Standard 1) and "
