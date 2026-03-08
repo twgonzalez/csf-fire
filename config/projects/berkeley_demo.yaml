@@ -1,5 +1,5 @@
 # ============================================================
-# Berkeley AB 747 Demo Projects
+# Berkeley AB 747 Demo Projects — JOSH v3.0 (ΔT Standard)
 # ============================================================
 # Use with:  uv run python main.py demo --city "Berkeley"
 #
@@ -7,34 +7,28 @@
 # to city planners.  Each project appears as a toggleable layer
 # on the output map so reviewers can compare impacts side-by-side.
 #
-# Tier logic (Phase 2c — demand model fix, marginal causation):
-#   DISCRETIONARY           — size >= 15 AND project CAUSES a serving route
-#                             to cross v/c 0.95 (baseline < 0.95, proposed >= 0.95)
-#                             NOTE: routes already failing at baseline (vc >= 0.95)
-#                             do NOT trigger DISCRETIONARY — the project didn't cause it.
-#   CONDITIONAL MINISTERIAL — city has FHSZ AND size >= 15 (Standard 4 not triggered)
-#   MINISTERIAL             — size < 15 OR no FHSZ in city
+# Tier logic (v3.0 — ΔT Standard):
+#   DISCRETIONARY           — size >= 15 AND ΔT > max_marginal_minutes on any serving route
+#                             (no baseline precondition — routes already failing are tested equally)
+#   CONDITIONAL MINISTERIAL — size >= 15 AND ΔT within threshold on all serving routes
+#   MINISTERIAL             — size < 15
 #
-# Demand model: catchment-based (network path analysis) for baseline_demand_vph.
-# Standard 4 impact: worst-case marginal test (full project vph per route).
+# Core metric: ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress_penalty
+#   project_vehicles = units × 2.5 vpu × mobilization_rate(hazard_zone)
+#   effective_capacity = hcm_capacity × hazard_degradation_factor(fhsz_zone)
 #
 # Coverage matrix (one project per distinct legal concept):
 #   Size gate below threshold, no FHSZ → Project 1 (10 units, flat)
 #   Size gate below threshold, IN FHSZ → Project 4 (10 units, hills Zone 3)
-#   Size met, capacity headroom, no FHSZ → Project 2 (Downtown)
-#   Size met, capacity headroom, IN FHSZ → Project 3 (Hills Gateway, Zone 3)
-#   Size met, capacity exceeded, NOT in FHSZ, hillside road → Project 5 (Claremont Hills)
-#   Dual standard (Std 4 + Std 5), NOT in FHSZ → Project 6 (Cedar Street)
-#
-# Removed (redundant — no distinct legal concept beyond the 6 kept):
-#   Telegraph Corridor (60u) — same Cedar St bottleneck as Cedar Street Infill
-#   North Berkeley TOD (200u) — scale only, not a distinct legal concept
-#   West Berkeley Flex (55u) — DISCRETIONARY, different geography but no new concept
+#   Size met, ΔT within threshold, no FHSZ → Project 2 (Downtown, arterials have headroom)
+#   Size met, ΔT exceeds threshold, IN FHSZ Zone 3 → Project 3 (Hills Gateway, high mob + degraded cap)
+#   Size met, ΔT within threshold, borderline non-FHSZ → Project 5 (Claremont Hills, 0.25 mob)
+#   Size met, egress penalty pushes ΔT over threshold → Project 6 (Cedar Street, 6-story)
 # ============================================================
 
 city: "Berkeley"
 state: "CA"
-description: "Berkeley AB 747 — Ministerial vs Discretionary Demo"
+description: "Berkeley AB 747 — Ministerial vs Discretionary Demo (v3.0 ΔT Standard)"
 
 projects:
 
@@ -46,10 +40,11 @@ projects:
     lat: 37.8528
     lon: -122.2699
     units: 10
+    stories: 2
     description: >
       10-unit project at Ashby BART — below the 15-unit size threshold.
       Standard 1 (size gate) is not triggered, so the project qualifies for ministerial
-      approval regardless of evacuation route congestion.
+      approval regardless of evacuation route congestion or ΔT computation.
     expected_tier: "MINISTERIAL"
 
   # -----------------------------------------------------------
@@ -60,30 +55,29 @@ projects:
     lat: 37.8695
     lon: -122.2685
     units: 75
+    stories: 4
     description: >
-      75-unit project on Shattuck Ave.  Exceeds the 15-unit threshold and
-      has 75 serving evacuation routes within 0.5 miles.  The high-capacity
-      arterials here (Shattuck, University) have sufficient headroom that
-      107 peak-hour project vehicles do not push any single route from below
-      to above the v/c 0.95 threshold.  Standard 4 is NOT triggered →
+      75-unit project on Shattuck Ave. Exceeds the 15-unit threshold.
+      Non-FHSZ location → mobilization rate 0.25 (Zhao et al. 2022).
+      High-capacity arterials (Shattuck, University) with no hazard degradation.
+      ΔT well below the 10-minute threshold for non-FHSZ zones.
       CONDITIONAL MINISTERIAL (evacuation conditions required, but ministerial).
     expected_tier: "CONDITIONAL MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 3 — Hills gateway: in FHSZ Zone 3 → project vehicles use 100% mob → DISCRETIONARY
+  # 3 — Hills gateway: in FHSZ Zone 3 → elevated mob rate → DISCRETIONARY
   # -----------------------------------------------------------
   - name: "Hills Gateway"
     address: "Claremont Ave & Tunnel Rd"
     lat: 37.8914
     lon: -122.2494
     units: 80
+    stories: 3
     description: >
-      80-unit project near the Berkeley Hills in FHSZ Zone 3. Standard 3 flags
-      the FHSZ site: project vehicles use 100% mobilization factor (mandatory
-      simultaneous evacuation). This elevates project demand from 114 vph (×0.57)
-      to 200 vph (×1.00), which is enough to push multiple serving routes over
-      the v/c 0.95 threshold → DISCRETIONARY. Baseline road demand stays at 0.57
-      so the marginal causation test can fire.
+      80-unit project near the Berkeley Hills in FHSZ Zone 3. Mobilization rate 0.75
+      (VHFHSZ per Zhao et al. 2022). Road capacity degraded by factor 0.35 (VHFHSZ).
+      Narrow canyon roads at effective capacity well below HCM raw value.
+      ΔT exceeds 3-minute threshold for VHFHSZ zone → DISCRETIONARY.
     expected_tier: "DISCRETIONARY"
 
   # -----------------------------------------------------------
@@ -96,49 +90,48 @@ projects:
     lat: 37.8914
     lon: -122.2494
     units: 10
+    stories: 2
     description: >
       10-unit project in the Berkeley Hills FHSZ Zone 3 area — same location
       as Hills Gateway (Project 3, 80 units → DISCRETIONARY).
-      Despite the fire zone, Standard 1 (size gate) is NOT triggered: 10 < 15.
-      The wildland scenario short-circuits at Step 2 and returns MINISTERIAL.
-      FHSZ designation is a severity modifier, not an independent trigger.
+      Despite the fire zone and high mobilization rate, Standard 1 (size gate) is NOT
+      triggered: 10 < 15. Returns MINISTERIAL. FHSZ designation is a modifier, not a gate.
     expected_tier: "MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 5 — Claremont Hills: NOT in FHSZ, hillside road bottleneck → DISCRETIONARY
-  #     Proves fire zone location is NOT required to trigger DISCRETIONARY.
+  # 5 — Claremont Hills: NOT in FHSZ, hillside road, within ΔT threshold → CONDITIONAL
+  #     Shows that low mob rate (non-FHSZ = 0.25) generates few project vehicles.
+  #     47 vph / ~900 vph bottleneck × 60 = ~3.1 min — well below 10-min non-FHSZ threshold.
   # -----------------------------------------------------------
   - name: "Claremont Hills Terrace"
     address: "Ridge Road & Claremont Ave, Berkeley Hills"
     lat: 37.876
     lon: -122.260
     units: 75
+    stories: 3
     description: >
-      75-unit hillside project NOT in a mapped FHSZ zone — proves that fire
-      zone location is NOT required to trigger DISCRETIONARY.  Ridge Road
-      (narrow two-lane, cap 1,125 vph) carries evacuation demand at v/c 0.94
-      at baseline; 107 peak-hour project vehicles push it to 1.03, crossing
-      the 0.95 LOS E/F threshold.  Standard 4 triggered → DISCRETIONARY.
-      Contrast with Hills Gateway (Project 3, same hills, in FHSZ, DISCRETIONARY):
-      both projects trigger DISCRETIONARY, but via different mechanisms — Hills
-      Gateway via elevated FHSZ project demand (100% mob), Claremont via road
-      bottleneck alone (57% mob).
-    expected_tier: "DISCRETIONARY"
+      75-unit hillside project NOT in a mapped FHSZ zone. Non-FHSZ mobilization rate
+      (0.25 per Zhao et al. 2022) generates only 46.9 project vehicles. No capacity
+      degradation factor applies. Ridge Road bottleneck (~900 vph) yields ΔT ≈ 3.1 min
+      — well below the 10-minute non-FHSZ threshold. CONDITIONAL MINISTERIAL: size
+      threshold met, evacuation conditions required, but ΔT within bounds.
+    expected_tier: "CONDITIONAL MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 6 — Cedar Street: Standard 4 + Standard 5 both triggered → DISCRETIONARY
-  #     Project site NOT in FHSZ. Dual-standard case.
+  # 6 — Cedar Street: multi-story egress penalty triggers ΔT → DISCRETIONARY
+  #     6-story building: egress_penalty = 6 × 1.5 = 9.0 min (above 4-story threshold)
+  #     Vehicle ΔT ≈ 2.5 min + 9.0 min egress = 11.5 min > 10-min threshold → DISCRETIONARY
   # -----------------------------------------------------------
   - name: "Cedar Street Infill"
     address: "Cedar Street & Shattuck Ave, North Berkeley"
     lat: 37.879
     lon: -122.278
     units: 75
+    stories: 6
     description: >
-      75-unit project in the North Berkeley residential corridor, NOT in FHSZ.
-      Cedar Street (two-lane, cap 1,125 vph) is at v/c 0.91 at baseline; 107
-      project vehicles push it to 1.00 (LOS F).  Standard 4 (wildland, 0.5-mile
-      radius) AND Standard 5 (local density, 0.25-mile radius) are both
-      triggered — the project is within the local egress radius of the
-      near-capacity street.  DISCRETIONARY driven entirely by capacity impact.
+      75-unit, 6-story project in North Berkeley (NOT in FHSZ). Non-FHSZ mob = 0.25.
+      Building egress penalty: 6 stories × 1.5 min/story = 9.0 min (NFPA 101).
+      Cedar Street bottleneck (two-lane, ~1125 vph): vehicle ΔT ≈ 2.5 min + 9.0 min egress
+      = 11.5 min > 10-minute non-FHSZ threshold. DISCRETIONARY via egress + road bottleneck.
+      Mitigation: reduce stories to ≤3 (no egress penalty applies below threshold).
     expected_tier: "DISCRETIONARY"

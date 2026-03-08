@@ -240,7 +240,7 @@ def _build_demo_project_popup(
     # Std 4: wildland evac capacity
     if not met_size:
         s4 = _NOT_EVAL
-    elif project.exceeds_capacity_threshold:
+    elif project.capacity_exceeded:
         s4 = _TRIGGERED
     else:
         s4 = _WITHIN_CAP
@@ -289,7 +289,7 @@ def _build_demo_project_popup(
         f'Std 4 &middot; Evac Capacity</span>'
         + _cap_chip(*s4)
         + f'</div>'
-        + (_route_line(worst_wildland_route) if project.exceeds_capacity_threshold else "")
+        + (_route_line(worst_wildland_route) if project.capacity_exceeded else "")
         + f'</div>'
     )
 
@@ -297,7 +297,7 @@ def _build_demo_project_popup(
         f'<div>'
         f'<div style="display:flex;justify-content:space-between;align-items:center;">'
         f'<span style="font-size:11px;color:#343a40;font-weight:600;">'
-        f'Std 5 &middot; Local Capacity</span>'
+        f'Std 5 &middot; SB 79 Transit</span>'
         + _cap_chip(*s5)
         + f'</div>'
         + (_route_line(worst_local_route) if ld_triggered else "")

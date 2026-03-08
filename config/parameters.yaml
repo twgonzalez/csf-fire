@@ -1,83 +1,122 @@
-# Fire Evacuation Capacity Analysis — Default Parameters
-# All thresholds and factors used in objective standards calculations.
-# These values must be explicitly cited in any legal documentation.
+# JOSH v3.0 — Global Parameters
+# Fire Evacuation Capacity Analysis System
+# All thresholds trace to published sources. No parameter requires city-level adoption.
 # Override city-specific values in config/cities/{city}.yaml
 
 # ============================================================
-# Objective Standards Thresholds
+# Project Size Threshold
+# Basis: 15 units × 2.5 vpu × 0.25 mob (non-FHSZ) = 9.4 vph — de minimis under ITE.
+#        At 15 units in a VHFHSZ (×0.75 mob), contribution = 28.1 vph — measurable.
+# Statutory anchor: SB 330 (Gov. Code §65905.5) — heightened protections at 10+ units;
+#   15 is the first integer above ITE de minimis that falls in the SB 330 project class.
+# This is an administrative proportionality threshold, NOT a safety threshold.
 # ============================================================
 
-# Volume-to-capacity threshold triggering discretionary review
-# Basis: LOS E/F boundary per Highway Capacity Manual 2022 (v/c = 0.95 is the exact E/F breakpoint)
-# Legal rationale: 0.95 is the true HCM LOS E/F boundary — more permissive of infill than
-# an arbitrary mid-LOS-E value, and harder for HCD to challenge as a categorical prohibition.
-vc_threshold: 0.95
-
-# FHSZ Mobilization Factor
-# When a project site is within FHSZ Zone 2 or 3, mandatory evacuation orders produce
-# near-simultaneous departure rather than the staggered peak-hour departure modeled by
-# peak_hour_mobilization.  Standard 4 replaces the base mobilization factor with this
-# value when in_fire_zone == True.
-#
-# Effective surge on baseline demand = fhsz_mobilization_factor / peak_hour_mobilization
-#   e.g. 1.0 / 0.57 ≈ 1.754× — more conservative than an arbitrary 1.5× multiplier and
-#   logically bounded: mobilization can never exceed 100% of households.
-#
-# Default: 1.0 (100% simultaneous departure under mandatory order).
-# Override per city in config/cities/{city}.yaml if a local study supports a different value.
-# Legal basis: CAL FIRE / Cal OES evacuation planning guidance; AB 747 §65302.15.
-fhsz_mobilization_factor: 1.0
-
-# Minimum dwelling units triggering Standards review
-# Basis: 15 units × 2.5 vph/unit × 0.57 mobilization = 21.4 peak-hour trips,
-# exceeding the ITE Trip Generation Handbook de minimis of 10–15 peak-hour trips
-# commonly applied in California traffic studies. At this size the project's
-# contribution is statistically distinguishable from background traffic variation.
-# Statutory anchor: California Housing Crisis Act (SB 330, Gov. Code §65905.5)
-# applies heightened protections to projects of 10+ units; 15 is the first
-# integer above the ITE de minimis that falls within the SB 330 project class.
 unit_threshold: 15
 
-# Evacuation route search radius from project location (miles)
-# Basis: Standard 2, defined in objective standards ordinance
-evacuation_route_radius_miles: 0.5
+# ============================================================
+# Mobilization Rates by FHSZ Zone
+# Source: Zhao, X., et al. (2022). Estimating wildfire evacuation decision and departure
+#         timing using large-scale GPS data. Transportation Research Part C.
+#         (44.2M GPS records, 2019 Kincade Fire — census block group resolution)
+#         Cross-validated: Wong, S.D., et al. (2020). Review of California wildfire
+#         evacuations from 2017-2019. UC ITS.
+#
+# GPS-measured compliance varies by proximity to hazard.
+#   VHFHSZ: 0.75  — conservative above observed zone-max rates for highest-risk zones
+#   High FHSZ: 0.57 — matches KLD/observed zone-level mean (KLD TR-1381, Berkeley)
+#   Moderate FHSZ: 0.40 — below mean; farther from typical ignition
+#   Non-FHSZ: 0.25  — shadow evacuation (GPS-observed compliance outside evacuation zones)
+# ============================================================
+
+mobilization_rates:
+  vhfhsz: 0.75
+  high_fhsz: 0.57
+  moderate_fhsz: 0.40
+  non_fhsz: 0.25
+  citation: >
+    Zhao, X., et al. (2022). Estimating wildfire evacuation decision and departure
+    timing using large-scale GPS data. Transportation Research Part C 139:103647.
+    Wong, S.D., Broader, J.C., Shaheen, S.A. (2020). Review of California wildfire
+    evacuations from 2017 to 2019. UC Institute of Transportation Studies.
 
 # ============================================================
-# Vehicle Generation (Standard 4 inputs)
+# Hazard-Aware Road Capacity Degradation
+# Roads within fire hazard zones do not operate at full HCM capacity during wildfires.
+# Each factor is a composite of published HCM adjustment tables, applied to
+# CAL FIRE FHSZ-designated road segments.
+#
+# Source: FHWA Guide for Highway Capacity and Operations Analysis of ATDM Strategies
+#         Appendix C (HCM weather/incident factors — Exhibit 10-15, Exhibit 10-17)
+# Validated against: Link, E.D. & Maranghides, A. (NIST). Burnover events
+#   identified during the 2018 Camp Fire. (Observed road closures on 3 of 5 routes.)
+#
+# Derivation:
+#   VHFHSZ (0.35): Visibility <0.25 mi (×0.89, HCM Exhibit 10-15) ×
+#                  one lane blocked by counterflow EVs (×0.35 on 2-lane, HCM Exhibit 10-17)
+#                  Composite: 0.89 × 0.35 = 0.31, rounded up to 0.35 (conservative)
+#   High FHSZ (0.50): Moderate smoke (~×0.90) × shoulder incident (~×0.95)
+#                     Composite rounded down to 0.50 for compound effects
+#   Moderate FHSZ (0.75): Light smoke possible (×0.90, HCM Exhibit 10-15)
+#   Non-FHSZ (1.00): No fire-related degradation
+#
+# Conservative in the developer's favor: Camp Fire showed factor=0.0 on 60% of routes.
 # ============================================================
 
-# Average vehicles per household
-# Source: U.S. Census American Community Survey (ACS)
+hazard_degradation:
+  enabled: true
+  factors:
+    vhfhsz: 0.35
+    high_fhsz: 0.50
+    moderate_fhsz: 0.75
+    non_fhsz: 1.00
+
+# ============================================================
+# ΔT Thresholds (minutes) by Hazard Zone
+# Graduated by hazard severity — shorter safe egress windows in higher-risk zones.
+# These are defaults; cities can adjust in Safety Element adoption ordinances.
+# Even without adopted thresholds, the raw ΔT number constitutes substantial evidence
+# of a "specific adverse impact" under HAA §65589.5(j)(1).
+# ============================================================
+
+max_marginal_minutes:
+  vhfhsz: 3
+  high_fhsz: 5
+  moderate_fhsz: 8
+  non_fhsz: 10
+
+# ============================================================
+# Vehicles Per Housing Unit
+# Source: Census ACS 5-Year, Table B25044 (vehicles available by tenure)
+# Override per city in config/cities/{city}.yaml if local ACS data differs.
+# ============================================================
+
 vehicles_per_unit: 2.5
 
-# Peak hour mobilization factor (fraction of households mobilizing in the peak hour)
-# Default: 0.57 — KLD Engineering AB 747 Study (Berkeley, 2024), Figure 12
-#
-# CITY ONBOARDING: Override peak_hour_mobilization in config/cities/{city}.yaml.
-# Also set mobilization_source to one of:
-#   local_study         — city has an empirical AB 747 / PeMS study (strongest)
-#   comparable_city     — transferred from a comparable CA city with documented justification
-#   state_guidance      — OPR AB 747 guidance range (0.40–0.75); cite the specific table
-#   conservative_default — no study available; use 0.70 with explicit disclosure
-# See docs/city_onboarding.md for full guidance.
-peak_hour_mobilization: 0.57
+# ============================================================
+# Building Egress Penalty
+# Source: NFPA 101 (Life Safety Code), International Building Code (IBC)
+# Applies to multi-story buildings — stair descent + garage egress time.
+# Developer can reduce penalty by adding stairwells, widening stairs, adding garage exits.
+# ============================================================
 
-# AADT to peak hour conversion factor (if hourly data unavailable)
-# Source: Standard traffic engineering practice
-aadt_peak_hour_factor: 0.10
+egress_penalty:
+  threshold_stories: 4        # NFPA 101 high-rise threshold (75 ft)
+  minutes_per_story: 1.5      # NFPA 101 stair descent + IBC garage egress
+  max_minutes: 12             # Cap at 8-story equivalent
 
 # ============================================================
 # HCM 2022 Capacity Table (passenger cars per hour)
-# Source: Highway Capacity Manual, 7th Edition (2022)
+# Source: Highway Capacity Manual, 7th Edition (2022), Transportation Research Board
 # ============================================================
 
 hcm_capacity:
   freeway:
-    capacity_per_lane: 2250   # pc/h per lane, conservative estimate
+    capacity_per_lane: 2250   # pc/h per lane, Ch. 12, Exhibit 12-6
   multilane:
-    capacity_per_lane: 1900   # pc/h per lane
+    capacity_per_lane: 1900   # pc/h per lane, Ch. 12, Exhibit 12-7
   two_lane:
-    # Capacity by posted speed limit (mph)
+    # Capacity by posted speed limit (mph), Ch. 15
     by_speed:
       20: 900
       25: 1125
@@ -153,7 +192,15 @@ speed_defaults:
   road: 25
 
 # ============================================================
-# LOS (Level of Service) Thresholds
+# Evacuation Route Identification
+# ============================================================
+
+evacuation:
+  serving_route_radius_miles: 0.5   # Standard 2 search radius
+
+# ============================================================
+# LOS (Level of Service) Thresholds — INFORMATIONAL ONLY
+# Not used in ΔT determination. Retained for KLD cross-check and planning context.
 # Source: HCM 2022
 # ============================================================
 
@@ -163,150 +210,72 @@ los_thresholds:
   C: 0.40
   D: 0.60
   E: 0.95
-  F: 999.0   # anything above E
+  F: 999.0
+
+# vc_threshold retained for informational v/c display only (not in determination logic)
+vc_threshold: 0.95
 
 # ============================================================
-# Data Caching
+# AADT to peak hour conversion (informational; not used in ΔT determination)
 # ============================================================
 
-# Days before cached data is considered stale and re-downloaded
-cache_ttl_days: 90
+aadt_peak_hour_factor: 0.10
+
+# ============================================================
+# Demand Model
+# ============================================================
+
+evacuation_demand:
+  method: "catchment"
+  # "catchment" — housing-unit-weighted Dijkstra catchment per segment
+  # "road_class" — flat utilization rate by road class (legacy fallback)
+
+# KLD buffer demand — informational only (informational citywide planning reference)
+demand:
+  buffer_radius_miles: 0.25
+  resident_mobilization: 0.57
+  employee_mobilization_day: 1.00
+  employee_mobilization_night: 0.10
+  student_mobilization_day: 1.00
+  vehicles_per_unit: 2.5
+  employee_vehicle_occupancy: 1.0
+  scenario: "maximum"
 
 # ============================================================
 # FHSZ Zone Configuration
 # Source: CAL FIRE Office of State Fire Marshal
 # ============================================================
 
+fhsz:
+  trigger_zones:
+    - 2
+    - 3
+  api_base: "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer"
+
+# ============================================================
+# SB 79 Transit Proximity (Standard 5 — Informational Flag)
+# Identifies projects within 0.5 miles of Tier 1 or Tier 2 transit.
+# Does not affect tier determination — informational context only.
+# ============================================================
+
+sb79_transit:
+  enabled: true
+  radius_miles: 0.5
+
 # ============================================================
 # Census ACS Configuration
-# Source: U.S. Census Bureau American Community Survey 5-year estimates
-# Used for housing-unit-weighted evacuation demand baseline (Agent 2)
 # ============================================================
 
 census:
   acs_year: 2022
-  housing_units_table: "B25001_001E"    # Total housing units per block group
-  population_table: "B01001_001E"       # Total population (for employee fallback)
+  housing_units_table: "B25001_001E"
+  population_table: "B01001_001E"
   api_base: "https://api.census.gov/data"
-  max_origins: 100                       # Max block group origin points for network path analysis
-  lodes_year: 2021                       # LEHD LODES data year (2021 is latest in LODES8)
-  # api_key: ""                          # Optional Census API key (not required; avoids rate limits)
+  max_origins: 100
+  lodes_year: 2021
 
 # ============================================================
-# Evacuation Demand Baseline Method
-# Controls how baseline_demand_vph is computed for evacuation route segments.
+# Data Caching
 # ============================================================
 
-evacuation_demand:
-  method: "catchment"
-  # "catchment" — use census housing-unit-weighted catchment per segment
-  #   formula: catchment_housing_units × vehicles_per_unit × peak_hour_mobilization
-  #   requires: Census block group data downloaded by Agent 1
-  # "road_class" — flat utilization rate by road class (legacy behavior)
-  #   use this when Census data is unavailable or for backward compatibility
-
-# ============================================================
-# Evacuation Demand Model — KLD Engineering AB 747 Methodology
-# Buffer-based demand for ALL road segments (Phase 2b+)
-# Source: KLD Engineering TR-1381 (Berkeley AB 747 Study, March 2024)
-# ============================================================
-
-demand:
-  # Radius around each road segment to collect resident/employee/student demand
-  # Source: KLD Engineering AB 747 methodology (Berkeley study)
-  buffer_radius_miles: 0.25
-
-  # Fraction of households that mobilize per hour during peak evacuation
-  # Source: Figure 12, KLD Engineering AB 747 study (Berkeley, 2024)
-  resident_mobilization: 0.57
-
-  # Employee mobilization: daytime scenario — all employees must evacuate
-  # Source: KLD Engineering AB 747 methodology
-  employee_mobilization_day: 1.00
-
-  # Employee mobilization: nighttime/weekend scenario
-  employee_mobilization_night: 0.10
-
-  # Student mobilization (same as daytime employee for max demand scenario)
-  student_mobilization_day: 1.00
-
-  # Vehicles per housing unit
-  # Source: U.S. Census American Community Survey (ACS)
-  vehicles_per_unit: 2.5
-
-  # Vehicles per employee (all commute alone for evacuation planning)
-  employee_vehicle_occupancy: 1.0
-
-  # Demand scenario — "maximum" uses day mobilization rates
-  # "minimum" would use night rates (not yet implemented)
-  scenario: "maximum"
-
-fhsz:
-  # Zones 2 and 3 trigger the objective standards
-  trigger_zones:
-    - 2
-    - 3
-  # CAL FIRE FRAP ArcGIS REST API — HHZ_ref_FHSZ service, layer 0
-  # Field: FHSZ9 (values: SRA_VeryHigh, LRA_High, FRA_Moderate, etc.)
-  api_base: "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer"
-
-# ============================================================
-# Three-Tier Determination Configuration
-# Cities can override thresholds per tier in their city config.
-# All thresholds are 100% algorithmic — zero discretion permitted.
-# ============================================================
-
-determination_tiers:
-  discretionary:
-    # Triggers: size >= threshold AND capacity exceeded (Standard 4)
-    # Fire zone location is a severity modifier recorded in audit trail, NOT a gate
-    # Legal basis: AB 747 (California Government Code §65302.15) + HCM 2022
-    unit_threshold: 15    # minimum dwelling units; if absent, inherits unit_threshold
-    vc_threshold: 0.95    # v/c exceedance trigger; if absent, inherits vc_threshold (exact HCM LOS E/F boundary)
-    legal_basis: "AB 747 (Gov. Code §65302.15) and HCM 2022 v/c capacity threshold — project causes a serving evacuation route to cross the LOS E/F boundary (v/c = 0.95) from below"
-
-  conditional_ministerial:
-    # Triggers: size >= threshold (Standard 1) + capacity not exceeded (Standard 4)
-    # Universal — applies to all cities regardless of FHSZ presence.
-    # Ministerial approval eligible with mandatory evacuation conditions to be defined by city.
-    # Legal basis: General Plan Safety Element consistency + AB 1600 nexus
-    #   (project adds vehicles to shared evacuation network regardless of location)
-    unit_threshold: 15    # minimum dwelling units; if absent, inherits unit_threshold
-    legal_basis: "General Plan Safety Element consistency and AB 1600 nexus (project adds vehicles to shared evacuation network regardless of project location)"
-
-  ministerial:
-    # Default when Standard 1 (size) is not met OR no serving evacuation routes identified.
-    legal_basis: "Project below applicable significance threshold; ministerial approval eligible without evacuation conditions"
-
-# ============================================================
-# Standard 5: Local Capacity Test
-# Legal basis: Government Code §65302(g) — General Plan Safety Element;
-#              California Fire Code 503 — fire apparatus access;
-#              SB 79 (2025) — objective health and safety standard carve-out.
-#
-# Asks: "Will adding this project's vehicles to local streets push any local
-# collector/arterial above v/c 0.95 under normal (non-evacuation) conditions?"
-# No FHSZ surge modifier — Standard 5 is FHSZ-agnostic.
-# Applies citywide when enabled: true.
-# ============================================================
-
-local_density:
-  # Master switch — set true to activate Standard 5 evaluation citywide
-  enabled: true
-
-  # Minimum dwelling units to trigger Standard 5 analysis
-  unit_threshold: 15
-
-  # Volume-to-capacity threshold (same as wildland scenario — exact HCM LOS E/F boundary)
-  vc_threshold: 0.95
-
-  # Buffer radius around project to collect local egress roads
-  # Source: KLD Engineering quarter-mile methodology
-  radius_miles: 0.25
-
-  # Road types counted as local egress routes (freeways excluded)
-  local_egress_road_types:
-    - multilane
-    - two_lane
-
-  legal_basis: "Government Code §65302(g) — General Plan Safety Element evacuation route capacity; California Fire Code 503 — fire apparatus access road capacity; SB 79 (2025) objective health and safety standard carve-out"
+cache_ttl_days: 90

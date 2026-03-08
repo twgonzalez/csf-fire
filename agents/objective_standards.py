@@ -1,32 +1,36 @@
 """
-Agent 3: Objective Standards Engine — Orchestrator
+Agent 3: Objective Standards Engine — Orchestrator — JOSH v3.0
 
 Runs all applicable evacuation capacity scenarios against a proposed project
 and returns the most restrictive tier determination.
 
-Architecture:
+Architecture (v3.0):
   Each scenario implements the universal 5-step algorithm:
     1. Applicability check
     2. Scale gate
-    3. Route identification
+    3. Route identification (returns list[EvacuationPath])
     4. Demand calculation
-    5. Capacity ratio test (demand / capacity > threshold)
+    5. ΔT test (project_vehicles / bottleneck_effective_capacity) × 60 + egress)
 
   The orchestrator runs all scenarios, then applies "most restrictive wins":
     DISCRETIONARY (3) > CONDITIONAL MINISTERIAL (2) > MINISTERIAL (1)
 
-  Adding a new scenario requires only a new class in agents/scenarios/.
-  No changes to this orchestrator are needed.
+  Sb79TransitScenario always returns NOT_APPLICABLE — informational flag only.
 
 Active scenarios:
   A. WildlandScenario     — Standards 1–4 (AB 747, Gov. Code §65302.15)
-  B. LocalDensityScenario — Standard 5 (General Plan §65302(g), Fire Code 503, SB 79)
-                            [ENABLED — citywide, no transit gate; see parameters.yaml local_density block]
-                            [Phase 3: GTFS transit proximity gating available via require_transit_proximity]
+  B. Sb79TransitScenario  — Standard 5 (SB 79 transit proximity, informational only)
 
-Public API (unchanged from prior architecture):
-  evaluate_project(project, roads_gdf, fhsz_gdf, config, city_config) → (Project, audit)
-  generate_audit_trail(project, audit, output_path) → str
+Key v3.0 changes from v2.0:
+  - LocalDensityScenario replaced by Sb79TransitScenario (informational only)
+  - evaluate_project() accepts and passes evacuation_paths list to context
+  - Audit trail shows ΔT per path (not v/c comparison)
+  - _update_project_from_wildland() updated for new Project fields
+
+Public API:
+  evaluate_project(project, roads_gdf, fhsz_gdf, config, city_config,
+                   evacuation_paths=None) -> (Project, audit)
+  generate_audit_trail(project, audit, output_path) -> str
 """
 import logging
 from datetime import datetime
@@ -37,7 +41,7 @@ import geopandas as gpd
 from models.project import Project
 from agents.scenarios.base import ScenarioResult, Tier, TIER_RANK
 from agents.scenarios.wildland import WildlandScenario
-from agents.scenarios.local_density import LocalDensityScenario
+from agents.scenarios.sb79_transit import Sb79TransitScenario
 
 logger = logging.getLogger(__name__)
 
@@ -52,22 +56,27 @@ def evaluate_project(
     fhsz_gdf: gpd.GeoDataFrame,
     config: dict,
     city_config: dict,
-) -> tuple[Project, dict]:
+    evacuation_paths: list = None,
+) -> tuple:
     """
     Run all objective standards scenarios and produce a final determination.
 
-    Each scenario independently evaluates the project using the universal
-    5-step algorithm. The most restrictive tier across all applicable scenarios
-    is the final determination.
+    Args:
+        evacuation_paths: Pre-computed EvacuationPath objects from Agent 2.
+                         If None, WildlandScenario.identify_routes() will use
+                         an empty list and conservative fallback behavior.
 
     Returns:
         (updated Project, audit_trail dict)
     """
-    context = {"fhsz_gdf": fhsz_gdf}
+    context = {
+        "fhsz_gdf":         fhsz_gdf,
+        "evacuation_paths": evacuation_paths or [],
+    }
 
     scenarios = [
         WildlandScenario(config, city_config),
-        LocalDensityScenario(config, city_config),
+        Sb79TransitScenario(config, city_config),
     ]
 
     results: list[ScenarioResult] = [
@@ -77,7 +86,6 @@ def evaluate_project(
 
     final_tier = _most_restrictive(results)
 
-    # Update project fields (wildland result populates serving/flagged routes)
     wildland_result = next(r for r in results if r.scenario_name == "wildland_ab747")
     _update_project_from_wildland(project, wildland_result, config)
 
@@ -86,36 +94,38 @@ def evaluate_project(
 
     audit = {
         "evaluation_date": datetime.now().isoformat(),
-        "project": project.to_dict(),
+        "project":         project.to_dict(),
         "algorithm": {
             "name":        "Universal 5-Step Evacuation Capacity Algorithm",
-            "version":     "2.0 (multi-scenario)",
+            "version":     "3.0 (ΔT Standard)",
             "description": (
                 "Each scenario applies: (1) applicability check, (2) scale gate, "
-                "(3) route identification, (4) demand calculation, "
-                "(5) capacity ratio test (demand/capacity > threshold). "
+                "(3) route identification (EvacuationPath objects with bottleneck tracking), "
+                "(4) demand calculation (zone-based mobilization rate × vpu × units), "
+                "(5) ΔT test (project_vehicles / bottleneck_effective_capacity × 60 + egress). "
                 "Most restrictive tier across all applicable scenarios is the final determination."
             ),
             "legal_doc":   "See legal.md for full legal basis and defense reference.",
         },
         "scenarios": {
             r.scenario_name: {
-                "legal_basis": r.legal_basis,
-                "tier":        r.tier.value,
-                "triggered":   r.triggered,
-                "reason":      r.reason,
-                "steps":       r.steps,
-                "flagged_route_ids": r.flagged_route_ids,
+                "legal_basis":     r.legal_basis,
+                "tier":            r.tier.value,
+                "triggered":       r.triggered,
+                "reason":          r.reason,
+                "steps":           r.steps,
+                "delta_t_results": r.delta_t_results,
+                "max_delta_t":     r.max_delta_t,
             }
             for r in results
         },
         "determination": {
-            "result":          final_tier.value,
-            "tier":            final_tier.value,
-            "scenario_tiers":  {r.scenario_name: r.tier.value for r in results},
-            "logic":           "Most restrictive tier across all applicable scenarios wins.",
-            "tier_rank":       "DISCRETIONARY(3) > CONDITIONAL MINISTERIAL(2) > MINISTERIAL(1) > NOT_APPLICABLE(0)",
-            "reason":          project.determination_reason,
+            "result":         final_tier.value,
+            "tier":           final_tier.value,
+            "scenario_tiers": {r.scenario_name: r.tier.value for r in results},
+            "logic":          "Most restrictive tier across all applicable scenarios wins.",
+            "tier_rank":      "DISCRETIONARY(3) > CONDITIONAL MINISTERIAL(2) > MINISTERIAL(1) > NOT_APPLICABLE(0)",
+            "reason":         project.determination_reason,
         },
     }
 
@@ -126,8 +136,7 @@ def evaluate_project(
 # Tier aggregation
 # ---------------------------------------------------------------------------
 
-def _most_restrictive(results: list[ScenarioResult]) -> Tier:
-    """Return the most restrictive tier across all applicable scenario results."""
+def _most_restrictive(results: list) -> Tier:
     applicable = [r for r in results if r.tier != Tier.NOT_APPLICABLE]
     if not applicable:
         return Tier.MINISTERIAL
@@ -147,36 +156,26 @@ def _update_project_from_wildland(
     project.meets_size_threshold = s2.get("result", False)
     project.unit_threshold_used  = s2.get("threshold", config.get("unit_threshold", 15))
 
-    # Route identification
-    s3 = steps.get("step3_routes", {})
-    if s3:
-        route_list = s3.get("serving_routes", [])
-        project.serving_route_ids = [r["osmid"] for r in route_list]
-
-    # Ratio test
-    s5 = steps.get("step5_ratio_test", {})
+    # ΔT test results
+    s5 = steps.get("step5_delta_t", {})
     if s5:
-        project.exceeds_capacity_threshold = s5.get("result", False)
-        project.project_vehicles_peak_hour = steps.get("step4_demand", {}).get(
-            "project_vehicles_peak_hour", 0.0
-        )
-        project.flagged_route_ids = s5.get("flagged_route_ids", [])
+        project.delta_t_results            = result.delta_t_results
+        project.capacity_exceeded          = result.triggered
+        project.project_vehicles_peak_hour = s5.get("project_vehicles", 0.0)
+        project.egress_minutes             = s5.get("egress_minutes", 0.0)
 
 
-def _build_combined_reason(results: list[ScenarioResult], final_tier: Tier) -> str:
-    """Build a combined determination reason across all scenarios."""
-    triggered = [r for r in results if r.triggered]
+def _build_combined_reason(results: list, final_tier: Tier) -> str:
+    triggered  = [r for r in results if r.triggered]
     applicable = [r for r in results if r.tier != Tier.NOT_APPLICABLE]
 
     if triggered:
-        # Lead with the triggering scenario(s)
         parts = [r.reason for r in triggered]
         if len(parts) == 1:
             return parts[0]
         return " | ".join(f"[{r.scenario_name}] {r.reason}" for r in triggered)
 
     if applicable:
-        # Most restrictive applicable non-triggered scenario
         best = max(applicable, key=lambda r: TIER_RANK[r.tier])
         return best.reason
 
@@ -195,8 +194,8 @@ def generate_audit_trail(
     """
     Write a human-readable audit trail document for legal compliance.
 
-    Iterates over all scenario results and renders each step.
-    Format is designed for inclusion in planning record.
+    v3.0 format: shows ΔT per path (not v/c comparison), bottleneck data,
+    hazard degradation, mobilization rate, egress penalty.
 
     Returns the text content (also written to output_path).
     """
@@ -210,13 +209,15 @@ def generate_audit_trail(
     lines = [
         "=" * 70,
         "FIRE EVACUATION CAPACITY ANALYSIS — PROJECT DETERMINATION",
+        "JOSH v3.0 (ΔT Standard)",
         "=" * 70,
-        f"Date:          {audit['evaluation_date']}",
-        f"Project:       {project.project_name or 'Unnamed'}",
-        f"Address:       {project.address or 'Not provided'}",
-        f"APN:           {project.apn or 'Not provided'}",
-        f"Location:      {project.location_lat}, {project.location_lon}",
+        f"Date:           {audit['evaluation_date']}",
+        f"Project:        {project.project_name or 'Unnamed'}",
+        f"Address:        {project.address or 'Not provided'}",
+        f"APN:            {project.apn or 'Not provided'}",
+        f"Location:       {project.location_lat}, {project.location_lon}",
         f"Dwelling Units: {project.dwelling_units}",
+        f"Stories:        {getattr(project, 'stories', 0)}",
         "",
         "ALGORITHM",
         "-" * 40,
@@ -226,7 +227,6 @@ def generate_audit_trail(
     lines.append(f"  {alg.get('description', '')}")
     lines.append(f"  Reference: {alg.get('legal_doc', '')}")
 
-    # ── Render each scenario ──────────────────────────────────────────
     for scenario_name, scenario_data in audit.get("scenarios", {}).items():
         tier      = scenario_data["tier"]
         triggered = scenario_data["triggered"]
@@ -242,78 +242,86 @@ def generate_audit_trail(
         ]
 
         if tier == "NOT_APPLICABLE":
-            s1 = steps.get("step1_applicability", {})
-            lines.append(f"  NOT APPLICABLE: {s1.get('note', scenario_data.get('reason', ''))}")
+            note = scenario_data.get("reason", steps.get("note", "Not applicable"))
+            lines.append(f"  NOT APPLICABLE: {note}")
+            sb79_flag = steps.get("near_transit")
+            if sb79_flag is not None:
+                lines.append(
+                    f"  SB 79 Transit Proximity: "
+                    f"{'WITHIN transit buffer' if sb79_flag else 'outside transit buffer'}"
+                )
             continue
 
-        # Step 1: Applicability
+        # Step 1
         s1 = steps.get("step1_applicability", {})
         lines += [
             "",
-            "  STEP 1 — APPLICABILITY CHECK",
+            "  STEP 1 — APPLICABILITY CHECK (Standard 3: FHSZ Modifier)",
             "  " + "-" * 38,
             f"  Method: {s1.get('method', '')}",
             f"  Result: {'APPLICABLE' if s1.get('result') else 'NOT APPLICABLE'}",
         ]
         if "note" in s1:
             lines.append(f"  Note: {s1['note']}")
-
-        # Standard 3: FHSZ modifier (elevates project departure rate in Std 4 when flagged)
         if "fire_zone_severity_modifier" in s1:
             fz = s1["fire_zone_severity_modifier"]
             lines.append(
-                f"  Standard 3 (FHSZ Modifier): {fz.get('zone_description', 'Not in FHSZ')} "
-                f"({'IN FIRE ZONE — 100% simultaneous departure rate applied to project vehicles' if fz.get('result') else 'not in FHSZ — standard 57% departure rate applies'})"
+                f"  Standard 3 (FHSZ): {fz.get('zone_description', 'Not in FHSZ')} "
+                f"(hazard_zone={fz.get('hazard_zone', 'non_fhsz')}) "
+                f"({'IN FIRE ZONE' if fz.get('result') else 'not in FHSZ'})"
+            )
+            lines.append(
+                f"  Mobilization Rate: {s1.get('std3_mobilization_rate', 0.25):.2f} "
+                f"(Zhao et al. 2022 GPS-empirical, Kincade Fire)"
             )
 
-        # Step 2: Scale Gate
+        # Step 2
         s2 = steps.get("step2_scale", {})
         if s2:
             lines += [
                 "",
-                "  STEP 2 — SCALE GATE",
+                "  STEP 2 — SCALE GATE (Standard 1)",
                 "  " + "-" * 38,
                 f"  {s2.get('method', '')} → {'TRIGGERED' if s2.get('result') else 'not triggered'}",
                 f"  ({s2.get('dwelling_units')} units vs. {s2.get('threshold')} threshold)",
             ]
 
         if tier == "MINISTERIAL" and not s2.get("result"):
-            lines.append(f"  → Determination: MINISTERIAL (below scale threshold)")
+            lines.append(f"  -> Determination: MINISTERIAL (below scale threshold)")
             lines.append(f"  Reason: {scenario_data['reason']}")
             continue
 
-        # Step 3: Route Identification
+        # Step 3
         s3 = steps.get("step3_routes", {})
         if s3:
             lines += [
                 "",
-                "  STEP 3 — ROUTE IDENTIFICATION",
+                "  STEP 3 — ROUTE IDENTIFICATION (Standard 2)",
                 "  " + "-" * 38,
                 f"  Method: {s3.get('method', '')}",
                 f"  Radius: {s3.get('radius_miles')} miles ({s3.get('radius_meters')} m)",
-                f"  Routes found: {s3.get('serving_route_count', 0)}",
+                f"  Serving route segments found: {s3.get('serving_route_count', 0)}",
+                f"  Serving EvacuationPaths identified: {s3.get('serving_paths_count', 0)}",
             ]
-            # Deduplicate OSM segments by road name — one named road = many OSM rows
-            _name_seg_count: dict[str, int] = {}
-            for r in s3.get("serving_routes", []):
-                rname = r.get("name") or str(r["osmid"])
-                _name_seg_count[rname] = _name_seg_count.get(rname, 0) + 1
-            _seen_s3: set[str] = set()
-            for r in s3.get("serving_routes", []):
-                rname = r.get("name") or str(r["osmid"])
-                if rname in _seen_s3:
-                    continue
-                _seen_s3.add(rname)
-                seg_count = _name_seg_count[rname]
-                seg_note = f" ({seg_count} OSM segments)" if seg_count > 1 else ""
+            if s3.get("fallback_all_paths"):
                 lines.append(
-                    f"    - {rname}{seg_note}: "
-                    f"v/c={r.get('vc_ratio', 0):.4f}, LOS={r.get('los', '')}, "
-                    f"cap={r.get('capacity_vph', 0):.0f} vph, "
-                    f"demand={r.get('baseline_demand_vph', 0):.1f} vph"
+                    "  [Conservative fallback: no paths matched proximity — all city paths used]"
+                )
+            _name_seen: set = set()
+            for r in s3.get("serving_routes", []):
+                rname = r.get("name") or str(r["osmid"])
+                if rname in _name_seen:
+                    continue
+                _name_seen.add(rname)
+                lines.append(
+                    f"    - {rname}: "
+                    f"eff_cap={r.get('effective_capacity_vph', 0):.0f} vph, "
+                    f"fhsz={r.get('fhsz_zone', 'non_fhsz')}, "
+                    f"deg={r.get('hazard_degradation', 1.0):.2f}, "
+                    f"vc={r.get('vc_ratio', 0):.3f} (informational)"
                 )
 
-        # Step 4: Demand Calculation
+        # Step 4
         s4 = steps.get("step4_demand", {})
         if s4:
             lines += [
@@ -321,111 +329,94 @@ def generate_audit_trail(
                 "  STEP 4 — DEMAND CALCULATION",
                 "  " + "-" * 38,
                 f"  Formula: {s4.get('formula', '')}",
+                f"  Hazard Zone: {s4.get('hazard_zone', 'non_fhsz')}",
+                f"  Mobilization Rate: {s4.get('mobilization_rate', 0.25):.2f}",
                 f"  Project vehicles (peak hour): {s4.get('project_vehicles_peak_hour', 0):.1f} vph",
                 f"  Source (vehicles/unit): {s4.get('source_vehicles_per_unit', '')}",
-                f"  Source (departure rate): {s4.get('source_mobilization', '')}",
+                f"  Source (mobilization): {s4.get('source_mobilization', '')}",
             ]
 
-        # Step 5: Capacity Ratio Test
-        s5 = steps.get("step5_ratio_test", {})
+        # Step 5: ΔT
+        s5 = steps.get("step5_delta_t", {})
         if s5:
-            # Build osmid→name lookup for human-readable route summaries
-            _osmid_to_name = {
-                r.get("osmid"): (r.get("name") or str(r.get("osmid", "")))
-                for r in s5.get("route_details", [])
-            }
-
-            def _fmt_osmid_list(osmid_list):
-                if not osmid_list:
-                    return "none"
-                names, seen = [], set()
-                for oid in osmid_list:
-                    n = _osmid_to_name.get(oid, str(oid))
-                    if n not in seen:
-                        seen.add(n)
-                        names.append(n)
-                return ", ".join(names)
-
             lines += [
                 "",
-                "  STEP 5 — CAPACITY RATIO TEST",
+                "  STEP 5 — ΔT TEST (Standard 4)",
                 "  " + "-" * 38,
-                f"  V/C Threshold: {s5.get('vc_threshold', 0.95)}",
                 f"  Method: {s5.get('method', '')}",
-                f"  Project vehicles per route: {s5.get('vehicles_per_route', 0):.1f} vph",
-                f"  Routes evaluated: {s5.get('serving_routes_evaluated', 0)}",
-                f"  Already failing at baseline (not caused by project): {_fmt_osmid_list(s5.get('already_failing_at_baseline', []))}",
-                f"  Project-caused exceedance (triggers DISCRETIONARY): {_fmt_osmid_list(s5.get('project_caused_exceedance', []))}",
+                f"  Hazard Zone: {s5.get('hazard_zone', 'non_fhsz')}",
+                f"  Mobilization Rate: {s5.get('mobilization_rate', 0.25):.2f}",
+                f"  Project Vehicles: {s5.get('project_vehicles', 0):.1f} vph",
+                f"  Egress Penalty: {s5.get('egress_minutes', 0):.1f} min "
+                f"(NFPA 101/IBC; applies to buildings >= 4 stories)",
+                f"  ΔT Threshold: {s5.get('max_marginal_minutes', 10)} min",
+                f"  Paths Evaluated: {s5.get('paths_evaluated', 0)}",
+                f"  Max ΔT: {s5.get('max_delta_t_minutes', 0):.2f} min",
+                f"  Triggered: {'YES — DISCRETIONARY' if s5.get('triggered') else 'NO'}",
                 "",
-                "  Route-by-Route Results:",
+                "  Per-Path Results (deduplicated by bottleneck name):",
             ]
-            # Deduplicate by road name — OSM splits one road into many geometry segments
-            _name_seg_count_s5: dict[str, int] = {}
-            for r in s5.get("route_details", []):
-                rname = r.get("name") or str(r.get("osmid", ""))
-                _name_seg_count_s5[rname] = _name_seg_count_s5.get(rname, 0) + 1
-            _seen_s5: set[str] = set()
-            for r in s5.get("route_details", []):
-                rname = r.get("name") or str(r.get("osmid", ""))
-                if rname in _seen_s5:
+            _bn_seen: set = set()
+            for r in s5.get("path_results", []):
+                bn_name = r.get("bottleneck_name") or r.get("bottleneck_osmid", "Unknown")
+                if bn_name in _bn_seen:
                     continue
-                _seen_s5.add(rname)
-                seg_count = _name_seg_count_s5[rname]
-                seg_note = f" ({seg_count} segments)" if seg_count > 1 else ""
-                # Only mark routes the PROJECT causes to cross the threshold (marginal causation).
-                # Routes already failing at baseline are noted separately — they do not trigger DISCRETIONARY.
-                if r.get("project_causes_exceedance"):
-                    flag = " *** PROJECT CAUSES EXCEEDANCE ***"
-                elif r.get("baseline_exceeds"):
-                    flag = " [pre-existing LOS F — not caused by project]"
-                else:
-                    flag = ""
-                lines.append(f"    {rname}{seg_note}:{flag}")
-                evac_d = r.get("evac_demand_vph", r.get("baseline_demand_vph", 0.0))
-                mob_f  = r.get("mob_factor", 0.57)
-                eff_d  = r.get("effective_baseline_demand", evac_d)
-                lines.append(
-                    f"      Normal demand: {r.get('normal_demand_vph', 0.0):.1f} vph  "
-                    f"Evac demand: {evac_d:.1f} vph  "
-                    f"Effective baseline: {eff_d:.1f} vph ({mob_f:.0%} departure rate), "
-                    f"v/c={r.get('effective_baseline_vc', 0):.4f} {'[EXCEEDS]' if r['baseline_exceeds'] else '[OK]'}"
+                _bn_seen.add(bn_name)
+                flag = (
+                    " *** ΔT EXCEEDS THRESHOLD — DISCRETIONARY ***"
+                    if r.get("flagged") else " [within threshold]"
                 )
                 lines.append(
-                    f"      Proposed: {r['proposed_demand_vph']:.1f} vph (+{r['vehicles_added']:.1f}), "
-                    f"v/c={r['proposed_vc']:.4f} {'[EXCEEDS]' if r['proposed_exceeds'] else '[OK]'}"
+                    f"    Bottleneck: {bn_name}{flag}"
                 )
-            lines.append(f"  → Triggered: {'YES' if s5.get('result') else 'NO'}")
+                lines.append(
+                    f"      HCM cap: {r.get('bottleneck_hcm_capacity_vph', 0):.0f} vph  "
+                    f"x degradation {r.get('bottleneck_hazard_degradation', 1.0):.2f} "
+                    f"({r.get('bottleneck_fhsz_zone', 'non_fhsz')})  "
+                    f"= eff cap {r.get('bottleneck_effective_capacity_vph', 0):.0f} vph"
+                )
+                lines.append(
+                    f"      ΔT = ({r.get('project_vehicles', 0):.1f} vph / "
+                    f"{r.get('bottleneck_effective_capacity_vph', 0):.0f} vph) x 60 "
+                    f"+ {r.get('egress_minutes', 0):.1f} min egress "
+                    f"= {r.get('delta_t_minutes', 0):.2f} min  "
+                    f"(threshold: {r.get('threshold_minutes', 10)} min)"
+                )
 
         lines += [
             "",
-            f"  → Scenario Tier: {tier}",
+            f"  -> Scenario Tier: {tier}",
             f"  Reason: {scenario_data['reason']}",
         ]
 
     # ── Final Determination ───────────────────────────────────────────
-    d = audit.get("determination", {})
+    d   = audit.get("determination", {})
+    hz  = getattr(project, "hazard_zone", "non_fhsz")
+    max_dt = project.max_delta_t() if hasattr(project, "max_delta_t") else 0.0
 
     tier_explanation = {
         "DISCRETIONARY": (
             "DISCRETIONARY REVIEW REQUIRED\n\n"
             "  At least one scenario triggered DISCRETIONARY: the project meets the\n"
-            "  dwelling unit size threshold and at least one serving route exceeds the\n"
-            "  HCM 2022 v/c capacity threshold under the applicable demand scenario.\n\n"
-            "  NOTE: For the wildland scenario, DISCRETIONARY is triggered by capacity\n"
-            "  impact (Standard 4), not by fire zone location. Fire zone location is\n"
-            "  recorded as a severity modifier and may affect required mitigation conditions."
+            "  dwelling unit size threshold and at least one serving path's ΔT exceeds\n"
+            "  the applicable threshold for the project's hazard zone.\n\n"
+            "  ΔT = (project_vehicles / bottleneck_effective_capacity) x 60 + egress_penalty\n"
+            "  The baseline state of the road is irrelevant — projects in already-failing\n"
+            "  zones are tested equally (key v3.0 correction from v2.0 marginal causation test).\n\n"
+            "  NOTE: Fire zone location (Standard 3) affects mobilization rate and ΔT threshold;\n"
+            "  it does not independently gate the determination."
         ),
         "CONDITIONAL MINISTERIAL": (
             "CONDITIONAL MINISTERIAL APPROVAL\n\n"
-            "  The city contains FHSZ zones and the project meets the dwelling unit size\n"
-            "  threshold. No scenario triggered DISCRETIONARY (v/c threshold not exceeded).\n\n"
-            "  Ministerial approval eligible with mandatory evacuation-related conditions\n"
-            "  defined by the city pursuant to its General Plan Safety Element."
+            "  The project meets the dwelling unit size threshold and serves evacuation routes.\n"
+            "  No serving path's ΔT exceeds the applicable threshold for the project's\n"
+            "  hazard zone. Ministerial approval eligible with mandatory evacuation-related\n"
+            "  conditions defined by the city pursuant to its General Plan Safety Element."
         ),
         "MINISTERIAL": (
             "MINISTERIAL APPROVAL ELIGIBLE\n\n"
-            "  No scenario triggered DISCRETIONARY or CONDITIONAL MINISTERIAL.\n"
-            "  No evacuation-related conditions are flagged by this analysis."
+            "  Project is below the dwelling unit size threshold (Standard 1 not met).\n"
+            "  No evacuation capacity analysis is required."
         ),
     }.get(det, det)
 
@@ -437,6 +428,16 @@ def generate_audit_trail(
         f"  RESULT: {det_label}",
         "",
         f"  {project.determination_reason}",
+        "",
+        "  PARAMETERS APPLIED",
+        "  " + "-" * 38,
+        f"  Hazard Zone:        {hz}",
+        f"  Mobilization Rate:  {getattr(project, 'mobilization_rate', 0.0):.2f} "
+        f"(Zhao et al. 2022 GPS-empirical)",
+        f"  Vehicles per Unit:  2.5 (U.S. Census ACS B25044)",
+        f"  Egress Penalty:     {getattr(project, 'egress_minutes', 0.0):.1f} min "
+        f"(NFPA 101/IBC — {getattr(project, 'stories', 0)} stories)",
+        f"  Max ΔT (project):   {max_dt:.2f} min",
         "",
         "  Determination Tier:",
         f"    {tier_explanation}",
@@ -462,14 +463,3 @@ def generate_audit_trail(
     output_path.write_text(text)
     logger.info(f"Audit trail written to: {output_path}")
     return text
-
-
-# ---------------------------------------------------------------------------
-# Backward-compat helper (used by capacity_analysis.py indirectly)
-# ---------------------------------------------------------------------------
-
-def calculate_proposed_vc(proposed_demand: float, capacity: float) -> float:
-    """Calculate proposed v/c ratio after adding project vehicles."""
-    if capacity <= 0:
-        return 0.0
-    return proposed_demand / capacity
