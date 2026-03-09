@@ -648,7 +648,7 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
     fz_desc     = s1_applicability.get("std3_zone_desc", "Not in FHSZ")
     fz_level    = s1_applicability.get("std3_zone_level", 0)
     hazard_zone = s1_applicability.get("std3_hazard_zone", "non_fhsz")
-    mob_rate    = s1_applicability.get("std3_mobilization_rate", 0.25)
+    mob_rate    = s1_applicability.get("std3_mobilization_rate", 0.90)
 
     if not s1_result:
         s3_chip = "NOT EVALUATED"
@@ -663,10 +663,10 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
           <strong>Project site:</strong> {fz_desc} (source: CAL FIRE OSFM)<br>
           <strong>Hazard zone:</strong> <code>{hazard_zone}</code> &nbsp;&middot;&nbsp;
           <strong>Mobilization rate:</strong> {mob_rate:.2f}
-          (Zhao et al. 2022 GPS-empirical, 44M records, Kincade Fire)<br>
-          Road capacity is additionally degraded by zone-specific factors
+          (NFPA 101 design basis — constant; ~10% zero-vehicle HH adjustment per Census ACS B25044)<br>
+          Road capacity is degraded by zone-specific factors
           (vhfhsz=0.35, high_fhsz=0.50, moderate_fhsz=0.75) applied upstream by Agent 2
-          (HCM Exhibit 10-15/10-17 composite + NIST Camp Fire validation).
+          (HCM Exhibit 10-15/10-17 composite + NIST Camp Fire validation). FHSZ does NOT affect mobilization.
         </div>"""
     else:
         s3_chip = "NOT IN FHSZ"
@@ -676,7 +676,7 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
           Project site is not within a designated fire hazard severity zone —
           <strong>hazard_zone:</strong> <code>non_fhsz</code> &nbsp;&middot;&nbsp;
           <strong>mobilization rate:</strong> {mob_rate:.2f}
-          (shadow evacuation baseline, Zhao et al. 2022). No road capacity degradation applied.
+          (NFPA 101 design basis — constant). No road capacity degradation applied.
         </div>"""
 
     rows.append(_std_row("3", s3_badge_color,
@@ -692,7 +692,7 @@ def _build_standards_analysis(tier: str, wildland: dict, local5: dict, config: d
     egress_min   = s5.get("egress_minutes", 0)
     max_dt       = s5.get("max_delta_t_minutes", 0.0)
     hazard_zone  = s5.get("hazard_zone", "non_fhsz")
-    mob_rate     = s5.get("mobilization_rate", 0.25)
+    mob_rate     = s5.get("mobilization_rate", 0.90)
     max_threshold = s5.get("threshold_minutes", 6.0)
     safe_window   = s5.get("safe_egress_window_minutes", 120.0)
     max_share     = s5.get("max_project_share", 0.05)
@@ -1033,18 +1033,13 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
     ut  = config.get("unit_threshold", 15)
     vpu = config.get("vehicles_per_unit", 2.5)
 
-    # v3.0 / v3.1 parameters
-    mob_rates    = config.get("mobilization_rates", {})
+    # v3.2 parameters
+    mob_rate     = config.get("mobilization_rate", 0.90)  # NFPA 101 design basis, constant
     haz_deg      = config.get("hazard_degradation", {})
     safe_egress  = config.get("safe_egress_window", {})
     max_share    = config.get("max_project_share", 0.05)
     egress_cfg   = config.get("egress_penalty", {})
     vc_t         = config.get("vc_threshold", 0.95)
-
-    mob_vhf  = mob_rates.get("vhfhsz", 0.75)
-    mob_hi   = mob_rates.get("high_fhsz", 0.57)
-    mob_mod  = mob_rates.get("moderate_fhsz", 0.40)
-    mob_non  = mob_rates.get("non_fhsz", 0.25)
 
     deg_vhf  = haz_deg.get("vhfhsz", 0.35)
     deg_hi   = haz_deg.get("high_fhsz", 0.50)
@@ -1079,7 +1074,7 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
   <div style="font-family:monospace; font-size:12px; background:#f1f3f5; padding:8px 12px;
               border-radius:4px; color:#212529; margin-bottom:12px;">
     ΔT = (project_vehicles / bottleneck_effective_capacity_vph) &times; 60 + egress_penalty<br>
-    project_vehicles = units &times; {vpu} vpu &times; mobilization_rate(hazard_zone)<br>
+    project_vehicles = units &times; {vpu} vpu &times; {mob_rate:.2f} (mobilization, NFPA 101 constant)<br>
     egress_penalty = min(stories &times; {egr_mps}, {egr_max}) min &nbsp;[if stories &ge; {egr_thr}; else 0]<br>
     Flagged when ΔT &gt; threshold(hazard_zone) = safe_egress_window × max_project_share
   </div>
@@ -1091,18 +1086,9 @@ def _build_methodology(audit: dict, config: dict, city_config: dict) -> str:
           <td>ITE de minimis; SB 330, Gov. Code §65905.5</td></tr>
       <tr><td>Vehicles per dwelling unit</td><td><strong>{vpu}</strong></td>
           <td>U.S. Census ACS B25044</td></tr>
-      <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
-              font-size:11px; letter-spacing:0.5px;">
-          Mobilization Rates by Hazard Zone (Zhao et al. 2022, 44M GPS records, Kincade Fire)
-      </td></tr>
-      <tr><td>&nbsp;&nbsp;Very High FHSZ (vhfhsz)</td>
-          <td><strong>{mob_vhf:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
-      <tr><td>&nbsp;&nbsp;High FHSZ (high_fhsz)</td>
-          <td><strong>{mob_hi:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
-      <tr><td>&nbsp;&nbsp;Moderate FHSZ (moderate_fhsz)</td>
-          <td><strong>{mob_mod:.2f}</strong></td><td>Zhao et al. 2022</td></tr>
-      <tr><td>&nbsp;&nbsp;Non-FHSZ (non_fhsz)</td>
-          <td><strong>{mob_non:.2f}</strong></td><td>Zhao et al. 2022 (shadow evacuation)</td></tr>
+      <tr><td>Mobilization rate (all zones)</td>
+          <td><strong>{mob_rate:.2f}</strong></td>
+          <td>NFPA 101 design basis (100% occupant evacuation); ~10% zero-vehicle HH adj. (Census ACS B25044)</td></tr>
       <tr><td colspan="3" style="padding-top:8px; font-weight:700; color:#495057;
               font-size:11px; letter-spacing:0.5px;">
           Hazard Capacity Degradation Factors (HCM Exhibit 10-15/10-17 + NIST Camp Fire)

@@ -1,12 +1,11 @@
-# JOSH v3.0 — Global Parameters
+# JOSH v3.2 — Global Parameters
 # Fire Evacuation Capacity Analysis System
 # All thresholds trace to published sources. No parameter requires city-level adoption.
 # Override city-specific values in config/cities/{city}.yaml
 
 # ============================================================
 # Project Size Threshold
-# Basis: 15 units × 2.5 vpu × 0.25 mob (non-FHSZ) = 9.4 vph — de minimis under ITE.
-#        At 15 units in a VHFHSZ (×0.75 mob), contribution = 28.1 vph — measurable.
+# Basis: 15 units × 2.5 vpu × 0.90 mob = 33.75 vph — measurable on any road type.
 # Statutory anchor: SB 330 (Gov. Code §65905.5) — heightened protections at 10+ units;
 #   15 is the first integer above ITE de minimis that falls in the SB 330 project class.
 # This is an administrative proportionality threshold, NOT a safety threshold.
@@ -15,30 +14,25 @@
 unit_threshold: 15
 
 # ============================================================
-# Mobilization Rates by FHSZ Zone
-# Source: Zhao, X., et al. (2022). Estimating wildfire evacuation decision and departure
-#         timing using large-scale GPS data. Transportation Research Part C.
-#         (44.2M GPS records, 2019 Kincade Fire — census block group resolution)
-#         Cross-validated: Wong, S.D., et al. (2020). Review of California wildfire
-#         evacuations from 2017-2019. UC ITS.
+# Mobilization Rate — constant for all projects, all zones
+# Source: NFPA 101 (Life Safety Code) design basis.
 #
-# GPS-measured compliance varies by proximity to hazard.
-#   VHFHSZ: 0.75  — conservative above observed zone-max rates for highest-risk zones
-#   High FHSZ: 0.57 — matches KLD/observed zone-level mean (KLD TR-1381, Berkeley)
-#   Moderate FHSZ: 0.40 — below mean; farther from typical ignition
-#   Non-FHSZ: 0.25  — shadow evacuation (GPS-observed compliance outside evacuation zones)
+# NFPA 101 designs building exits for 100% occupant evacuation. Fire marshals
+# do not size exits for partial evacuation. This standard applies the same
+# principle to the roads serving those buildings.
+#
+# The 0.90 factor accounts for approximately 10% of households with zero
+# vehicles, as measured by Census ACS Table B25044.
+#
+# FHSZ affects the road (through the hazard degradation factor below).
+# It does not affect mobilization. The project's residents are the project's
+# residents regardless of where the project is located.
 # ============================================================
 
-mobilization_rates:
-  vhfhsz: 0.75
-  high_fhsz: 0.57
-  moderate_fhsz: 0.40
-  non_fhsz: 0.25
-  citation: >
-    Zhao, X., et al. (2022). Estimating wildfire evacuation decision and departure
-    timing using large-scale GPS data. Transportation Research Part C 139:103647.
-    Wong, S.D., Broader, J.C., Shaheen, S.A. (2020). Review of California wildfire
-    evacuations from 2017 to 2019. UC Institute of Transportation Studies.
+mobilization_rate: 0.90
+# Source: NFPA 101 design basis (100% evacuation), adjusted for
+# ~10% zero-vehicle households per Census ACS B25044.
+# Cities may override with city-specific zero-vehicle rate from B25044.
 
 # ============================================================
 # Hazard-Aware Road Capacity Degradation
@@ -268,7 +262,6 @@ evacuation_demand:
 # KLD buffer demand — informational only (informational citywide planning reference)
 demand:
   buffer_radius_miles: 0.25
-  resident_mobilization: 0.57
   employee_mobilization_day: 1.00
   employee_mobilization_night: 0.10
   student_mobilization_day: 1.00
