@@ -480,39 +480,44 @@ def _build_header(city_name: str, case_num: str, eval_date: str, project) -> str
 
 
 # ---------------------------------------------------------------------------
-# Summary stats (unchanged from v1)
+# Summary stats
 # ---------------------------------------------------------------------------
 
 def _build_summary_stats(tier: str, wildland: dict, local5: dict) -> str:
-    l5_applicable = local5.get("tier", "NOT_APPLICABLE") != "NOT_APPLICABLE"
-    n_evaluated = 5 if l5_applicable else 4
-
-    w_triggered = wildland.get("triggered", False)
-    l5_triggered = local5.get("triggered", False)
-    n_triggered = (1 if w_triggered else 0) + (1 if l5_triggered else 0)
-
-    trig_color = "#c0392b" if n_triggered > 0 else "#27ae60"
-    tc = _TIER_CSS_COLOR.get(tier, "#555")
-
     tier_label = {
         "DISCRETIONARY":           "DISCRETIONARY<br>REVIEW REQUIRED",
         "CONDITIONAL MINISTERIAL": "CONDITIONAL<br>MINISTERIAL",
         "MINISTERIAL":             "MINISTERIAL<br>APPROVAL ELIGIBLE",
     }.get(tier, tier)
 
+    if tier == "MINISTERIAL":
+        # No ΔT analysis was run — single full-width tier card
+        return f"""<div class="stat-cards" style="margin-top:20px; grid-template-columns:1fr;">
+  <div class="stat-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 16px;">
+    <div class="tier-pill">{tier_label}</div>
+  </div>
+</div>"""
+
+    # DISCRETIONARY or CONDITIONAL MINISTERIAL — show ΔT metrics
+    s5        = wildland.get("steps", {}).get("step5_delta_t", {})
+    max_dt    = s5.get("max_delta_t_minutes", 0.0)
+    threshold = s5.get("threshold_minutes", 6.0)
+
+    dt_color  = "#c0392b" if tier == "DISCRETIONARY" else "#27ae60"
+
     return f"""<div class="stat-cards" style="margin-top:20px;">
 
   <div class="stat-card">
-    <div class="big-num" style="color:#495057;">{n_evaluated}</div>
-    <div class="label">Standards Evaluated</div>
+    <div class="big-num" style="color:{dt_color};">{max_dt:.1f}</div>
+    <div class="label">Max &Delta;T (min)</div>
   </div>
 
   <div class="stat-card">
-    <div class="big-num" style="color:{trig_color};">{n_triggered}</div>
-    <div class="label">{"Standards" if n_triggered != 1 else "Standard"} Triggered</div>
+    <div class="big-num" style="color:#495057;">{threshold:.2f}</div>
+    <div class="label">Threshold (min)</div>
   </div>
 
-  <div class="stat-card" style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+  <div class="stat-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
     <div class="tier-pill">{tier_label}</div>
   </div>
 

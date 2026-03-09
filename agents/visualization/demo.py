@@ -904,7 +904,7 @@ def _build_project_detail_div(
 
       <!-- Bar -->
       <div style="position:relative; height:12px; border-radius:6px;
-                  overflow:visible; margin-top:2px; margin-bottom:5px;">
+                  overflow:visible; margin-top:2px; margin-bottom:5px; margin-right:10px;">
         <div style="position:absolute; left:0; top:0; width:100%; height:100%;
                     background:#d4edda; border-radius:6px;"></div>
         <div style="position:absolute; left:50%; top:0; right:0; height:100%;
