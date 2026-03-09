@@ -254,6 +254,7 @@ def create_demo_map(
 
     # ── Per-project FeatureGroups ──────────────────────────────────────────
     proj_js_names: list[str] = []
+    bottleneck_js_names: list[str | None] = []   # parallel — None if no highlight layer
 
     # Per-project Standard 5 data (populated from audits if available)
     proj_ld_data: list[dict] = []
@@ -290,6 +291,7 @@ def create_demo_map(
         # Use project.delta_t_results (set by Agent 3 WildlandScenario).
         # Show the flagged path with highest ΔT, or the highest ΔT path overall.
         worst_wildland_route: "dict | None" = None
+        ctrl_osmid: str = ""   # controlling bottleneck osmid for hover highlight
         if project.delta_t_results:
             flagged_dts = [r for r in project.delta_t_results if r.get("flagged")]
             best_dt     = (
@@ -297,6 +299,7 @@ def create_demo_map(
                 if flagged_dts else
                 max(project.delta_t_results, key=lambda r: r.get("delta_t_minutes", 0))
             )
+            ctrl_osmid = str(best_dt.get("bottleneck_osmid", ""))
             worst_wildland_route = {
                 "name":              str(best_dt.get("bottleneck_name", "") or "Bottleneck segment"),
                 "delta_t_minutes":   best_dt.get("delta_t_minutes",  0.0),
@@ -435,6 +438,32 @@ def create_demo_map(
                     tooltip=tip,
                 ).add_to(proj_group)
 
+        # ── Controlling bottleneck highlight (hover-activated, initially hidden) ──
+        # One white polyline per non-MINISTERIAL project; opacity toggled by JS
+        # on marker mouseover/mouseout to draw the eye to the physical pinch point.
+        btn_js_name: "str | None" = None
+        if (tier != "MINISTERIAL"
+                and ctrl_osmid
+                and "osmid" in roads_wgs84.columns):
+            ctrl_mask = roads_wgs84["osmid"].apply(
+                lambda o, s=ctrl_osmid: _osmid_matches(o, {s})
+            )
+            ctrl_rows = roads_wgs84[ctrl_mask]
+            if not ctrl_rows.empty:
+                ctrl_geom = ctrl_rows.iloc[0].geometry
+                if ctrl_geom is not None and not ctrl_geom.is_empty:
+                    btn_layer = folium.GeoJson(
+                        mapping(ctrl_geom),
+                        style_function=lambda _: {
+                            "color": "white",
+                            "weight": 9,
+                            "opacity": 0,
+                        },
+                    )
+                    btn_layer.add_to(proj_group)
+                    btn_js_name = btn_layer.get_name()
+        bottleneck_js_names.append(btn_js_name)
+
         # Project marker (wildland group — visible in Scenario A)
         folium.Marker(
             location=[project.location_lat, project.location_lon],
@@ -462,6 +491,7 @@ def create_demo_map(
             proj_js_names=proj_js_names,
             map_js_name=map_js_name,
             proj_ld_data=proj_ld_data,
+            bottleneck_js_names=bottleneck_js_names,
         )
     ))
     m.get_root().html.add_child(folium.Element(
@@ -583,11 +613,13 @@ def _build_demo_panel_html(
     proj_js_names: list,
     map_js_name: str,
     proj_ld_data: list[dict] | None = None,
+    bottleneck_js_names: list | None = None,
 ) -> str:
     """Fixed top-left panel for the demo map — project selector + detail cards."""
     vc_threshold  = config.get("vc_threshold", 0.95)
     unit_threshold = config.get("unit_threshold", 50)
     proj_js_array = json.dumps(proj_js_names)
+    bottleneck_js_array = json.dumps(bottleneck_js_names or [None] * len(proj_js_names))
 
     tier_abbr_map = {
         "DISCRETIONARY":           "DISC",
@@ -690,12 +722,27 @@ def _build_demo_panel_html(
 <script>
 (function () {{
 
-  var PROJECT_LAYERS = {proj_js_array};
-  var MAP_NAME = '{map_js_name}';
+  var PROJECT_LAYERS    = {proj_js_array};
+  var BOTTLENECK_LAYERS = {bottleneck_js_array};
+  var MAP_NAME  = '{map_js_name}';
+  var pulseTimers = {{}};
+
+  // ── Clear all bottleneck pulses and hide highlight layers ────────────
+  function clearAllPulses() {{
+    Object.keys(pulseTimers).forEach(function (k) {{
+      clearInterval(pulseTimers[k]);
+    }});
+    pulseTimers = {{}};
+    BOTTLENECK_LAYERS.forEach(function (bName) {{
+      if (bName && window[bName]) window[bName].setStyle({{opacity: 0}});
+    }});
+  }}
 
   window.selectProject = function (idx) {{
     var mapObj = window[MAP_NAME];
     if (!mapObj) return;
+
+    clearAllPulses();
 
     PROJECT_LAYERS.forEach(function (varName, i) {{
       var layer = window[varName];
@@ -723,11 +770,41 @@ def _build_demo_panel_html(
     btn.textContent    = (body.style.display === 'none') ? '▶' : '▼';
   }};
 
-  // ── Init: show only project 0 (poll until Leaflet map is ready) ──────
+  // ── Init: show project 0, then wire bottleneck hover handlers ────────
   (function initSelect() {{
     var mapObj = window[MAP_NAME];
     if (!mapObj) {{ setTimeout(initSelect, 50); return; }}
     window.selectProject(0);
+
+    // Attach mouseover/mouseout to each project's house marker so hovering
+    // reveals the controlling bottleneck segment with a pulsing white stroke.
+    BOTTLENECK_LAYERS.forEach(function (bName, idx) {{
+      if (!bName) return;
+      var projLayer = window[PROJECT_LAYERS[idx]];
+      if (!projLayer) return;
+
+      projLayer.eachLayer(function (layer) {{
+        if (!(layer instanceof L.Marker)) return;
+        var bLayer = window[bName];
+        if (!bLayer) return;
+
+        layer.on('mouseover', function () {{
+          bLayer.setStyle({{opacity: 1}});
+          var bright = true;
+          pulseTimers[idx] = setInterval(function () {{
+            bright = !bright;
+            bLayer.setStyle({{opacity: bright ? 1.0 : 0.15}});
+          }}, 550);
+        }});
+
+        layer.on('mouseout', function () {{
+          clearInterval(pulseTimers[idx]);
+          pulseTimers[idx] = null;
+          bLayer.setStyle({{opacity: 0}});
+        }});
+      }});
+    }});
+
   }})();
 
 }})();
