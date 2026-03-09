@@ -775,8 +775,7 @@ def _build_project_detail_div(
 
     # ── Hazard zone / mob rate ────────────────────────────────────────────
     hazard_zone = getattr(project, "hazard_zone", "non_fhsz") or "non_fhsz"
-    mob_rates   = config.get("mobilization_rates", {})
-    mob_rate    = mob_rates.get(hazard_zone, 0.25)
+    mob_rate    = config.get("mobilization_rate", 0.90)  # NFPA 101 design basis, constant
     mob_pct     = f"{mob_rate:.0%}"
 
     _zone_labels = {

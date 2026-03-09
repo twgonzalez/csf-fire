@@ -1,5 +1,5 @@
 """
-Agent 3: Objective Standards Engine — Orchestrator — JOSH v3.1
+Agent 3: Objective Standards Engine — Orchestrator — JOSH v3.2
 
 Runs all applicable evacuation capacity scenarios against a proposed project
 and returns the most restrictive tier determination.
@@ -103,12 +103,13 @@ def evaluate_project(
         "project":         project.to_dict(),
         "algorithm": {
             "name":        "Universal 5-Step Evacuation Capacity Algorithm",
-            "version":     "3.0 (ΔT Standard)",
+            "version":     "3.2 (ΔT Standard — constant mobilization)",
             "description": (
                 "Each scenario applies: (1) applicability check, (2) scale gate, "
                 "(3) route identification (EvacuationPath objects with bottleneck tracking), "
-                "(4) demand calculation (zone-based mobilization rate × vpu × units), "
+                "(4) demand calculation (mobilization rate 0.90 × vpu × units — NFPA 101 design basis), "
                 "(5) ΔT test (project_vehicles / bottleneck_effective_capacity × 60 + egress). "
+                "FHSZ affects road capacity degradation only — not mobilization. "
                 "Most restrictive tier across all applicable scenarios is the final determination."
             ),
             "legal_doc":   "See legal.md for full legal basis and defense reference.",
@@ -216,7 +217,7 @@ def generate_audit_trail(
     lines = [
         "=" * 70,
         "FIRE EVACUATION CAPACITY ANALYSIS — PROJECT DETERMINATION",
-        "JOSH v3.1 (ΔT Standard — Derived Thresholds)",
+        "JOSH v3.2 (ΔT Standard — Constant Mobilization, NFPA 101)",
         "=" * 70,
         f"Date:           {audit['evaluation_date']}",
         f"Project:        {project.project_name or 'Unnamed'}",
@@ -278,8 +279,8 @@ def generate_audit_trail(
                 f"({'IN FIRE ZONE' if fz.get('result') else 'not in FHSZ'})"
             )
             lines.append(
-                f"  Mobilization Rate: {s1.get('std3_mobilization_rate', 0.25):.2f} "
-                f"(Zhao et al. 2022 GPS-empirical, Kincade Fire)"
+                f"  Mobilization Rate: {s1.get('std3_mobilization_rate', 0.90):.2f} "
+                f"(NFPA 101 design basis — constant; Census ACS B25044 zero-vehicle adjustment)"
             )
 
         # Step 2
@@ -337,7 +338,7 @@ def generate_audit_trail(
                 "  " + "-" * 38,
                 f"  Formula: {s4.get('formula', '')}",
                 f"  Hazard Zone: {s4.get('hazard_zone', 'non_fhsz')}",
-                f"  Mobilization Rate: {s4.get('mobilization_rate', 0.25):.2f}",
+                f"  Mobilization Rate: {s4.get('mobilization_rate', 0.90):.2f} (NFPA 101 design basis, constant)",
                 f"  Project vehicles (peak hour): {s4.get('project_vehicles_peak_hour', 0):.1f} vph",
                 f"  Source (vehicles/unit): {s4.get('source_vehicles_per_unit', '')}",
                 f"  Source (mobilization): {s4.get('source_mobilization', '')}",
@@ -360,7 +361,7 @@ def generate_audit_trail(
                 "  " + "-" * 38,
                 f"  Method: {s5.get('method', '')}",
                 f"  Hazard Zone: {s5.get('hazard_zone', 'non_fhsz')}",
-                f"  Mobilization Rate: {s5.get('mobilization_rate', 0.25):.2f}",
+                f"  Mobilization Rate: {s5.get('mobilization_rate', 0.90):.2f} (NFPA 101 design basis, constant)",
                 f"  Project Vehicles: {s5.get('project_vehicles', 0):.1f} vph",
                 f"  Egress Penalty: {s5.get('egress_minutes', 0):.1f} min "
                 f"(NFPA 101/IBC; applies to buildings >= 4 stories)",
@@ -467,8 +468,8 @@ def generate_audit_trail(
         "  PARAMETERS APPLIED",
         "  " + "-" * 38,
         f"  Hazard Zone:        {hz}",
-        f"  Mobilization Rate:  {getattr(project, 'mobilization_rate', 0.0):.2f} "
-        f"(Zhao et al. 2022 GPS-empirical)",
+        f"  Mobilization Rate:  {getattr(project, 'mobilization_rate', 0.90):.2f} "
+        f"(NFPA 101 design basis — constant; ~10% zero-vehicle HHs per Census ACS B25044)",
         f"  Vehicles per Unit:  2.5 (U.S. Census ACS B25044)",
         f"  Egress Penalty:     {getattr(project, 'egress_minutes', 0.0):.1f} min "
         f"(NFPA 101/IBC — {getattr(project, 'stories', 0)} stories)",

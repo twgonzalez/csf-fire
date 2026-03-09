@@ -1,21 +1,27 @@
 """
-Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v3.0
+Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v3.2
 
 Legal basis: AB 747 (California Government Code §65302.15), HCM 2022,
-Zhao et al. (2022) GPS-empirical mobilization rates.
+NFPA 101 (Life Safety Code) mobilization design basis.
 
-ΔT Standard (v3.0):
+ΔT Standard (v3.2):
   Standard 1 — Project Size:       units >= threshold (scale gate)
   Standard 2 — Evac Routes Served: network buffer → identifies serving EvacuationPaths
   Standard 3 — FHSZ Modifier:      GIS point-in-polygon; sets hazard_zone string which
-                                    controls mobilization_rate and ΔT threshold
+                                    controls ROAD capacity degradation and ΔT threshold
+                                    (FHSZ does NOT affect mobilization in v3.2)
   Standard 4 — ΔT Test:            ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress
                                     Project is DISCRETIONARY if ΔT > threshold for hazard_zone
                                     threshold = safe_egress_window(zone) × max_project_share
 
+Key v3.2 changes from v3.1:
+  - Mobilization rate is now constant 0.90 (NFPA 101 design basis)
+  - FHSZ zone now affects ONE thing only: road capacity (hazard_degradation factor)
+  - Removed tiered mob rates (Zhao et al. 2022) — behavioral observation ≠ design standard
+  - Berkeley regression test: 75-unit non-FHSZ hills → DISCRETIONARY (was CONDITIONAL under v3.1)
+
 Key v3.0 changes from v2.0:
   - No baseline precondition: routes already at LOS F are tested equally
-  - Tiered mobilization rates from Zhao et al. 2022 GPS data (vhfhsz=0.75, high=0.57, moderate=0.40, non=0.25)
   - Hazard-aware capacity degradation (HCM composite factors) applied upstream by Agent 2
   - Building egress penalty (NFPA 101/IBC) added to ΔT for buildings ≥ 4 stories
   - Returns EvacuationPath objects (not osmid lists) from identify_routes()
@@ -40,10 +46,12 @@ _LEGAL_BASIS = (
     "AB 747 (California Government Code §65302.15) — General Plan Safety Element "
     "mandatory update for evacuation route capacity analysis; "
     "HCM 2022 (Highway Capacity Manual, 7th Edition) — effective capacity with hazard degradation; "
-    "Zhao, X., et al. (2022) — GPS-empirical mobilization rates (44M records, Kincade Fire)"
+    "NFPA 101 (Life Safety Code) — 0.90 mobilization design basis (100% occupant evacuation, "
+    "adjusted for ~10% zero-vehicle households per Census ACS B25044); "
+    "NIST TN 2135 (Maranghides et al.) — safe egress windows by hazard zone"
 )
 
-# HAZ_CLASS integer → canonical hazard_zone key (matches mobilization_rates and safe_egress_window)
+# HAZ_CLASS integer → canonical hazard_zone key (matches safe_egress_window and hazard_degradation keys)
 _HAZ_CLASS_TO_ZONE = {
     3: "vhfhsz",
     2: "high_fhsz",
@@ -58,9 +66,9 @@ class WildlandScenario(EvacuationScenario):
 
     Standard 1 (size) gates the analysis.
     Standard 3 (FHSZ modifier) sets project.hazard_zone which controls:
-      - mobilization_rate (Zhao et al. 2022 GPS-empirical tiered lookup)
       - ΔT threshold (safe_egress_window × max_project_share by hazard zone)
       - capacity degradation factor (applied upstream in Agent 2 to road segments)
+      NOTE (v3.2): FHSZ does NOT affect mobilization. Mobilization is constant 0.90 (NFPA 101).
     Standard 4 (ΔT test) uses compute_delta_t() from base class.
     """
 
@@ -91,9 +99,9 @@ class WildlandScenario(EvacuationScenario):
         This scenario is ALWAYS applicable — the citywide FHSZ gate was removed in v3.0.
 
         The GIS point-in-polygon test determines project.hazard_zone, which controls:
-          - mobilization_rate via config["mobilization_rates"][hazard_zone]
           - ΔT threshold via config["safe_egress_window"][hazard_zone] × config["max_project_share"]
-          - (capacity degradation already applied to roads upstream in Agent 2)
+          - road capacity degradation (applied upstream in Agent 2)
+          NOTE (v3.2): FHSZ does NOT affect mobilization rate. Mobilization is constant 0.90.
 
         Method: GIS point-in-polygon test against CAL FIRE FHSZ zones.
         Discretion: Zero — binary spatial result with deterministic zone mapping.
@@ -109,9 +117,8 @@ class WildlandScenario(EvacuationScenario):
         project.fire_zone_level = fire_zone_detail.get("zone_level", 0)
         project.hazard_zone     = fire_zone_detail.get("hazard_zone", "non_fhsz")
 
-        # Set mobilization_rate on project for audit display
-        mob_rates = self.config.get("mobilization_rates", {})
-        project.mobilization_rate = mob_rates.get(project.hazard_zone, 0.25)
+        # Mobilization is constant (NFPA 101 design basis) — not FHSZ-dependent
+        project.mobilization_rate = self.config.get("mobilization_rate", 0.90)
 
         return True, {
             "result":                    True,
@@ -124,12 +131,11 @@ class WildlandScenario(EvacuationScenario):
             "fire_zone_severity_modifier": fire_zone_detail,
             "note": (
                 f"Standard 3: project in FHSZ Zone {project.fire_zone_level} "
-                f"({project.hazard_zone}) — mobilization rate {project.mobilization_rate:.2f} "
-                f"(Zhao et al. 2022 GPS-empirical, Kincade Fire)."
+                f"({project.hazard_zone}). FHSZ affects road capacity degradation only. "
+                f"Mobilization rate {project.mobilization_rate:.2f} (NFPA 101 design basis, constant)."
                 if fire_zone_result else
-                f"Standard 3: project not in FHSZ — hazard_zone=non_fhsz, "
-                f"mobilization rate {project.mobilization_rate:.2f} "
-                f"(shadow evacuation, Zhao et al. 2022)."
+                f"Standard 3: project not in FHSZ — hazard_zone=non_fhsz. "
+                f"Mobilization rate {project.mobilization_rate:.2f} (NFPA 101 design basis, constant)."
             ),
         }
 
@@ -250,18 +256,19 @@ class WildlandScenario(EvacuationScenario):
         max_dt    = step5.get("max_delta_t_minutes", 0.0)
         threshold = step5.get("threshold_minutes", 0.0)
         hz        = step5.get("hazard_zone", "non_fhsz")
-        mob       = step5.get("mobilization_rate", 0.25)
+        mob       = step5.get("mobilization_rate", 0.90)
         n_paths   = sum(1 for r in step5.get("path_results", []) if r.get("flagged"))
         fire_note = (
-            f"Standard 3: FHSZ Zone {project.fire_zone_level} ({hz}), mob rate {mob:.2f}. "
+            f"Standard 3: FHSZ Zone {project.fire_zone_level} ({hz}) — road degradation applied. "
             if project.in_fire_zone else
-            f"Standard 3: not in FHSZ (hazard_zone={hz}), mob rate {mob:.2f}. "
+            f"Standard 3: not in FHSZ (hazard_zone={hz}) — no road degradation. "
         )
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold (Standard 1) and "
             f"{n_paths} serving path(s) exceed the ΔT threshold of {threshold:.2f} min "
             f"(max ΔT: {max_dt:.1f} min). "
             f"{fire_note}"
+            f"Mobilization: {mob:.2f} (NFPA 101 design basis, constant). "
             f"Discretionary review required. Legal basis: {self.legal_basis}."
         )
 
@@ -270,17 +277,18 @@ class WildlandScenario(EvacuationScenario):
         max_dt    = step5.get("max_delta_t_minutes", 0.0)
         threshold = step5.get("threshold_minutes", 0.0)
         hz        = step5.get("hazard_zone", "non_fhsz")
-        mob       = step5.get("mobilization_rate", 0.25)
+        mob       = step5.get("mobilization_rate", 0.90)
         fire_note = (
-            f"Standard 3: FHSZ Zone {project.fire_zone_level} ({hz}), mob {mob:.2f}. "
+            f"Standard 3: FHSZ Zone {project.fire_zone_level} ({hz}) — road degradation applied. "
             if project.in_fire_zone else
-            f"Standard 3: not in FHSZ (hazard_zone={hz}), mob {mob:.2f}. "
+            f"Standard 3: not in FHSZ (hazard_zone={hz}) — no road degradation. "
         )
         return (
             f"Project meets the {self.unit_threshold}-unit size threshold and "
             f"has {n_paths} serving path(s). "
             f"Max ΔT {max_dt:.1f} min within threshold ({threshold:.2f} min). "
             f"{fire_note}"
+            f"Mobilization: {mob:.2f} (NFPA 101 design basis, constant). "
             f"Ministerial approval eligible with mandatory evacuation conditions. "
             f"Legal basis: {self.legal_basis}."
         )

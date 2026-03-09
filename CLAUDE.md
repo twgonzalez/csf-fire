@@ -86,10 +86,7 @@ output/{city}/          # Results (git-ignored)
 |-----------|---------|--------|
 | `unit_threshold` | 15 | ITE de minimis; SB 330 statutory anchor |
 | `vehicles_per_unit` | 2.5 | U.S. Census ACS B25044 |
-| `mobilization_rates.vhfhsz` | 0.75 | Zhao et al. 2022 GPS (44M records, Kincade Fire) |
-| `mobilization_rates.high_fhsz` | 0.57 | Zhao et al. 2022 |
-| `mobilization_rates.moderate_fhsz` | 0.40 | Zhao et al. 2022 |
-| `mobilization_rates.non_fhsz` | 0.25 | Zhao et al. 2022 (shadow evacuation) |
+| `mobilization_rate` | **0.90 (constant)** | **NFPA 101 design basis; ~10% zero-vehicle HHs per Census ACS B25044** |
 | `hazard_degradation.vhfhsz` | 0.35 | HCM Exhibit 10-15/10-17 + NIST Camp Fire |
 | `hazard_degradation.high_fhsz` | 0.50 | HCM composite |
 | `hazard_degradation.moderate_fhsz` | 0.75 | HCM composite |
@@ -98,12 +95,14 @@ output/{city}/          # Results (git-ignored)
 | `safe_egress_window.moderate_fhsz` | 120 min | Standard emergency planning |
 | `safe_egress_window.non_fhsz` | 120 min | FEMA standard |
 | `max_project_share` | 0.05 | Standard 5% engineering significance threshold |
-| Derived ΔT thresholds (v3.1) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
+| Derived ΔT thresholds (v3.2) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
 | `egress_penalty.threshold_stories` | 4 | NFPA 101 / IBC |
 | `egress_penalty.minutes_per_story` | 1.5 | NFPA 101 |
 | `egress_penalty.max_minutes` | 12 | NFPA 101 cap |
 | Evacuation route radius | 0.5 miles | per Standard 2 |
 | `vc_threshold` | 0.95 | Informational only — HCM LOS E/F boundary |
+
+**v3.2 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
 
 ## HCM 2022 Capacity Table
 
@@ -136,7 +135,7 @@ All standards are algorithmic — zero discretion allowed. Do NOT add "professio
 2. **Standard 2**: Buffer project location 0.5 mi → filter `EvacuationPath` objects by bottleneck/exit osmid proximity
 3. **Standard 3**: GIS point-in-polygon test against CAL FIRE FHSZ; sets `project.hazard_zone` string which controls mobilization_rate and ΔT threshold; `in_fire_zone=True` for HAZ_CLASS ≥ 2
 4. **Standard 4 (ΔT Test)**: `ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty`
-   - `project_vehicles = units × vpu × mobilization_rate(hazard_zone)`
+   - `project_vehicles = units × vpu × 0.90` (mobilization constant, NFPA 101 — not zone-dependent)
    - `egress_penalty = 0` for stories < 4; `min(stories × 1.5, 12)` for ≥ 4 stories
    - Flagged when `ΔT > threshold(hazard_zone)` where `threshold = safe_egress_window × max_project_share`
    - **No baseline precondition** — routes already at LOS F are tested equally
@@ -173,15 +172,16 @@ Phase 1 (MVP): Agents 1–3 only. CLI output to CSV + text. No web UI, no fee ca
 Phase 2 (next): Agent 4 (impact fee calculator) + Agent 6 (Folium maps).
 Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 
-## v3.0 Migration Status (branch: feat/v3-delta-t)
+## v3.2 Migration Status (branch: feat/v3-delta-t)
 
 ✅ Replaced v/c marginal causation test with ΔT (marginal evacuation clearance time).
-✅ Tiered mobilization rates from Zhao et al. 2022 GPS data (vhfhsz=0.75, high=0.57, moderate=0.40, non=0.25).
+✅ **v3.2: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
+✅ **v3.2: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
 ✅ Hazard-aware capacity degradation applied by Agent 2 (HCM composite + NIST Camp Fire validation).
 ✅ Building egress penalty (NFPA 101/IBC) for buildings ≥ 4 stories.
 ✅ `EvacuationPath` dataclass with per-path bottleneck tracking (argmin effective_capacity_vph).
 ✅ `Sb79TransitScenario` replaces `LocalDensityScenario` (informational flag, no tier impact).
-✅ Audit trail v3.0: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
+✅ Audit trail v3.2: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
 ✅ `data/{city}/evacuation_paths.json` persisted by Agent 2 after routing.
 
 ## Pending Methodology Work

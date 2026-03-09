@@ -1,5 +1,5 @@
 # ============================================================
-# Berkeley AB 747 Demo Projects — JOSH v3.1 (ΔT Standard)
+# Berkeley AB 747 Demo Projects — JOSH v3.2 (ΔT Standard)
 # ============================================================
 # Use with:  uv run python main.py demo --city "Berkeley"
 #
@@ -7,36 +7,36 @@
 # to city planners.  Each project appears as a toggleable layer
 # on the output map so reviewers can compare impacts side-by-side.
 #
-# Tier logic (v3.1 — ΔT Standard with derived thresholds):
+# Tier logic (v3.2 — ΔT Standard, constant mobilization):
 #   DISCRETIONARY           — size >= 15 AND ΔT > threshold on any serving route
 #                             (threshold = safe_egress_window[zone] × max_project_share)
 #                             (no baseline precondition — routes already failing are tested equally)
 #   CONDITIONAL MINISTERIAL — size >= 15 AND ΔT within threshold on all serving routes
 #   MINISTERIAL             — size < 15
 #
-# v3.1 derived thresholds (safe_egress_window × 5%):
+# v3.2 thresholds (safe_egress_window × 5%):
 #   vhfhsz:        45 min × 5% = 2.25 min
 #   high_fhsz:     90 min × 5% = 4.50 min
 #   moderate_fhsz: 120 min × 5% = 6.00 min
 #   non_fhsz:      120 min × 5% = 6.00 min
 #
 # Core metric: ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress_penalty
-#   project_vehicles = units × 2.5 vpu × mobilization_rate(hazard_zone)
+#   project_vehicles = units × 2.5 vpu × 0.90  (NFPA 101 constant — not zone-dependent)
 #   effective_capacity = hcm_capacity × hazard_degradation_factor(fhsz_zone)
 #   egress_penalty = 0 for < 4 stories; min(stories × 1.5, 12) for ≥ 4 stories
 #
 # Coverage matrix (one project per distinct legal concept):
 #   Size gate below threshold, no FHSZ → Project 1 (10 units, flat)
 #   Size gate below threshold, IN FHSZ → Project 4 (10 units, hills Zone 3)
-#   Size met, ΔT within threshold, no FHSZ, 3-story → Project 2 (Downtown, arterials have headroom)
-#   Size met, ΔT exceeds threshold, IN FHSZ Zone 3 → Project 3 (Hills Gateway, high mob + degraded cap)
-#   Size met, ΔT within threshold, borderline non-FHSZ → Project 5 (Claremont Hills, 0.25 mob)
+#   Size met, ΔT exceeds threshold, IN FHSZ Zone 3 → Project 3 (Hills Gateway, degraded road cap)
+#   Size met, ΔT within threshold, small project non-FHSZ → Project 5 (Claremont Hills, 25 units)
+#   Size met, ΔT exceeds threshold via road bottleneck alone → Project 2 (Downtown Mid-Rise, 75u)
 #   Size met, egress penalty pushes ΔT over threshold → Project 6 (Cedar Street, 6-story)
 # ============================================================
 
 city: "Berkeley"
 state: "CA"
-description: "Berkeley AB 747 — Ministerial vs Discretionary Demo (v3.1 ΔT Standard)"
+description: "Berkeley AB 747 — Ministerial vs Discretionary Demo (v3.2 ΔT Standard)"
 
 projects:
 
@@ -56,10 +56,11 @@ projects:
     expected_tier: "MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 2 — Mid-rise downtown: at threshold, high-capacity arterials → CONDITIONAL
+  # 2 — Mid-rise downtown: at threshold, bottleneck on local street → DISCRETIONARY
   #     3 stories → no egress penalty (below 4-story NFPA 101 threshold).
-  #     v3.1: non-FHSZ threshold = 120 min × 5% = 6.0 min.
-  #     Vehicle ΔT on Shattuck arterial ≈ 1.5 min (well under 6.0 min).
+  #     v3.2: non-FHSZ threshold = 120 min × 5% = 6.0 min.
+  #     With 0.90 mob: 75 × 2.5 × 0.90 = 168.75 vehicles.
+  #     Even on downtown streets, evacuation paths bottleneck on local collectors.
   # -----------------------------------------------------------
   - name: "Downtown Mid-Rise"
     address: "Shattuck Ave & Center St, Downtown Berkeley"
@@ -69,12 +70,12 @@ projects:
     stories: 3
     description: >
       75-unit, 3-story project on Shattuck Ave. Exceeds the 15-unit threshold.
-      Non-FHSZ location → mobilization rate 0.25 (Zhao et al. 2022) → 46.9 project vehicles.
-      High-capacity arterials (Shattuck, University) with no hazard degradation.
-      No egress penalty (3 stories < 4-story NFPA 101 threshold).
-      v3.1 threshold: 120 min safe egress × 5% = 6.0 min. ΔT well below threshold.
-      CONDITIONAL MINISTERIAL (evacuation conditions required, but ministerial).
-    expected_tier: "CONDITIONAL MINISTERIAL"
+      Non-FHSZ → no road degradation. Mobilization rate 0.90 (NFPA 101 design basis)
+      → 168.75 project vehicles. No egress penalty (3 stories < 4-story threshold).
+      Evacuation paths bottleneck on local collectors serving the hills.
+      v3.2 threshold: 120 min × 5% = 6.0 min. Max ΔT ~9.0 min → DISCRETIONARY.
+      Demonstrates that even downtown, large projects can exceed threshold via road network constraints.
+    expected_tier: "DISCRETIONARY"
 
   # -----------------------------------------------------------
   # 3 — Hills gateway: in FHSZ Zone 3 → elevated mob rate → DISCRETIONARY
@@ -86,10 +87,12 @@ projects:
     units: 80
     stories: 3
     description: >
-      80-unit project near the Berkeley Hills in FHSZ Zone 3. Mobilization rate 0.75
-      (VHFHSZ per Zhao et al. 2022). Road capacity degraded by factor 0.35 (VHFHSZ).
-      Narrow canyon roads at effective capacity well below HCM raw value.
-      ΔT exceeds v3.1 VHFHSZ threshold (45 min × 5% = 2.25 min) → DISCRETIONARY.
+      80-unit project near the Berkeley Hills in FHSZ Zone 3. Mobilization rate 0.90
+      (NFPA 101 design basis, constant) → 180 project vehicles. Road capacity degraded
+      by factor 0.35 (VHFHSZ — HCM Exhibit 10-15/10-17 composite).
+      Narrow canyon roads at effective capacity far below HCM raw value.
+      VHFHSZ threshold: 45 min × 5% = 2.25 min. Max ΔT ~12.0 min → DISCRETIONARY.
+      Double constraint: tight threshold (45-min window) AND degraded road capacity.
     expected_tier: "DISCRETIONARY"
 
   # -----------------------------------------------------------
@@ -111,22 +114,25 @@ projects:
     expected_tier: "MINISTERIAL"
 
   # -----------------------------------------------------------
-  # 5 — Claremont Hills: NOT in FHSZ, hillside road, within ΔT threshold → CONDITIONAL
-  #     Shows that low mob rate (non-FHSZ = 0.25) generates few project vehicles.
-  #     47 vph / ~900 vph bottleneck × 60 = ~3.1 min — well below 10-min non-FHSZ threshold.
+  # 5 — Claremont Hills: NOT in FHSZ, hillside road, SMALL project → CONDITIONAL
+  #     25 units × 2.5 × 0.90 = 56.25 vehicles.
+  #     56.25 / ~904 vph bottleneck × 60 ≈ 3.7 min — below 6.0-min non-FHSZ threshold.
+  #     Shows that smaller projects on constrained roads still pass.
   # -----------------------------------------------------------
   - name: "Claremont Hills Terrace"
     address: "Ridge Road & Claremont Ave, Berkeley Hills"
     lat: 37.876
     lon: -122.260
-    units: 75
+    units: 25
     stories: 3
     description: >
-      75-unit hillside project NOT in a mapped FHSZ zone. Non-FHSZ mobilization rate
-      (0.25 per Zhao et al. 2022) generates only 46.9 project vehicles. No capacity
-      degradation factor applies. Ridge Road bottleneck (~900 vph) yields ΔT ≈ 3.1 min
-      — well below the v3.1 non-FHSZ threshold (120 min × 5% = 6.0 min). CONDITIONAL
-      MINISTERIAL: size threshold met, evacuation conditions required, but ΔT within bounds.
+      25-unit hillside project NOT in a mapped FHSZ zone. Mobilization rate 0.90
+      (NFPA 101 design basis, constant) → 56.25 project vehicles. No road capacity
+      degradation (non-FHSZ). Ridge Road bottleneck (~904 vph) → ΔT ≈ 3.7 min.
+      Non-FHSZ threshold: 120 min × 5% = 6.0 min. ΔT within threshold.
+      CONDITIONAL MINISTERIAL: size threshold met, evacuation conditions required.
+      Compare with Project 2 (75 units, downtown) which exceeds threshold despite
+      lower road hazard — project scale is the differentiating factor here.
     expected_tier: "CONDITIONAL MINISTERIAL"
 
   # -----------------------------------------------------------
@@ -141,9 +147,11 @@ projects:
     units: 75
     stories: 6
     description: >
-      75-unit, 6-story project in North Berkeley (NOT in FHSZ). Non-FHSZ mob = 0.25.
-      Building egress penalty: 6 stories × 1.5 min/story = 9.0 min (NFPA 101).
-      Cedar Street bottleneck (two-lane, ~1125 vph): vehicle ΔT ≈ 2.5 min + 9.0 min egress
-      = 11.5 min > 6.0-minute non-FHSZ threshold (120 min × 5%, v3.1). DISCRETIONARY via
-      egress + road bottleneck. Mitigation: reduce stories to ≤3 (no egress penalty applies).
+      75-unit, 6-story project in North Berkeley (NOT in FHSZ). Mobilization rate 0.90
+      (NFPA 101 constant) → 168.75 project vehicles. Building egress penalty: 6 stories
+      × 1.5 min/story = 9.0 min (NFPA 101). Cedar Street bottleneck (~1125 vph):
+      vehicle ΔT + 9.0 min egress → max ΔT ~18.0 min > 6.0-min threshold → DISCRETIONARY.
+      Mitigation: reduce stories to ≤3 (eliminates egress penalty, ΔT ≈ 9.0 min — still
+      DISCRETIONARY at this unit count), or reduce units to ~20 (ΔT ~9.0+0=9.0 min;
+      or ~15 units to get below threshold entirely for MINISTERIAL).
     expected_tier: "DISCRETIONARY"

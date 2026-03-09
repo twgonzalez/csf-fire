@@ -1,12 +1,15 @@
 # JOSH — Fire Evacuation Capacity Analysis System
 
-**Version:** 3.0 (ΔT Marginal Time Standard)
+**Version:** 3.2 (ΔT Standard — Constant Mobilization, NFPA 101)
 **Date:** March 2026
 **Authority:** California Government Code §65302(g)(4), §65302.15 (AB 747), §65589.5 (HAA), AB 1600, SB 79
 **Reference Studies:**
 - KLD Engineering, P.C., *Evacuation Route Safety, Capacity, and Viability Analysis — AB 747 Requirement*, City of Berkeley, March 7, 2024 (KLD TR-1381)
-- Zhao, X., et al. (2022). *Estimating wildfire evacuation decision and departure timing using large-scale GPS data.* Transportation Research Part C.
-- Wong, S.D., Broader, J.C., Shaheen, S.A. (2020). *Review of California wildfire evacuations from 2017 to 2019.* UC Institute of Transportation Studies.
+- Maranghides, A., et al. (2021). *A Case Study of the Camp Fire — Fire Progression Timeline.* NIST Technical Note 2135.
+- Maranghides, A., et al. (2023). *A Case Study of the Camp Fire — NETTRA.* NIST Technical Note 2252.
+- NFPA 101. *Life Safety Code.* National Fire Protection Association.
+- Zhao, X., et al. (2022). *Estimating wildfire evacuation decision and departure timing using large-scale GPS data.* Transportation Research Part C. (retained for planning-level analysis; no longer the mobilization source)
+- Wong, S.D., Broader, J.C., Shaheen, S.A. (2020). *Review of California wildfire evacuations from 2017 to 2019.* UC Institute of Transportation Studies. (planning reference only)
 - Rohaert, A., et al. (2025). *The impact of wildfire smoke on traffic evacuation dynamics.* Safety Science 186:106812.
 - Link, E.D. & Maranghides, A. (NIST). *Burnover events identified during the 2018 Camp Fire.*
 - FHWA. *Guide for Highway Capacity and Operations Analysis of ATDM Strategies* — Appendices A and C (HCM weather and incident capacity adjustment factors).
@@ -39,10 +42,14 @@ This is a life safety question — not a traffic efficiency question, not a CEQA
 ΔT = (project_vehicles / C_bottleneck) × 60 + T_egress
 
 Where:
-  project_vehicles = units × vehicles_per_unit × mobilization_rate(hazard_zone)
+  project_vehicles = units × vehicles_per_unit × 0.90
   C_bottleneck     = min(effective_capacity_vph) along serving route
   T_egress         = building egress penalty (minutes, 0 for low-rise)
 ```
+
+**Mobilization is 0.90 — constant for all projects, all zones (NFPA 101 design basis).**
+
+FHSZ affects the road (through `hazard_degradation` on road capacity). It does not affect mobilization. Mobilization is a constant: 0.90, consistent with the NFPA 101 design basis for full building evacuation, adjusted for zero-vehicle households per Census B25044.
 
 **Result:** A single number, in minutes, per serving route.
 
@@ -106,26 +113,23 @@ Lane counts: from OSM data. Estimated where missing (flagged in output).
 
 **Legal status:** HCM is THE national standard for highway capacity analysis. It has been published by the Transportation Research Board (a unit of the National Academies) since 1950 and is relied upon by every state DOT, FHWA, and traffic engineering practice in the country. It qualifies as an "objective, identified written public health or safety standard" under Gov. Code §65589.5(j)(2) without question.
 
-### 3.2 Mobilization Rates — Empirical Wildfire Data
+### 3.2 Mobilization Rate — 0.90 (Constant)
 
-Source: GPS-measured evacuation compliance from California wildfires, cross-validated across multiple events and methodologies.
+Source: NFPA 101 (Life Safety Code) design basis.
 
-| Hazard Zone | Rate | Empirical Basis |
-|---|---|---|
-| VHFHSZ | 0.75 | Conservative above observed zone-max rates |
-| High FHSZ | 0.57 | Matches KLD/observed zone-level mean |
-| Moderate FHSZ | 0.40 | Below mean — farther from typical ignition |
-| Non-FHSZ | 0.25 | Shadow evacuation rate from GPS studies |
+NFPA 101 designs building exits for 100% occupant evacuation. Fire marshals do not size exits for partial evacuation — they size exits for everyone. This standard applies the same principle to the roads serving those buildings.
 
-**Primary source:** Zhao, X., et al. (2022). "Estimating wildfire evacuation decision and departure timing using large-scale GPS data." Transportation Research Part C. Analysis of 44.2 million GPS signal records from over 5,000 devices during the 2019 Kincade Fire. Mean evacuation rate across 110 census block groups: 47.6%. Inside evacuation zones: 46% compliance.
+The 0.90 factor accounts for approximately 10% of households with zero vehicles, as measured by Census ACS Table B25044. Cities may override this with their city-specific zero-vehicle rate from B25044.
 
-**Cross-validation:** Wong, S.D., et al. (2020). "Review of California wildfire evacuations from 2017-2019." UC ITS. Survey data (n=589) across three fires. Reported ~47% compliance for 2017 Northern California Wildfires, consistent with GPS-derived estimates.
+**The mobilization rate does not vary by hazard zone. FHSZ affects the road (through the hazard degradation factor in §3.3). It does not affect the people. The project's residents are the project's residents regardless of where the project is located.**
 
-**Why the VHFHSZ rate is set at 0.75, not 0.47:** The 47% figure is a county-wide average across all zone types. Block groups closer to the fire perimeter show significantly higher compliance. The standard must plan for the demand created by people who DO evacuate in the highest-hazard zones, which is the scenario that loads the road network. Setting mobilization at the mean would systematically undercount peak-hour vehicle demand in the areas where it matters most. 0.75 is conservative — it assumes 25% of households in the highest-risk zone do not mobilize, which is consistent with observed stay-and-defend behavior in WUI communities.
+**Legal status:** NFPA 101 is the national fire protection standard adopted by reference in every state building code. Designing building exits for 100% occupant load is the codified standard. Extending this principle to the road is an application of fire code design logic, not a discretionary policy choice. A developer's expert would need to argue that roads serving buildings should be sized for fewer occupants than the buildings themselves — a position directly contradicted by NFPA 101.
 
-**Legal status:** Peer-reviewed, published in Transportation Research Part C (a top-tier transportation journal). GPS-measured (not survey-reported — eliminates recall bias). Measured at census block group level — the same geographic unit JOSH uses. Cross-validated across multiple fires and methods. A developer's expert would need to argue that future evacuees will behave differently than observed populations in five recent California wildfires. No expert will credibly make that claim.
+**Relationship to GPS behavioral studies:** Zhao et al. (2022) and Wong et al. (2020) document observed compliance rates (~47% during actual wildfires). These studies are valid for planning-level analysis but are the wrong source for a project-level design standard. Observed rates measure behavioral patterns during past events — not a design standard for emergency infrastructure. Fire marshals do not size stairwells for 47% of occupants. Roads should not be sized that way either. These studies remain cited for planning context but are no longer the source of record for mobilization rate in the project-level determination.
 
 ### 3.3 Hazard-Aware Capacity Degradation — HCM Composite Factors
+
+**This is the only place the FHSZ designation affects the project-level determination.** It adjusts the road's capacity. It does not adjust the project's vehicle generation (which is constant at `units × 2.5 × 0.90`).
 
 A road segment physically located within a fire hazard zone will not operate at full HCM capacity during the wildfire that triggers the evacuation. The degradation factors are composites of published HCM capacity adjustment factors for conditions that are documented consequences of Cal Fire FHSZ designations.
 
@@ -351,7 +355,7 @@ This is computationally trivial — one `min()` reduction per path during a trav
 |---|---|---|---|
 | Std 1: Project Size | units ≥ unit_threshold | Integer comparison | Gates all standards |
 | Std 2: Serving Routes | Evacuation routes within buffer of project | Buffer + intersect | Identifies routes for Std 4 |
-| Std 3: FHSZ Zone | What FHSZ zone is the project in? | Point-in-polygon | Sets mobilization rate + ΔT threshold |
+| Std 3: FHSZ Zone | What FHSZ zone is the project in? | Point-in-polygon | Sets road capacity degradation + ΔT threshold (NOT mobilization) |
 | Std 4: ΔT Capacity | Does project ΔT exceed threshold on any serving route? | ΔT computation | Gates DISCRETIONARY |
 | Std 5: SB 79 Flag | Is project within 0.5 mi of Tier 1/2 transit? | Buffer + intersect | Informational flag |
 
@@ -361,9 +365,9 @@ This is computationally trivial — one `min()` reduction per path during a trav
 def determine(project, serving_routes, fhsz_gdf, entitled_ledger, config):
     # ── INPUTS ──
     hazard_zone = get_fhsz_zone(project.location, fhsz_gdf)
-    mobilization = config['mobilization_rates'][hazard_zone]
+    mobilization = config.get('mobilization_rate', 0.90)  # NFPA 101 design basis, constant
     vehicles_per_unit = config['vehicles_per_unit']
-    # v3.1: threshold derived at runtime (not a static config value)
+    # threshold derived at runtime (not a static config value)
     safe_window = config['safe_egress_window'][hazard_zone]
     max_project_share = config['max_project_share']
     max_marginal = safe_window * max_project_share
@@ -494,13 +498,13 @@ PROJECT
   Hazard Zone: VHFHSZ (Cal Fire designation)
 
 PARAMETERS APPLIED
-  Mobilization rate:   0.75 (VHFHSZ, per Zhao et al. 2022)
+  Mobilization rate:   0.90 (NFPA 101 design basis, constant)
   Vehicles/unit:       2.5 (Census ACS B25044)
   Egress penalty:      0 min (below 4-story threshold)
   Safe egress window:  45 min (VHFHSZ, per NIST TN 2135)
   Max project share:   5%
   ΔT threshold:        2.25 min (45 × 5%)
-  Project vehicles:    84.4
+  Project vehicles:    101.3
 
 SERVING ROUTE ANALYSIS
   Route 1: Quail Gardens Dr → Leucadia Blvd exit
@@ -508,16 +512,16 @@ SERVING ROUTE ANALYSIS
     Raw capacity:      1,350 vph
     FHSZ degradation:  ×0.35 (VHFHSZ segment)
     Effective capacity: 472 vph
-    Project ΔT:        10.7 min + 0 egress = 10.7 min
+    Project ΔT:        12.9 min + 0 egress = 12.9 min
     Threshold:         2.25 min (45 min window × 5%)
-    ▶ FLAGGED — exceeds threshold by 8.45 min
+    ▶ FLAGGED — exceeds threshold by 10.65 min
 
   Route 2: Encinitas Blvd → I-5 exit
     Bottleneck:        Encinitas Blvd seg 2201 (4-lane, 35 mph)
     Raw capacity:      6,300 vph
     FHSZ degradation:  ×0.50 (High FHSZ segment)
     Effective capacity: 3,150 vph
-    Project ΔT:        1.6 min + 0 egress = 1.6 min
+    Project ΔT:        1.9 min + 0 egress = 1.9 min
     Threshold:         2.25 min (45 min window × 5%)
     ○ NOT FLAGGED
 
@@ -559,30 +563,30 @@ PROJECT
   SB 79 Flag:  Yes (within 0.5 mi of Coaster station)
 
 PARAMETERS APPLIED
-  Mobilization rate:   0.25 (Non-FHSZ)
+  Mobilization rate:   0.90 (NFPA 101 design basis, constant)
   Vehicles/unit:       2.5
   Egress penalty:      10.5 min (7 stories × 1.5 min/story)
   Safe egress window:  120 min (Non-FHSZ, FEMA standard)
   Max project share:   5%
   ΔT threshold:        6.0 min (120 × 5%)
-  Project vehicles:    125.0
+  Project vehicles:    450.0
 
 SERVING ROUTE ANALYSIS
   Route 1: Vulcan Ave → Leucadia Blvd
     Bottleneck:        Vulcan Ave seg 1102 (2-lane, 25 mph)
     Effective capacity: 1,125 vph (no degradation)
-    Project ΔT:        6.7 min + 10.5 egress = 17.2 min
+    Project ΔT:        24.0 min + 10.5 egress = 34.5 min
     Threshold:         6.0 min (120 min window × 5%)
     ▶ FLAGGED
 
 DETERMINATION
   ▶ DISCRETIONARY
-  Capacity exceeded: Route 1 (ΔT 17.2 min > 6.0 min threshold)
+  Capacity exceeded: Route 1 (ΔT 34.5 min > 6.0 min threshold)
 
 MITIGATION PATHWAYS
   - Add stairwells to reduce egress from 10.5 to ~5 min
   - Add second garage exit to different street
-  - Reduce units to ~90 (ΔT = 9.5 min with current design)
+  - Reduce units to ~20 (ΔT ≈ 6.0 min with current design)
   - Redesign garage with dual exits on Vulcan + Coast Hwy
 ```
 
@@ -602,7 +606,7 @@ Determination letters must cite:
 - HCM 2022 edition and specific exhibits used
 - Cal Fire FHSZ designation and Gov. Code §51175
 - Census data vintage (ACS year)
-- Mobilization rate source (Zhao et al. 2022, with full citation)
+- Mobilization rate source (NFPA 101 design basis, 0.90 constant; Census ACS B25044 zero-vehicle adjustment)
 - Degradation factor derivation (HCM exhibits composited)
 - All parameter values used
 - Complete ΔT computation showing inputs and result
@@ -616,7 +620,7 @@ Determination letters must cite:
 
 ```yaml
 # ═══════════════════════════════════════════════
-# JOSH v3.0 — Global Parameters
+# JOSH v3.2 — Global Parameters
 # ═══════════════════════════════════════════════
 
 # HCM 2022 Capacity (per lane, pc/h)
@@ -630,18 +634,10 @@ hcm_capacity:
     35: 1575
     40: 1700
 
-# Mobilization rates by FHSZ zone
-# Source: Zhao et al. 2022 (GPS, Kincade Fire), Wong et al. 2020 (survey)
-mobilization_rates:
-  vhfhsz: 0.75
-  high_fhsz: 0.57
-  moderate_fhsz: 0.40
-  non_fhsz: 0.25
-  citation: >
-    Zhao, X., et al. (2022). Estimating wildfire evacuation decision
-    and departure timing using large-scale GPS data. Transp. Res. Part C.
-    Wong, S.D., et al. (2020). Review of California wildfire evacuations
-    from 2017-2019. UC ITS.
+# Mobilization rate — constant for all projects, all zones
+# Source: NFPA 101 design basis (100% evacuation)
+# Adjusted for ~10% zero-vehicle HHs (Census ACS B25044)
+mobilization_rate: 0.90
 
 # Hazard-aware road capacity degradation
 # Source: HCM composite — visibility (Exhibit 10-15) + incident (Exhibit 10-17)
@@ -820,9 +816,9 @@ Defense: The standard does not prohibit development. It identifies a measurable 
 
 Furthermore, most urban infill sites — the development pattern the state favors — are on arterials with high capacity and low FHSZ exposure. Those projects show ΔT well under any threshold. The projects flagged are those in canyons, on ridgelines, at the end of single-access roads in fire zones — exactly where AB 747 directs cities to scrutinize evacuation capacity.
 
-**"You can't use different mobilization rates for different zones."**
+**"The 90% mobilization rate is too high — observed rates from wildfires are much lower."**
 
-Defense: The mobilization rates are empirically derived from GPS data showing that evacuation compliance varies by proximity to the hazard. This is observed behavior, not a policy choice. Applying a single county-wide rate would systematically undercount demand in the highest-hazard zones (where compliance is highest) and overcount it in low-hazard zones. The tiered rates are more accurate, not more restrictive.
+Defense: Observed rates from GPS studies (Zhao et al. 2022) show approximately 47% compliance during actual wildfires. But observed rates measure behavioral patterns during past events — they are not a design standard. NFPA 101 designs building exits for 100% occupant evacuation. Fire marshals do not size exits assuming half the people will stay. The 90% rate applies this same design principle to the road. The 10% reduction accounts for households with no vehicle (Census B25044). The standard designs for the emergency that requires evacuation, not for the average case.
 
 **"My parcel is at the edge of the zone — the zone-level FHSZ designation unfairly penalizes me."**
 
@@ -866,15 +862,17 @@ After implementing the corrected model, system outputs should approximate KLD Be
 
 The system must produce correct results for these test cases:
 
-| Scenario | Expected Result |
-|---|---|
-| 15 units on 4-lane arterial, non-FHSZ | MINISTERIAL (ΔT < 1 min) |
-| 45 units on 2-lane canyon road, VHFHSZ | DISCRETIONARY (ΔT >> 2.25 min) |
-| 200-unit 7-story SB 79 building on 2-lane collector, non-FHSZ | DISCRETIONARY (egress penalty + road time > 6 min) |
-| 15 units on major freeway on-ramp, moderate FHSZ | CONDITIONAL MINISTERIAL (ΔT < 6 min) |
-| 50 units in zone where all routes already at LOS F | DISCRETIONARY (ΔT computed against bottleneck capacity, not baseline) |
+| Scenario | Vehicles | Road | ΔT | Threshold | Expected Result |
+|---|---|---|---|---|---|
+| 15 units, 4-lane arterial, non-FHSZ | 15×2.5×0.90=33.75 | 3,800 vph | 0.5 min | 6.0 min | CONDITIONAL MINISTERIAL |
+| 45 units, 2-lane canyon, VHFHSZ (472 vph degraded) | 45×2.5×0.90=101.3 | 472 vph | 12.9 min | 2.25 min | DISCRETIONARY |
+| 200-unit 7-story, 2-lane collector, non-FHSZ | 200×2.5×0.90=450 | 1,350 vph | 20.0+10.5=30.5 min | 6.0 min | DISCRETIONARY |
+| 75 units, 5-story, non-FHSZ, 2-lane 20 mph (Berkeley hills) | 75×2.5×0.90=168.75 | 1,125 vph | 9.0+7.5=16.5 min | 6.0 min | **DISCRETIONARY** (regression test) |
+| 50 units in zone where all routes already at LOS F | — | bottleneck_capacity_vph | computed | zone threshold | DISCRETIONARY (no baseline precondition) |
 
-The fifth scenario is the critical regression test: under v2.0, this project escaped review because `baseline_vc >= 0.95` prevented the marginal causation test from firing. Under v3.0, the ΔT test references only the project's vehicles and the road's physical capacity. The baseline state is irrelevant. The project is evaluated.
+**Berkeley 75-unit regression test:** Under v3.1 (mobilization 0.25 for non-FHSZ), this project generated only 47 vehicles → ΔT 2.5 min → CONDITIONAL MINISTERIAL. But 75 units on a 2-lane 20 mph road in the Berkeley hills, at end of single-access corridor, cannot safely evacuate. Under v3.2 (mobilization 0.90), the project generates 168.75 vehicles → ΔT 16.5 min → DISCRETIONARY. This is the correct result.
+
+The last scenario is the v2.0 regression test: ΔT references only the project's vehicles and the road's physical capacity. The baseline state (already at LOS F) is irrelevant. The project is evaluated.
 
 ---
 

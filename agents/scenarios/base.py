@@ -16,7 +16,7 @@ Five-step algorithm:
 ΔT formula:
   ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty
   where:
-    project_vehicles = units × vpu × mobilization_rate(hazard_zone)
+    project_vehicles = units × vpu × 0.90  (mobilization constant, NFPA 101 design basis)
     egress_penalty   = NFPA 101 penalty for buildings ≥ 4 stories (0 for low-rise)
 
 Key v3.0 change from v2.0:
@@ -167,19 +167,18 @@ class EvacuationScenario(ABC):
         """
         Step 4: How many peak-hour vehicles does the project generate?
 
-        Formula: dwelling_units × vehicles_per_unit × mobilization_rate(hazard_zone)
-        Source: Census ACS (vpu) + Zhao et al. 2022 GPS data (mob rates).
+        Formula: dwelling_units × vehicles_per_unit × mobilization_rate
+        Source: Census ACS (vpu) + NFPA 101 design basis (mob rate constant 0.90).
         """
-        vpu      = self.config.get("vehicles_per_unit", 2.5)
-        mob_rates = self.config.get("mobilization_rates", {})
+        vpu         = self.config.get("vehicles_per_unit", 2.5)
+        mob         = self.config.get("mobilization_rate", 0.90)  # NFPA 101 design basis, constant
         hazard_zone = getattr(project, "hazard_zone", "non_fhsz")
-        mob      = mob_rates.get(hazard_zone, 0.25)
 
         project_vph = project.dwelling_units * vpu * mob
 
         mob_citation = (
-            "Zhao, X., et al. (2022). Estimating wildfire evacuation decision and "
-            "departure timing using large-scale GPS data. Transportation Research Part C."
+            "NFPA 101 (Life Safety Code) design basis — 100% occupant evacuation; "
+            "adjusted 0.90 for ~10% zero-vehicle households (Census ACS B25044)."
         )
 
         return project_vph, {
@@ -217,10 +216,9 @@ class EvacuationScenario(ABC):
         Returns:
             (triggered: bool, delta_t_results: list[dict], detail: dict)
         """
-        hazard_zone = getattr(project, "hazard_zone", "non_fhsz")
-        mob_rates   = config.get("mobilization_rates", {})
-        mob         = mob_rates.get(hazard_zone, 0.25)
-        vpu         = config.get("vehicles_per_unit", 2.5)
+        hazard_zone      = getattr(project, "hazard_zone", "non_fhsz")
+        mob              = config.get("mobilization_rate", 0.90)  # NFPA 101 design basis, constant
+        vpu              = config.get("vehicles_per_unit", 2.5)
         project_vehicles = project.dwelling_units * vpu * mob
 
         # Building egress penalty (NFPA 101 / IBC)
@@ -302,7 +300,7 @@ class EvacuationScenario(ABC):
             "triggered":                  triggered,
             "max_delta_t_minutes":        round(max_dt, 2),
             "method":                     "ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress",
-            "source_mobilization":        "Zhao et al. (2022) Transp. Res. Part C",
+            "source_mobilization":        "NFPA 101 design basis (constant 0.90; Census ACS B25044 zero-vehicle adjustment)",
             "source_egress":              "NFPA 101 / IBC",
             "source_threshold":           "NIST TN 2135 (safe_egress_window) × max_project_share (policy)",
             "path_results":               results,
