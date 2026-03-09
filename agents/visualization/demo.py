@@ -254,7 +254,6 @@ def create_demo_map(
 
     # ── Per-project FeatureGroups ──────────────────────────────────────────
     proj_js_names: list[str] = []
-    bottleneck_js_names: list[str | None] = []   # parallel — None if no highlight layer
 
     # Per-project Standard 5 data (populated from audits if available)
     proj_ld_data: list[dict] = []
@@ -438,12 +437,9 @@ def create_demo_map(
                     tooltip=tip,
                 ).add_to(proj_group)
 
-        # ── Controlling bottleneck highlight (hover-activated, initially hidden) ──
-        # Amber stroke on the physical bottleneck segment + ⚠ DivIcon at its
-        # midpoint. Both are opacity-0 at rest; JS shows them on marker hover.
-        # Amber (#F5A623) sits outside the existing red/gray/blue map palette
-        # so it reads as "selected/marked" without demanding attention.
-        btn_entry: "dict | None" = None
+        # ── Controlling bottleneck ⚠ icon (static — always visible when project selected) ──
+        # Yellow warning triangle at the midpoint of the worst-ΔT bottleneck segment.
+        # Shown/hidden with the project FeatureGroup — no JS interaction required.
         if (tier != "MINISTERIAL"
                 and ctrl_osmid
                 and "osmid" in roads_wgs84.columns):
@@ -454,41 +450,23 @@ def create_demo_map(
             if not ctrl_rows.empty:
                 ctrl_geom = ctrl_rows.iloc[0].geometry
                 if ctrl_geom is not None and not ctrl_geom.is_empty:
-                    # Amber stroke — shown on hover
-                    stroke_layer = folium.GeoJson(
-                        mapping(ctrl_geom),
-                        style_function=lambda _: {
-                            "color": "#F5A623",
-                            "weight": 7,
-                            "opacity": 0,
-                        },
-                    )
-                    stroke_layer.add_to(proj_group)
-
-                    # ⚠ icon at segment midpoint — shown on hover
                     try:
                         mid = ctrl_geom.interpolate(0.5, normalized=True)
                     except Exception:
                         mid = ctrl_geom.centroid
                     icon_html = (
-                        '<div style="font-size:15px; line-height:1; color:#F5A623;'
-                        ' text-shadow:0 0 5px rgba(0,0,0,0.65);">⚠</div>'
+                        '<div style="font-size:16px; line-height:1;'
+                        ' color:#FFD700; text-shadow:0 0 4px rgba(0,0,0,0.7);">⚠</div>'
                     )
-                    icon_marker = folium.Marker(
+                    folium.Marker(
                         location=[mid.y, mid.x],
                         icon=folium.DivIcon(
                             html=icon_html,
-                            icon_size=(18, 18),
-                            icon_anchor=(9, 9),
+                            icon_size=(20, 20),
+                            icon_anchor=(10, 10),
                         ),
-                    )
-                    icon_marker.add_to(proj_group)
-
-                    btn_entry = {
-                        "stroke": stroke_layer.get_name(),
-                        "icon":   icon_marker.get_name(),
-                    }
-        bottleneck_js_names.append(btn_entry)
+                        tooltip="Controlling bottleneck segment",
+                    ).add_to(proj_group)
 
         # Project marker (wildland group — visible in Scenario A)
         folium.Marker(
@@ -517,7 +495,6 @@ def create_demo_map(
             proj_js_names=proj_js_names,
             map_js_name=map_js_name,
             proj_ld_data=proj_ld_data,
-            bottleneck_js_names=bottleneck_js_names,
         )
     ))
     m.get_root().html.add_child(folium.Element(
@@ -639,13 +616,11 @@ def _build_demo_panel_html(
     proj_js_names: list,
     map_js_name: str,
     proj_ld_data: list[dict] | None = None,
-    bottleneck_js_names: list | None = None,
 ) -> str:
     """Fixed top-left panel for the demo map — project selector + detail cards."""
     vc_threshold  = config.get("vc_threshold", 0.95)
     unit_threshold = config.get("unit_threshold", 50)
     proj_js_array = json.dumps(proj_js_names)
-    bottleneck_js_array = json.dumps(bottleneck_js_names or [None] * len(proj_js_names))
 
     tier_abbr_map = {
         "DISCRETIONARY":           "DISC",
@@ -748,24 +723,12 @@ def _build_demo_panel_html(
 <script>
 (function () {{
 
-  var PROJECT_LAYERS    = {proj_js_array};
-  var BOTTLENECK_LAYERS = {bottleneck_js_array};  // array of {{stroke, icon}} | null
+  var PROJECT_LAYERS = {proj_js_array};
   var MAP_NAME = '{map_js_name}';
-
-  // ── Hide all bottleneck highlights ───────────────────────────────────
-  function clearAllHighlights() {{
-    BOTTLENECK_LAYERS.forEach(function (b) {{
-      if (!b) return;
-      if (b.stroke && window[b.stroke]) window[b.stroke].setStyle({{opacity: 0}});
-      if (b.icon   && window[b.icon])   window[b.icon].setOpacity(0);
-    }});
-  }}
 
   window.selectProject = function (idx) {{
     var mapObj = window[MAP_NAME];
     if (!mapObj) return;
-
-    clearAllHighlights();
 
     PROJECT_LAYERS.forEach(function (varName, i) {{
       var layer = window[varName];
@@ -793,44 +756,11 @@ def _build_demo_panel_html(
     btn.textContent    = (body.style.display === 'none') ? '▶' : '▼';
   }};
 
-  // ── Init: show project 0, then wire bottleneck hover handlers ────────
+  // ── Init: show only project 0 ─────────────────────────────────────
   (function initSelect() {{
     var mapObj = window[MAP_NAME];
     if (!mapObj) {{ setTimeout(initSelect, 50); return; }}
     window.selectProject(0);
-
-    // All icon markers start hidden (stroke opacity is already 0 from style_function)
-    BOTTLENECK_LAYERS.forEach(function (b) {{
-      if (b && b.icon && window[b.icon]) window[b.icon].setOpacity(0);
-    }});
-
-    // Hover over the house icon → reveal amber stroke + ⚠ at bottleneck segment
-    BOTTLENECK_LAYERS.forEach(function (b, idx) {{
-      if (!b) return;
-      var projLayer = window[PROJECT_LAYERS[idx]];
-      if (!projLayer) return;
-
-      projLayer.eachLayer(function (layer) {{
-        if (!(layer instanceof L.Marker)) return;
-        // Skip the ⚠ icon marker itself — target only the house marker
-        if (layer.options && layer.options.icon &&
-            layer.options.icon.options && layer.options.icon.options.html) return;
-
-        var strokeLayer = b.stroke ? window[b.stroke] : null;
-        var iconMarker  = b.icon   ? window[b.icon]   : null;
-
-        layer.on('mouseover', function () {{
-          if (strokeLayer) strokeLayer.setStyle({{opacity: 0.9}});
-          if (iconMarker)  iconMarker.setOpacity(1);
-        }});
-
-        layer.on('mouseout', function () {{
-          if (strokeLayer) strokeLayer.setStyle({{opacity: 0}});
-          if (iconMarker)  iconMarker.setOpacity(0);
-        }});
-      }});
-    }});
-
   }})();
 
 }})();
