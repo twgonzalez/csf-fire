@@ -1,31 +1,31 @@
 """
-Agent 2: Capacity Analysis
+Agent 2: Capacity Analysis — JOSH v3.0
 
 Calculates objective, verifiable evacuation route capacity metrics using
-Highway Capacity Manual 2022 (HCM 2022) standards.
+Highway Capacity Manual 2022 (HCM 2022) standards, with hazard-aware
+capacity degradation for road segments in FHSZ zones.
 
-All calculations are documented and reproducible. Estimated values are flagged.
+Key outputs per road segment:
+- capacity_vph          — raw HCM 2022 capacity (lanes × per-lane rate)
+- fhsz_zone             — FHSZ zone for this segment
+- hazard_degradation    — degradation factor for segment's zone
+- effective_capacity_vph — capacity_vph × hazard_degradation
+- baseline_demand_vph   — catchment-based demand (for display)
+- catchment_units       — housing units routed through this segment
+- vc_ratio, los         — informational only (not used in ΔT determination)
+- is_evacuation_route   — boolean
+- connectivity_score    — path count
 
-Key outputs:
-- capacity_vph per road segment (HCM 2022)
-- baseline_demand_vph — catchment-based evacuation demand when Census data
-  is available; AADT or road-class estimate otherwise
-- catchment_units — FHSZ housing units whose evacuation paths use each segment
-- demand_source — "catchment_based" | "aadt" | "road_class_estimated"
-- vc_ratio and LOS (A-F)
-- evacuation route identification via network analysis (NetworkX)
-- connectivity_score per segment (path count)
+Also returns a list of EvacuationPath objects capturing per-path bottleneck data.
 
-Demand method:
-  "catchment" (default): demand = catchment_units × vehicles_per_unit × peak_hour_mobilization
-  "road_class" (fallback): flat utilization rate by road class
-
-Pipeline order (new):
+Pipeline order (v3.0):
   1. HCM capacity per segment
-  2. Identify evacuation routes + compute housing-unit-weighted catchment
-  3. Apply baseline demand (catchment or fallback)
-  4. v/c ratio and LOS
+  2. Hazard degradation → effective_capacity_vph (NEW in v3.0)
+  3. Identify evacuation routes + bottleneck tracking (MODIFIED: uses effective_capacity)
+  4. Apply baseline demand (catchment or fallback)
+  5. v/c ratio and LOS (informational)
 """
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -37,7 +37,17 @@ import osmnx as ox
 import pandas as pd
 from shapely.geometry import Point
 
+from models.evacuation_path import EvacuationPath
+
 logger = logging.getLogger(__name__)
+
+# Zone label → canonical hazard_zone key (matches mobilization_rates keys)
+_HAZ_CLASS_TO_ZONE = {
+    3: "vhfhsz",
+    2: "high_fhsz",
+    1: "moderate_fhsz",
+    0: "non_fhsz",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -51,22 +61,20 @@ def analyze_capacity(
     config: dict,
     city_config: dict,
     block_groups_gdf: Optional[gpd.GeoDataFrame] = None,
-) -> gpd.GeoDataFrame:
+    data_dir: Optional[Path] = None,
+) -> tuple[gpd.GeoDataFrame, list]:
     """
     Run full capacity analysis pipeline on a road network.
 
-    Pipeline:
-      1. Calculate HCM 2022 capacity per segment
-      2. Identify evacuation routes via network analysis;
-         compute housing-unit-weighted catchment per segment
-      3. Calculate baseline demand (catchment-based or fallback)
-      4. Calculate v/c ratio and LOS
+    Pipeline (v3.0):
+      1. HCM 2022 capacity per segment
+      2. Hazard-aware capacity degradation (effective_capacity_vph)
+      3. Identify evacuation routes; compute catchment and bottleneck per path
+      4. Calculate baseline demand (catchment-based or fallback)
+      5. Calculate v/c ratio and LOS (informational)
 
-    block_groups_gdf: Census block groups with housing_units_in_fhsz column.
-      If provided and non-empty, enables catchment-based evacuation demand.
-      If None or empty, falls back to road-class utilization estimates.
-
-    Returns the enriched GeoDataFrame with all capacity columns added.
+    Returns:
+        (roads_gdf enriched with capacity columns, list of EvacuationPath objects)
     """
     analysis_crs = city_config.get("analysis_crs", "EPSG:26910")
 
@@ -75,34 +83,26 @@ def analyze_capacity(
     # Step 1: HCM Capacity
     roads_gdf = _apply_hcm_capacity(roads_gdf, config)
 
-    # Step 2: Evacuation routes + catchment weights
-    # (must precede demand calculation so catchment_units is available)
-    roads_gdf = _identify_evacuation_routes(
+    # Step 2: Hazard Degradation (NEW in v3.0)
+    roads_gdf = _apply_hazard_degradation(roads_gdf, fhsz_gdf, config, analysis_crs)
+
+    # Step 3: Evacuation routes + catchment weights + bottleneck tracking
+    roads_gdf, evacuation_paths = _identify_evacuation_routes(
         roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf
     )
 
-    # Step 3: Baseline demand
-    # CLAUDE.md item 2: Use catchment-based demand (network path analysis) as baseline_demand_vph
-    # for Standard 4 marginal impact test. The KLD simultaneous-evacuation buffer model is
-    # appropriate for citywide infrastructure sizing but produces 30-40× overload at the
-    # project level, making the marginal causation test impossible to satisfy.
-    #
-    # KLD buffer demand (if available) is stored in evacuation_demand_vph for informational
-    # purposes (citywide planning) but NOT used as baseline for Standard 4.
+    # Step 4: Baseline demand
     if (
         block_groups_gdf is not None
         and not block_groups_gdf.empty
         and "demand" in config
     ):
         roads_gdf = _apply_buffer_demand(roads_gdf, block_groups_gdf, config, analysis_crs)
-        # Preserve KLD buffer demand separately; baseline_demand_vph will be overwritten below
         roads_gdf["evacuation_demand_vph"] = roads_gdf["baseline_demand_vph"]
 
-    # Catchment-based or road-class demand for project-level marginal analysis (Standard 4)
     roads_gdf = _apply_baseline_demand(roads_gdf, config)
-    demand_method = config.get("evacuation_demand", {}).get("method", "catchment")
 
-    # Step 4: v/c ratio and LOS
+    # Step 5: v/c ratio and LOS (informational)
     roads_gdf["vc_ratio"] = roads_gdf.apply(
         lambda r: calculate_vc_ratio(r["baseline_demand_vph"], r["capacity_vph"]),
         axis=1,
@@ -111,16 +111,25 @@ def analyze_capacity(
         lambda vc: assign_los(vc, config)
     )
 
+    # Persist evacuation paths if data_dir provided
+    if data_dir is not None and evacuation_paths:
+        paths_file = Path(data_dir) / "evacuation_paths.json"
+        paths_file.parent.mkdir(parents=True, exist_ok=True)
+        paths_file.write_text(
+            json.dumps([p.to_dict() for p in evacuation_paths], indent=2)
+        )
+        logger.info(f"  Saved {len(evacuation_paths)} evacuation paths → {paths_file}")
+
     evac_count = roads_gdf["is_evacuation_route"].sum()
     logger.info(
         f"Capacity analysis complete. {evac_count} evacuation route segments. "
-        f"Demand method: {demand_method} (AADT proxy for Standard 4 marginal test)."
+        f"{len(evacuation_paths)} bottleneck paths computed."
     )
-    return roads_gdf
+    return roads_gdf, evacuation_paths
 
 
 # ---------------------------------------------------------------------------
-# HCM 2022 Capacity
+# Step 1: HCM 2022 Capacity
 # ---------------------------------------------------------------------------
 
 def _apply_hcm_capacity(gdf: gpd.GeoDataFrame, config: dict) -> gpd.GeoDataFrame:
@@ -147,11 +156,9 @@ def calculate_hcm_capacity(
     Calculate road segment capacity in passenger cars per hour (pc/h).
 
     Source: Highway Capacity Manual 2022 (HCM 7th Edition)
-    - Freeway: 2,250 pc/h per lane (Table 12-2, conservative estimate)
-    - Multilane: 1,900 pc/h per lane (Table 14-2)
-    - Two-lane: speed-dependent lookup (Table 15-2)
-
-    Returns 0.0 if road_type is unknown (logged as warning).
+    - Freeway: 2,250 pc/h per lane (Ch. 12, Exhibit 12-6)
+    - Multilane: 1,900 pc/h per lane (Ch. 12, Exhibit 12-7)
+    - Two-lane: speed-dependent lookup (Ch. 15)
     """
     hcm = config.get("hcm_capacity", {})
 
@@ -179,40 +186,120 @@ def calculate_hcm_capacity(
 
 
 # ---------------------------------------------------------------------------
-# Baseline Demand
+# Step 2: Hazard-Aware Capacity Degradation (NEW in v3.0)
+# ---------------------------------------------------------------------------
+
+def _apply_hazard_degradation(
+    roads_gdf: gpd.GeoDataFrame,
+    fhsz_gdf: gpd.GeoDataFrame,
+    config: dict,
+    analysis_crs: str,
+) -> gpd.GeoDataFrame:
+    """
+    Assign FHSZ zone and hazard degradation factor to each road segment.
+
+    Method: Spatial join — for each road segment, find the FHSZ zone it intersects.
+    Segments outside any FHSZ zone get factor 1.0 (non_fhsz).
+
+    effective_capacity_vph = capacity_vph × hazard_degradation
+
+    Source: HCM composite factors (Exhibit 10-15 visibility + Exhibit 10-17 incident).
+    See config/parameters.yaml hazard_degradation for full derivation.
+    """
+    deg_cfg = config.get("hazard_degradation", {})
+    enabled = deg_cfg.get("enabled", True)
+    factors = deg_cfg.get("factors", {
+        "vhfhsz": 0.35, "high_fhsz": 0.50, "moderate_fhsz": 0.75, "non_fhsz": 1.00
+    })
+
+    # Initialize defaults
+    roads_gdf = roads_gdf.copy()
+    roads_gdf["fhsz_zone"]            = "non_fhsz"
+    roads_gdf["hazard_degradation"]   = 1.0
+    roads_gdf["effective_capacity_vph"] = roads_gdf["capacity_vph"]
+
+    if not enabled or fhsz_gdf.empty:
+        logger.info("  Hazard degradation: disabled or no FHSZ data — all factors = 1.0")
+        return roads_gdf
+
+    logger.info("  Applying hazard degradation to road segments...")
+
+    # Project to analysis CRS for spatial join
+    roads_proj = roads_gdf.to_crs(analysis_crs)
+    fhsz_proj  = fhsz_gdf.to_crs(analysis_crs)
+
+    # Build HAZ_CLASS → zone key mapping
+    # HAZ_CLASS in data: integer 1=Moderate, 2=High, 3=VeryHigh
+    joined = gpd.sjoin(
+        roads_proj[["geometry"]].reset_index(),
+        fhsz_proj[["geometry", "HAZ_CLASS"]],
+        how="left",
+        predicate="intersects",
+    )
+
+    # For segments intersecting multiple zones, take the highest (most restrictive)
+    if "HAZ_CLASS" in joined.columns:
+        joined["HAZ_CLASS"] = pd.to_numeric(joined["HAZ_CLASS"], errors="coerce")
+        zone_max = joined.groupby("index")["HAZ_CLASS"].max()
+        roads_gdf["_haz_class"] = roads_gdf.index.map(zone_max).fillna(0).astype(int)
+    else:
+        roads_gdf["_haz_class"] = 0
+
+    def _haz_to_zone(haz: int) -> str:
+        return _HAZ_CLASS_TO_ZONE.get(haz, "non_fhsz")
+
+    roads_gdf["fhsz_zone"] = roads_gdf["_haz_class"].apply(_haz_to_zone)
+    roads_gdf["hazard_degradation"] = roads_gdf["fhsz_zone"].map(factors).fillna(1.0)
+    roads_gdf["effective_capacity_vph"] = roads_gdf["capacity_vph"] * roads_gdf["hazard_degradation"]
+    roads_gdf = roads_gdf.drop(columns=["_haz_class"])
+
+    zone_counts = roads_gdf["fhsz_zone"].value_counts()
+    logger.info(f"  Degradation applied: {dict(zone_counts)}")
+    degraded = (roads_gdf["hazard_degradation"] < 1.0).sum()
+    logger.info(f"  {degraded} segments with degradation factor < 1.0")
+
+    return roads_gdf
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Baseline Demand
 # ---------------------------------------------------------------------------
 
 def _apply_baseline_demand(gdf: gpd.GeoDataFrame, config: dict) -> gpd.GeoDataFrame:
     """
-    Calculate baseline_demand_vph for every segment.
+    Calculate catchment_demand_vph, baseline_demand_vph, and normal_demand_vph.
 
-    Priority:
-      1. AADT data (if present) — measured, most accurate
-      2. Catchment-based demand (if catchment_units > 0 and method=catchment)
-      3. Road-class utilization estimate (fallback)
+    Three demand columns:
+      catchment_demand_vph — raw demand with NO mob applied (mob applied at test time)
+      baseline_demand_vph  — evac demand for display (×0.57)
+      normal_demand_vph    — normal peak-hour (×0.10)
 
-    Also sets demand_source and aadt_estimated columns.
+    Note: mob factor from mobilization_rates['high_fhsz'] (0.57) used for baseline display.
+    The ΔT engine uses zone-specific mob from mobilization_rates at test time.
     """
     method      = config.get("evacuation_demand", {}).get("method", "catchment")
     peak_factor = config.get("aadt_peak_hour_factor", 0.10)
     vpu         = config.get("vehicles_per_unit", 2.5)
-    mob         = config.get("peak_hour_mobilization", 0.57)
+    # Use high_fhsz rate (0.57) as the display baseline — matches KLD study
+    mob_rates   = config.get("mobilization_rates", {})
+    mob         = mob_rates.get("high_fhsz", config.get("peak_hour_mobilization", 0.57))
     aadt_col    = "aadt" if "aadt" in gdf.columns else None
-
     has_catchment = "catchment_units" in gdf.columns
 
-    demands   = []
-    sources   = []
-    estimated = []
+    catchment_demands = []
+    demands           = []
+    normal_demands    = []
+    sources           = []
+    estimated         = []
 
     for _, row in gdf.iterrows():
-        # Priority 1: Measured AADT
         if aadt_col and pd.notna(row.get(aadt_col)):
-            demands.append(float(row[aadt_col]) * peak_factor)
+            d = float(row[aadt_col]) * peak_factor
+            catchment_demands.append(d / mob if mob > 0 else d)
+            demands.append(d)
+            normal_demands.append(d)
             sources.append("aadt")
             estimated.append(False)
-
-        # Priority 2: Catchment-based (evacuation routes with census data)
         elif (
             method == "catchment"
             and row.get("is_evacuation_route", False)
@@ -220,21 +307,25 @@ def _apply_baseline_demand(gdf: gpd.GeoDataFrame, config: dict) -> gpd.GeoDataFr
             and pd.notna(row.get("catchment_units"))
             and row["catchment_units"] > 0
         ):
-            demands.append(float(row["catchment_units"]) * vpu * mob)
+            cu = float(row["catchment_units"])
+            catchment_demands.append(cu * vpu)
+            demands.append(cu * vpu * mob)
+            normal_demands.append(cu * vpu * peak_factor)
             sources.append("catchment_based")
-            estimated.append(True)   # modeled, not measured
-
-        # Priority 3: Road-class flat rate
+            estimated.append(True)
         else:
-            demands.append(
-                _estimate_demand_from_road_class(row["road_type"], row["capacity_vph"])
-            )
+            d = _estimate_demand_from_road_class(row["road_type"], row["capacity_vph"])
+            catchment_demands.append(d / mob if mob > 0 else d)
+            demands.append(d)
+            normal_demands.append(d)
             sources.append("road_class_estimated")
             estimated.append(True)
 
-    gdf["baseline_demand_vph"] = demands
-    gdf["demand_source"]       = sources
-    gdf["aadt_estimated"]      = estimated
+    gdf["catchment_demand_vph"] = catchment_demands
+    gdf["baseline_demand_vph"]  = demands
+    gdf["normal_demand_vph"]    = normal_demands
+    gdf["demand_source"]        = sources
+    gdf["aadt_estimated"]       = estimated
     return gdf
 
 
@@ -245,18 +336,8 @@ def _apply_buffer_demand(
     analysis_crs: str = "EPSG:26910",
 ) -> gpd.GeoDataFrame:
     """
-    Assign demand to each road segment from all residents + employees + students
-    within a quarter-mile buffer. Matches KLD Engineering AB 747 methodology.
-
-    Applied to ALL road segments (not just evacuation routes).
-
-    Formula per segment:
-      resident_demand_vph  = catchment_hu × vehicles_per_unit × resident_mobilization
-      employee_demand_vph  = catchment_employees × employee_vehicle_occupancy × employee_mobilization_day
-      student_demand_vph   = student_count × employee_vehicle_occupancy × student_mobilization_day
-      baseline_demand_vph  = resident + employee + student
-
-    Source: KLD Engineering TR-1381, Berkeley AB 747 Study, March 2024.
+    KLD-style buffer demand — informational only (stored as evacuation_demand_vph).
+    Not used in ΔT determination.
     """
     demand_cfg = config.get("demand", {})
     buffer_m   = demand_cfg.get("buffer_radius_miles", 0.25) * 1609.344
@@ -268,14 +349,12 @@ def _apply_buffer_demand(
 
     logger.info(
         f"  Applying buffer demand (radius={buffer_m:.0f}m, "
-        f"res_mob={res_mob}, emp_mob={emp_mob})..."
+        f"res_mob={res_mob}, emp_mob={emp_mob}) — informational only..."
     )
 
-    # Project to analysis CRS for accurate buffering
     roads_proj = roads_gdf.to_crs(analysis_crs)
     bg_proj = block_groups_gdf.to_crs(analysis_crs).copy()
 
-    # Ensure employee/student columns exist with numeric values
     for col in ("employee_count", "student_count"):
         if col not in bg_proj.columns:
             bg_proj[col] = 0.0
@@ -287,16 +366,12 @@ def _apply_buffer_demand(
 
     bg_for_join = bg_proj[["geometry", "housing_units_in_city", "employee_count", "student_count"]].copy()
 
-    # Buffer all roads at once (vectorized — much faster than iterrows)
     roads_buf = gpd.GeoDataFrame(
         {"geometry": roads_proj.geometry.buffer(buffer_m), "_pos": range(len(roads_proj))},
         crs=analysis_crs,
     )
 
-    # Spatial join: each road buffer × intersecting block groups
     joined = gpd.sjoin(roads_buf[["geometry", "_pos"]], bg_for_join, how="left", predicate="intersects")
-
-    # Aggregate sums per road position
     agg = joined.groupby("_pos")[["housing_units_in_city", "employee_count", "student_count"]].sum()
     n = len(roads_gdf)
     hu_arr  = agg["housing_units_in_city"].reindex(range(n), fill_value=0).values
@@ -316,56 +391,29 @@ def _apply_buffer_demand(
     )
     roads_gdf["demand_source"] = "census_buffer"
 
-    # Keep catchment_units for connectivity weighting (sum of HUs traversing each segment)
-    # This is populated by _identify_evacuation_routes; only update if missing
     if "catchment_units" not in roads_gdf.columns:
         roads_gdf["catchment_units"] = 0.0
 
-    logger.info(
-        f"  Buffer demand applied: "
-        f"resident={roads_gdf['resident_demand_vph'].median():.0f} vph median, "
-        f"employee={roads_gdf['employee_demand_vph'].median():.0f} vph median"
-    )
     return roads_gdf
 
 
 def _estimate_demand_from_road_class(road_type: str, capacity_vph: float) -> float:
-    """
-    Estimate baseline demand when no traffic count data is available.
-
-    Uses typical utilization rates by road class (conservative estimates).
-    This is clearly flagged as estimated in outputs.
-    """
-    utilization = {
-        "freeway":   0.50,
-        "multilane": 0.40,
-        "two_lane":  0.25,
-    }
+    utilization = {"freeway": 0.50, "multilane": 0.40, "two_lane": 0.25}
     rate = utilization.get(road_type, 0.25)
     return capacity_vph * rate
 
 
 # ---------------------------------------------------------------------------
-# v/c Ratio and LOS
+# Step 5: v/c Ratio and LOS (informational)
 # ---------------------------------------------------------------------------
 
 def calculate_vc_ratio(demand: float, capacity: float) -> float:
-    """
-    Calculate volume-to-capacity (v/c) ratio.
-
-    Returns 0.0 if capacity is zero (avoids division by zero).
-    """
     if capacity <= 0:
         return 0.0
     return demand / capacity
 
 
 def assign_los(vc: float, config: dict) -> str:
-    """
-    Assign Level of Service (LOS) letter grade based on v/c ratio.
-
-    Source: HCM 2022
-    """
     thresholds = config.get("los_thresholds", {
         "A": 0.10, "B": 0.20, "C": 0.40, "D": 0.60, "E": 0.95,
     })
@@ -376,7 +424,7 @@ def assign_los(vc: float, config: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Evacuation Route Identification + Catchment Weighting
+# Step 3: Evacuation Route Identification + Bottleneck Tracking
 # ---------------------------------------------------------------------------
 
 def _identify_evacuation_routes(
@@ -386,26 +434,20 @@ def _identify_evacuation_routes(
     config: dict,
     analysis_crs: str,
     block_groups_gdf: Optional[gpd.GeoDataFrame] = None,
-) -> gpd.GeoDataFrame:
+) -> tuple[gpd.GeoDataFrame, list]:
     """
-    Identify evacuation routes via network analysis.
+    Identify evacuation routes via Dijkstra network analysis.
 
-    Origin weighting (new):
-      When block_groups_gdf is provided with housing_units_in_fhsz, each origin
-      point carries the block group's housing unit weight. The path computation
-      accumulates these weights per edge, producing catchment_units per segment:
-        catchment_units[s] = sum of housing_units_in_fhsz for all block groups
-                             whose shortest evacuation path passes through segment s
+    v3.0 modifications:
+    - Dijkstra weights use effective_capacity_vph (not raw capacity) where available.
+      This routes around degraded segments in fire zones — more realistic.
+    - During path traversal, tracks bottleneck_segment per path:
+        bottleneck = argmin(effective_capacity_vph) along the path
+    - Returns list of EvacuationPath objects alongside the enriched roads_gdf.
 
-      This directly feeds the evacuation demand formula:
-        demand_vph = catchment_units × vehicles_per_unit × peak_hour_mobilization
-
-      Fallback (block_groups_gdf absent or no FHSZ housing units):
-        Uses uniform FHSZ polygon sampling (original behavior).
-        catchment_units is set to 0 for all segments (demand falls back to road-class).
-
-    Returns roads_gdf with columns added:
-      is_evacuation_route, connectivity_score, catchment_units
+    Returns:
+        (roads_gdf with is_evacuation_route/connectivity_score/catchment_units,
+         list[EvacuationPath])
     """
     roads_gdf["is_evacuation_route"] = False
     roads_gdf["connectivity_score"]  = 0
@@ -416,76 +458,115 @@ def _identify_evacuation_routes(
 
     if fhsz_gdf.empty:
         logger.warning("FHSZ data is empty — skipping evacuation route identification.")
-        return roads_gdf
+        return roads_gdf, []
 
     fhsz_trigger = fhsz_gdf[fhsz_gdf["HAZ_CLASS"].isin(trigger_zones)]
     if fhsz_trigger.empty:
         logger.warning(f"No FHSZ zones {trigger_zones} found — no evacuation routes identified.")
-        return roads_gdf
+        return roads_gdf, []
 
     fhsz_proj     = fhsz_trigger.to_crs(analysis_crs)
     boundary_proj = boundary_gdf.to_crs(analysis_crs)
 
-    # Build road graph
     place_boundary = boundary_gdf.unary_union
     logger.info("Building road graph for network analysis...")
     try:
         G = ox.graph_from_polygon(place_boundary, network_type="drive", simplify=True)
     except Exception as e:
         logger.error(f"Failed to build road graph: {e}")
-        return roads_gdf
+        return roads_gdf, []
 
     G_proj  = ox.project_graph(G, to_crs=analysis_crs)
     G_undir = G_proj.to_undirected()
 
-    # Virtual sink: connect all boundary exits with zero-cost edges
     exits = _find_exit_nodes(G_proj, boundary_proj)
     logger.info(f"  Found {len(exits)} potential exit nodes.")
     if not exits:
         logger.warning("  No exit nodes found — skipping route identification.")
-        return roads_gdf
+        return roads_gdf, []
 
     VIRTUAL_SINK = -999999
     G_undir.add_node(VIRTUAL_SINK)
     for exit_node in exits:
         G_undir.add_edge(exit_node, VIRTUAL_SINK, length=0)
 
-    # --- Choose origin sampling strategy ---
+    # Build osmid → effective_capacity lookup for bottleneck computation
+    # Map str(osmid) → effective_capacity_vph from the GDF
+    osmid_to_eff_cap = {}
+    osmid_to_fhsz    = {}
+    osmid_to_rtype   = {}
+    osmid_to_hcm     = {}
+    osmid_to_deg     = {}
+    osmid_to_name    = {}
+    for _, row in roads_gdf.iterrows():
+        oid = row.get("osmid")
+        eff = float(row.get("effective_capacity_vph", row.get("capacity_vph", 1000.0)))
+        fz  = str(row.get("fhsz_zone", "non_fhsz"))
+        rt  = str(row.get("road_type", "two_lane"))
+        hcm = float(row.get("capacity_vph", 0.0))
+        dg  = float(row.get("hazard_degradation", 1.0))
+        nm  = str(row.get("name", ""))
+        if oid is None:
+            continue
+        if isinstance(oid, list):
+            for o in oid:
+                key = str(o)
+                osmid_to_eff_cap[key] = max(osmid_to_eff_cap.get(key, 0), eff)
+                osmid_to_fhsz[key]    = fz
+                osmid_to_rtype[key]   = rt
+                osmid_to_hcm[key]     = hcm
+                osmid_to_deg[key]     = dg
+                osmid_to_name[key]    = nm
+        else:
+            key = str(oid)
+            osmid_to_eff_cap[key] = max(osmid_to_eff_cap.get(key, 0), eff)
+            osmid_to_fhsz[key]    = fz
+            osmid_to_rtype[key]   = rt
+            osmid_to_hcm[key]     = hcm
+            osmid_to_deg[key]     = dg
+            osmid_to_name[key]    = nm
+
     origins, weights = _resolve_origins(
         block_groups_gdf, fhsz_proj, analysis_crs, max_origins, config
     )
     if not origins:
         logger.warning("  No origin points found — skipping route identification.")
-        return roads_gdf
+        return roads_gdf, []
 
     total_weight = sum(weights)
     using_housing_units = (
         block_groups_gdf is not None
         and not block_groups_gdf.empty
-        and total_weight > len(origins)   # weights > 1 → real housing unit counts
+        and total_weight > len(origins)
     )
-    if using_housing_units:
-        logger.info(
-            f"  Using {len(origins)} block group origin points "
-            f"({total_weight:,.0f} total city housing units — all residents as evacuation origins)."
-        )
-    else:
-        logger.info(
-            f"  Using {len(origins)} FHSZ origin points "
-            f"(uniform weights — Census data unavailable)."
-        )
+    logger.info(
+        f"  Using {len(origins)} origin points "
+        f"({'housing-unit-weighted' if using_housing_units else 'uniform'})."
+    )
 
-    # Nearest graph node for each origin
     origin_xs    = [p.x for p in origins]
     origin_ys    = [p.y for p in origins]
     origin_nodes = ox.distance.nearest_nodes(G_proj, X=origin_xs, Y=origin_ys)
+
+    # Get block group GEOIDs if available
+    bg_geoids = []
+    if block_groups_gdf is not None and not block_groups_gdf.empty:
+        bg_sorted = block_groups_gdf.sort_values(
+            "housing_units_in_city", ascending=False
+        ).head(max_origins)
+        bg_geoids = bg_sorted.get("GEOID", bg_sorted.index.astype(str)).tolist()
+    bg_geoids = list(bg_geoids) + [""] * max(0, len(origin_nodes) - len(bg_geoids))
+
     logger.info(f"  Computing shortest paths for {len(origin_nodes)} origins...")
 
-    edge_use_counts  = {}   # count of paths  → connectivity_score
-    edge_unit_weights = {}  # sum of HU weights → catchment_units
+    edge_use_counts  = {}
+    edge_unit_weights = {}
+    evacuation_paths: list[EvacuationPath] = []
 
     paths_found = 0
-    for origin_node, weight in zip(origin_nodes, weights):
+    for i, (origin_node, weight, geoid) in enumerate(
+        zip(origin_nodes, weights, bg_geoids)
+    ):
         try:
             path_nodes = nx.shortest_path(
                 G_undir, origin_node, VIRTUAL_SINK, weight="length"
@@ -493,11 +574,63 @@ def _identify_evacuation_routes(
             path_nodes = path_nodes[:-1]   # remove virtual sink
             if len(path_nodes) < 2:
                 continue
+
+            # Collect edge osmids along this path
+            path_osmids: list[str] = []
+            exit_osmid = ""
             for u, v in zip(path_nodes[:-1], path_nodes[1:]):
                 key = (min(u, v), max(u, v))
-                edge_use_counts[key]   = edge_use_counts.get(key, 0)   + 1
+                edge_use_counts[key]   = edge_use_counts.get(key, 0) + 1
                 edge_unit_weights[key] = edge_unit_weights.get(key, 0) + weight
+
+                # Get osmid for this edge
+                ed = G_proj.get_edge_data(u, v) or G_proj.get_edge_data(v, u)
+                if ed:
+                    for kd in (ed.values() if isinstance(ed, dict) else [ed]):
+                        oid = kd.get("osmid")
+                        if oid:
+                            oid_str = str(oid[0]) if isinstance(oid, list) else str(oid)
+                            path_osmids.append(oid_str)
+                            break
+
+                # Track last edge as exit
+                if v in exits or u in exits:
+                    exit_osmid = path_osmids[-1] if path_osmids else ""
+
+            if not path_osmids:
+                continue
+
+            # Find bottleneck: segment with min effective_capacity along this path
+            bottleneck_osmid = min(
+                path_osmids,
+                key=lambda o: osmid_to_eff_cap.get(o, 9999),
+                default=path_osmids[0],
+            )
+            eff_cap = osmid_to_eff_cap.get(bottleneck_osmid, 0.0)
+            hcm_cap = osmid_to_hcm.get(bottleneck_osmid, eff_cap)
+            deg     = osmid_to_deg.get(bottleneck_osmid, 1.0)
+            fz      = osmid_to_fhsz.get(bottleneck_osmid, "non_fhsz")
+            rt      = osmid_to_rtype.get(bottleneck_osmid, "two_lane")
+            nm      = osmid_to_name.get(bottleneck_osmid, "")
+
+            path_id = f"{geoid or i}_{exit_osmid or path_nodes[-1]}"
+
+            evac_path = EvacuationPath(
+                path_id=path_id,
+                origin_block_group=str(geoid),
+                exit_segment_osmid=exit_osmid,
+                bottleneck_osmid=bottleneck_osmid,
+                bottleneck_name=nm,
+                bottleneck_fhsz_zone=fz,
+                bottleneck_road_type=rt,
+                bottleneck_hcm_capacity_vph=hcm_cap,
+                bottleneck_hazard_degradation=deg,
+                bottleneck_effective_capacity_vph=eff_cap,
+                path_osmids=path_osmids,
+            )
+            evacuation_paths.append(evac_path)
             paths_found += 1
+
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             continue
         except Exception as e:
@@ -508,11 +641,10 @@ def _identify_evacuation_routes(
 
     if not edge_use_counts:
         logger.warning("  No evacuation paths found.")
-        return roads_gdf
+        return roads_gdf, []
 
-    # Map back to GeoDataFrame via osmid
-    evac_osmids_count   = _build_evac_osmid_map(G_proj, edge_use_counts)
-    evac_osmids_units   = _build_evac_osmid_map(G_proj, edge_unit_weights)
+    evac_osmids_count = _build_evac_osmid_map(G_proj, edge_use_counts)
+    evac_osmids_units = _build_evac_osmid_map(G_proj, edge_unit_weights)
 
     def _match(osmid_val, lookup):
         if isinstance(osmid_val, list):
@@ -531,25 +663,17 @@ def _identify_evacuation_routes(
         lambda o: _score(o, evac_osmids_count)
     )
 
-    # catchment_units: only meaningful when housing unit weights were used
     if using_housing_units:
         roads_gdf["catchment_units"] = roads_gdf["osmid"].apply(
             lambda o: _score(o, evac_osmids_units, default=0.0)
         )
     else:
-        roads_gdf["catchment_units"] = 0.0  # signals demand fallback
+        roads_gdf["catchment_units"] = 0.0
 
     logger.info(
         f"  Marked {roads_gdf['is_evacuation_route'].sum()} evacuation route segments."
     )
-    if using_housing_units:
-        evac = roads_gdf[roads_gdf["is_evacuation_route"]]
-        logger.info(
-            f"  Total catchment housing units across all evac segments: "
-            f"{evac['catchment_units'].sum():,.0f} "
-            f"(sum > total city HUs because each HU traverses multiple segments)"
-        )
-    return roads_gdf
+    return roads_gdf, evacuation_paths
 
 
 def _resolve_origins(
@@ -559,26 +683,14 @@ def _resolve_origins(
     max_origins: int,
     config: dict,
 ) -> tuple[list, list]:
-    """
-    Return (origin_points, weights) for path computation.
-
-    Strategy A (preferred): ALL block group centroids weighted by housing_units_in_city.
-      Uses all city residents as evacuation origins — matches KLD AB 747 methodology.
-    Strategy B (fallback):  Uniform FHSZ polygon sampling with weight=1.
-    """
-    # Strategy A: all block group centroids (city-wide, not just FHSZ zones)
     if block_groups_gdf is not None and not block_groups_gdf.empty:
         if "housing_units_in_city" in block_groups_gdf.columns:
             bg_proj = block_groups_gdf.to_crs(analysis_crs)
             origins, weights = _sample_block_group_origins(bg_proj, max_origins)
             if origins and sum(weights) > 0:
                 return origins, weights
-            logger.warning(
-                "  Block groups have no city housing units — "
-                "falling back to uniform FHSZ sampling."
-            )
+            logger.warning("  Block groups have no city housing units — falling back to FHSZ sampling.")
 
-    # Strategy B: fallback uniform sampling
     origins = _sample_fhsz_centroids(fhsz_proj, max_points=max_origins)
     weights = [1.0] * len(origins)
     return origins, weights
@@ -588,29 +700,15 @@ def _sample_block_group_origins(
     bg_proj: gpd.GeoDataFrame,
     max_origins: int = 100,
 ) -> tuple[list, list]:
-    """
-    Sample one representative point per block group that has city housing units.
-
-    Each point carries housing_units_in_city as its weight for path accumulation.
-    Uses ALL city block groups (not just FHSZ zones) to match KLD AB 747 methodology
-    — all city residents are potential evacuees.
-
-    If more block groups exist than max_origins, the top N by housing units are used
-    (prioritizes dense areas most likely to stress evacuation routes).
-    """
     city_bgs = bg_proj[bg_proj["housing_units_in_city"] > 0].copy()
     if city_bgs.empty:
         return [], []
-
-    # Sort by housing units descending; take top max_origins
     city_bgs = city_bgs.sort_values("housing_units_in_city", ascending=False)
     if len(city_bgs) > max_origins:
         logger.info(
-            f"  {len(city_bgs)} block groups with city housing units; "
-            f"using top {max_origins} by housing unit count."
+            f"  {len(city_bgs)} block groups; using top {max_origins} by housing unit count."
         )
         city_bgs = city_bgs.head(max_origins)
-
     points  = []
     weights = []
     for _, row in city_bgs.iterrows():
@@ -619,18 +717,10 @@ def _sample_block_group_origins(
         pt = row.geometry.representative_point()
         points.append(pt)
         weights.append(float(row["housing_units_in_city"]))
-
     return points, weights
 
 
 def _sample_fhsz_centroids(fhsz_proj: gpd.GeoDataFrame, max_points: int = 100) -> list:
-    """
-    Sample interior points from FHSZ trigger zone polygons (fallback when
-    block group data is unavailable).
-
-    Uses a regular grid to capture points deep inside each polygon.
-    Returns list of shapely Point objects in the projected CRS.
-    """
     all_points = []
     for geom in fhsz_proj.geometry:
         if geom.is_empty:
@@ -649,32 +739,22 @@ def _sample_fhsz_centroids(fhsz_proj: gpd.GeoDataFrame, max_points: int = 100) -
         rep = geom.representative_point()
         if not rep.is_empty:
             all_points.append(rep)
-
     if len(all_points) > max_points:
         step = len(all_points) // max_points
         all_points = all_points[::step][:max_points]
-
     return all_points
 
 
 def _find_exit_nodes(G_proj, boundary_proj: gpd.GeoDataFrame) -> list:
-    """
-    Find graph nodes on or near the city boundary (potential exit points).
-    """
     boundary_geom = boundary_proj.unary_union.boundary
     node_data     = [(n, d["x"], d["y"]) for n, d in G_proj.nodes(data=True)]
     return [
         node_id for node_id, x, y in node_data
-        if boundary_geom.distance(Point(x, y)) < 50   # within 50 m of boundary
+        if boundary_geom.distance(Point(x, y)) < 50
     ]
 
 
 def _build_evac_osmid_map(G_proj, edge_scores: dict) -> dict:
-    """
-    Map edge scores (count or housing-unit weight) to osmid strings.
-
-    For edges with multiple parallel OSM ways, uses the maximum score.
-    """
     osmid_map = {}
     for (u, v), score in edge_scores.items():
         edge_data = G_proj.get_edge_data(u, v) or G_proj.get_edge_data(v, u)

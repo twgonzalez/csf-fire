@@ -52,6 +52,13 @@ uv run python main.py demo --city "Berkeley"
 The `output/` directory is git-ignored. Share `output/{city}/demo_map.html` directly with
 stakeholders. Do NOT leave a stale demo map — always regenerate before sharing.
 
+**Brief / popup labeling convention (user-facing):** Criteria are labeled **A** (Applicability
+Threshold — size gate), **B** (Site Parameters — FHSZ zone + degradation + threshold), and
+**C** (Evacuation Clearance Analysis — routes + ΔT test) in `brief_v3.py` and the demo map
+popup. SB 79 transit proximity is a separate informational scenario (no badge, footnote only).
+The underlying algorithm is Standards 1–5 / 5-step; A/B/C is the presentation layer used
+in all user-facing outputs (determination letter, popup, briefs).
+
 ## Directory Structure
 
 ```
@@ -80,16 +87,29 @@ output/{city}/          # Results (git-ignored)
   determination_{id}.txt
 ```
 
-## Key Parameters (from config/parameters.yaml)
+## Key Parameters (from config/parameters.yaml) — v3.0 ΔT Standard
 
 | Parameter | Default | Source |
 |-----------|---------|--------|
-| `vc_threshold` | 0.95 | Exact LOS E/F boundary, HCM 2022 |
-| `unit_threshold` | 15 | ITE de minimis (21.4 vph at 15 units); SB 330 statutory anchor |
-| `vehicles_per_unit` | 2.5 | U.S. Census ACS |
-| `peak_hour_mobilization` | 0.57 | Berkeley mobilization study |
-| `aadt_peak_hour_factor` | 0.10 | Standard peak-hour conversion |
-| Evacuation route radius | 0.5 miles | per Standard 3 |
+| `unit_threshold` | 15 | ITE de minimis; SB 330 statutory anchor |
+| `vehicles_per_unit` | 2.5 | U.S. Census ACS B25044 |
+| `mobilization_rate` | **0.90 (constant)** | **NFPA 101 design basis; ~10% zero-vehicle HHs per Census ACS B25044** |
+| `hazard_degradation.vhfhsz` | 0.35 | HCM Exhibit 10-15/10-17 + NIST Camp Fire |
+| `hazard_degradation.high_fhsz` | 0.50 | HCM composite |
+| `hazard_degradation.moderate_fhsz` | 0.75 | HCM composite |
+| `safe_egress_window.vhfhsz` | 45 min | NIST TN 2135 (Camp Fire timeline) |
+| `safe_egress_window.high_fhsz` | 90 min | Fire spread ~2× VHFHSZ window |
+| `safe_egress_window.moderate_fhsz` | 120 min | Standard emergency planning |
+| `safe_egress_window.non_fhsz` | 120 min | FEMA standard |
+| `max_project_share` | 0.05 | Standard 5% engineering significance threshold |
+| Derived ΔT thresholds (v3.2) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
+| `egress_penalty.threshold_stories` | 4 | NFPA 101 / IBC |
+| `egress_penalty.minutes_per_story` | 1.5 | NFPA 101 |
+| `egress_penalty.max_minutes` | 12 | NFPA 101 cap |
+| Evacuation route radius | 0.5 miles | per Standard 2 |
+| `vc_threshold` | 0.95 | Informational only — HCM LOS E/F boundary |
+
+**v3.2 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
 
 ## HCM 2022 Capacity Table
 
@@ -114,20 +134,30 @@ output/{city}/          # Results (git-ignored)
 | 0.60–0.95 | E |
 | 0.95+ | F |
 
-## Objective Standards (Agent 3)
+## Objective Standards — v3.0 ΔT Standard (Agent 3)
 
-All four standards are algorithmic — zero discretion allowed. Do NOT add any "professional judgment" or "reasonable estimate" language to the standards engine.
+All standards are algorithmic — zero discretion allowed. Do NOT add "professional judgment" language.
 
-1. **Standard 1**: GIS point-in-polygon test against FHSZ Zone 2 or 3
-2. **Standard 2**: `units >= 15` (integer comparison)
-3. **Standard 3**: Network analysis to find evacuation routes within 0.5 miles
-4. **Standard 4**: `baseline_vc < 0.95` AND `proposed_vc >= 0.95` for any serving route — marginal causation test; project must itself cause the threshold crossing (0.95 = exact HCM LOS E/F boundary)
+1. **Standard 1**: `units >= 15` (integer comparison — universal size gate)
+2. **Standard 2**: Buffer project location 0.5 mi → filter `EvacuationPath` objects by bottleneck/exit osmid proximity
+3. **Standard 3**: GIS point-in-polygon test against CAL FIRE FHSZ; sets `project.hazard_zone` string which controls mobilization_rate and ΔT threshold; `in_fire_zone=True` for HAZ_CLASS ≥ 2
+4. **Standard 4 (ΔT Test)**: `ΔT = (project_vehicles / bottleneck_effective_capacity_vph) × 60 + egress_penalty`
+   - `project_vehicles = units × vpu × 0.90` (mobilization constant, NFPA 101 — not zone-dependent)
+   - `egress_penalty = 0` for stories < 4; `min(stories × 1.5, 12)` for ≥ 4 stories
+   - Flagged when `ΔT > threshold(hazard_zone)` where `threshold = safe_egress_window × max_project_share`
+   - **No baseline precondition** — routes already at LOS F are tested equally
+5. **Standard 5**: SB 79 transit proximity flag — **informational only**, never raises tier
 
 **Final determination:**
 ```
-IF std1 AND std2 AND std4 → DISCRETIONARY REVIEW REQUIRED
-OTHERWISE → MINISTERIAL APPROVAL ELIGIBLE
+DISCRETIONARY           — Std 1 met AND any serving path ΔT > threshold
+CONDITIONAL MINISTERIAL — Std 1 met AND all paths ΔT within threshold
+MINISTERIAL             — below size threshold (Std 1 not met)
 ```
+
+**ΔT engine** (`agents/scenarios/base.py`): `compute_delta_t()` iterates `list[EvacuationPath]` from Agent 2.
+**Routing** (`agents/scenarios/wildland.py`): `identify_routes()` returns `EvacuationPath` objects filtered by proximity.
+**Orchestration** (`agents/objective_standards.py`): most-restrictive-wins across WildlandScenario only (Sb79TransitScenario never contributes to tier).
 
 ## Data Sources
 
@@ -149,22 +179,21 @@ Phase 1 (MVP): Agents 1–3 only. CLI output to CSV + text. No web UI, no fee ca
 Phase 2 (next): Agent 4 (impact fee calculator) + Agent 6 (Folium maps).
 Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 
+## v3.2 Migration Status (branch: feat/v3-delta-t)
+
+✅ Replaced v/c marginal causation test with ΔT (marginal evacuation clearance time).
+✅ **v3.2: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
+✅ **v3.2: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
+✅ Hazard-aware capacity degradation applied by Agent 2 (HCM composite + NIST Camp Fire validation).
+✅ Building egress penalty (NFPA 101/IBC) for buildings ≥ 4 stories.
+✅ `EvacuationPath` dataclass with per-path bottleneck tracking (argmin effective_capacity_vph).
+✅ `Sb79TransitScenario` replaces `LocalDensityScenario` (informational flag, no tier impact).
+✅ Audit trail v3.2: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
+✅ `data/{city}/evacuation_paths.json` persisted by Agent 2 after routing.
+
 ## Pending Methodology Work
 
-1. ✅ **Trigger fix (marginal causation)** — `ratio_test()` in `agents/scenarios/base.py`
-   Changed from absolute trigger (`baseline_vc >= threshold`) to marginal test
-   (`baseline_vc < threshold AND proposed_vc >= threshold`). Projects near pre-existing
-   congestion are no longer automatically DISCRETIONARY; only projects that cause a
-   threshold crossing are flagged.
-
-2. ✅ **Demand model** — `agents/capacity_analysis.py` + `agents/scenarios/base.py`
-   KLD buffer model preserved as `evacuation_demand_vph` (informational). `baseline_demand_vph`
-   now uses catchment-based demand (network path analysis: catchment_units × vpu × mob), which
-   represents realistic per-segment load. `vehicles_per_route = project_vph` (not divided by
-   n_routes) implements worst-case marginal impact test. Result: DISCRETIONARY is now
-   demonstrable for constrained locations (e.g., Ridge Road, Cedar Street near capacity).
-
-3. **Physical site access standard (new Standard 6)** — no file yet
+1. **Physical site access standard (new Standard 6)** — no file yet
    The Clark Street (Encinitas) problem — 200 units at end of an 18' wide dead-end street —
    is not a v/c ratio problem. It is a physical access problem governed by IFC §503
    (fire apparatus access roads). Objective thresholds already exist in adopted fire code:

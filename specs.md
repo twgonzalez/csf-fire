@@ -1,3 +1,6 @@
+> **ARCHIVED — v2.0 (v/c ratio framework).** This document is superseded by
+> [`docs/JOSH_v3_Specification.md`](docs/JOSH_v3_Specification.md) (v3.1 ΔT standard, current).
+
 # Fire Evacuation Capacity Analysis System — Specification
 
 **Version:** 2.0 (revised to align with KLD Engineering AB 747 methodology)
@@ -277,22 +280,20 @@ baseline_demand_vph = resident_vph + employee_vph + student_vph
 
 | Standard | Check | Method | Gate for tier? |
 |---|---|---|---|
-| Std 1: Citywide FHSZ | Does city have any FHSZ zones? | non-empty GDF check | Gates CONDITIONAL |
-| Fire Zone Modifier | Is project in FHSZ Zone 2/3? | GIS point-in-polygon | Severity within DISC |
-| Std 2 (disc): Size | units ≥ disc_unit_threshold | integer comparison | Gates DISCRETIONARY |
-| Std 2 (cond): Size | units ≥ cond_unit_threshold | integer comparison | Gates CONDITIONAL |
-| Std 3: Serving routes | Evac routes within 0.5 mi of project | buffer + intersect | Informs Std 4 |
-| Std 4: Capacity | Any serving route exceeds v/c threshold? | HCM v/c calculation | Gates DISCRETIONARY |
+| Std 1: Project Size | units ≥ unit_threshold | integer comparison | Gates all standards (universal scale gate) |
+| Std 2: Evac Routes | Evac routes within 0.5 mi of project | buffer + intersect | Informs Std 4 |
+| Std 3: FHSZ Modifier | Is project in FHSZ Zone 2/3? | GIS point-in-polygon | Activates surge multiplier in Std 4 |
+| Std 4: Evac Capacity | Project causes route to cross v/c 0.95? | HCM marginal causation | Gates DISCRETIONARY |
+| Std 5: Local Capacity | Project causes local street to cross v/c 0.95? | HCM v/c, no surge | Supplemental — escalates to DISCRETIONARY |
 
 **Determination logic (100% algorithmic):**
 ```
-IF disc_size_met AND capacity_exceeded:
+IF size_met AND capacity_exceeded (Std 4 or Std 5):
     tier = DISCRETIONARY
-    # fire_zone_modifier adds fire-specific conditions to audit trail
-    # but does NOT create a second path — capacity impact is the gate
+    # Std 3 (FHSZ) activates surge multiplier in Std 4 — not an independent gate
 
-ELIF city_has_fhsz AND cond_size_met:
-    tier = CONDITIONAL MINISTERIAL
+ELIF size_met:
+    tier = CONDITIONAL MINISTERIAL   # universal — all cities, not FHSZ-gated
 
 ELSE:
     tier = MINISTERIAL

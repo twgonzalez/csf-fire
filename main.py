@@ -26,13 +26,7 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 def load_config(city: str) -> tuple[dict, dict]:
-    """Load parameters.yaml and city-specific config, applying city overrides.
-
-    City configs can override any parameter from parameters.yaml by placing it
-    under the ``overrides:`` key in config/cities/{city}.yaml.  Known nested
-    parameters (unit_threshold, vc_threshold) are propagated to all sub-sections
-    so every scenario sees the city-adopted value.  See docs/city_onboarding.md §2d.
-    """
+    """Load parameters.yaml and city-specific config, applying city overrides."""
     base_dir = Path(__file__).parent
 
     params_path = base_dir / "config" / "parameters.yaml"
@@ -51,26 +45,10 @@ def load_config(city: str) -> tuple[dict, dict]:
         with open(city_path) as f:
             city_config = yaml.safe_load(f)
 
-    # Apply city-specific overrides into the shared config dict.
-    # Only parameters explicitly listed under overrides: in the city YAML are applied;
-    # omitted parameters inherit the parameters.yaml defaults unchanged.
+    # Apply city-specific overrides
     overrides = city_config.get("overrides") or {}
     if overrides:
         config.update(overrides)
-        # unit_threshold has three nested lookup paths (one per scenario type).
-        # Propagate the city override to all of them so every scenario is consistent.
-        if "unit_threshold" in overrides:
-            ut = int(overrides["unit_threshold"])
-            config.setdefault("determination_tiers", {})
-            config["determination_tiers"].setdefault("discretionary", {})["unit_threshold"] = ut
-            config["determination_tiers"].setdefault("conditional_ministerial", {})["unit_threshold"] = ut
-            config.setdefault("local_density", {})["unit_threshold"] = ut
-        # vc_threshold likewise appears in nested scenario configs.
-        if "vc_threshold" in overrides:
-            vct = float(overrides["vc_threshold"])
-            config.setdefault("determination_tiers", {})
-            config["determination_tiers"].setdefault("discretionary", {})["vc_threshold"] = vct
-            config.setdefault("local_density", {})["vc_threshold"] = vct
 
     return config, city_config
 
@@ -134,14 +112,17 @@ def analyze(city: str, state: str, refresh: bool):
     console.print("\n[bold]Step 2: Capacity Analysis[/bold]")
     block_groups_gdf = datasets.get("block_groups")
     with console.status("Running HCM calculations and route identification..."):
-        roads_gdf = analyze_capacity(
+        roads_gdf, evacuation_paths = analyze_capacity(
             roads_gdf=datasets["roads"],
             fhsz_gdf=datasets["fhsz"],
             boundary_gdf=datasets["boundary"],
             config=config,
             city_config=city_config,
             block_groups_gdf=block_groups_gdf,
+            data_dir=data_dir,
         )
+
+    console.print(f"  {len(evacuation_paths)} bottleneck paths computed.")
 
     # Save results
     routes_path = output_dir / "routes.csv"
@@ -149,7 +130,8 @@ def analyze(city: str, state: str, refresh: bool):
 
     output_cols = [
         "name", "highway", "road_type", "lane_count", "speed_limit",
-        "capacity_vph", "baseline_demand_vph", "vc_ratio", "los",
+        "capacity_vph", "fhsz_zone", "hazard_degradation", "effective_capacity_vph",
+        "baseline_demand_vph", "vc_ratio", "los",
         "connectivity_score", "catchment_units", "demand_source",
         "catchment_hu", "catchment_employees",
         "resident_demand_vph", "employee_demand_vph", "student_demand_vph",
@@ -172,10 +154,12 @@ def analyze(city: str, state: str, refresh: bool):
 @click.option("--lat", required=True, type=float, help="Project latitude")
 @click.option("--lon", required=True, type=float, help="Project longitude")
 @click.option("--units", required=True, type=int, help="Number of dwelling units")
+@click.option("--stories", default=0, type=int, show_default=True,
+              help="Number of above-grade stories (for NFPA 101 egress penalty)")
 @click.option("--name", default="", help="Project name (optional)")
 @click.option("--address", default="", help="Project address (optional)")
 @click.option("--apn", default="", help="Assessor Parcel Number (optional)")
-def evaluate(city: str, lat: float, lon: float, units: int,
+def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
              name: str, address: str, apn: str):
     """
     Evaluate a proposed project -- produce ministerial/discretionary determination.
@@ -197,9 +181,8 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     output_dir = base_dir / "output" / city_slug
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check that analyze has been run
-    roads_path = data_dir / "roads.gpkg"
-    fhsz_path = data_dir / "fhsz.geojson"
+    roads_path    = data_dir / "roads.gpkg"
+    fhsz_path     = data_dir / "fhsz.geojson"
     boundary_path = data_dir / "boundary.geojson"
 
     missing = [p for p in [roads_path, fhsz_path, boundary_path] if not p.exists()]
@@ -209,24 +192,29 @@ def evaluate(city: str, lat: float, lon: float, units: int,
         sys.exit(1)
 
     console.rule(f"[bold cyan]Evaluating Project in {city}[/bold cyan]")
+    if name:
+        console.print(f"  Project: {name}")
     console.print(f"  Location: {lat}, {lon}")
-    console.print(f"  Units: {units}")
+    console.print(f"  Units: {units}  Stories: {stories}")
 
-    block_groups_path = data_dir / "block_groups.geojson"
+    block_groups_path    = data_dir / "block_groups.geojson"
+    evac_paths_path      = data_dir / "evacuation_paths.json"
 
     with console.status("Loading cached data..."):
-        roads_gdf = gpd.read_file(roads_path, layer="roads")
-        fhsz_gdf = gpd.read_file(fhsz_path)
-        boundary_gdf = gpd.read_file(boundary_path)
+        roads_gdf        = gpd.read_file(roads_path, layer="roads")
+        fhsz_gdf         = gpd.read_file(fhsz_path)
+        boundary_gdf     = gpd.read_file(boundary_path)
         block_groups_gdf = gpd.read_file(block_groups_path) if block_groups_path.exists() else None
+        evacuation_paths = _load_evacuation_paths(evac_paths_path)
 
     # If roads don't have capacity columns yet, run capacity analysis first
-    if "vc_ratio" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
-        console.print("[yellow]Routes not yet analyzed -- running capacity analysis...[/yellow]")
+    if "effective_capacity_vph" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
+        console.print("[yellow]Roads not yet analyzed — running capacity analysis...[/yellow]")
         from agents.capacity_analysis import analyze_capacity
-        roads_gdf = analyze_capacity(
+        roads_gdf, evacuation_paths = analyze_capacity(
             roads_gdf, fhsz_gdf, boundary_gdf, config, city_config,
             block_groups_gdf=block_groups_gdf,
+            data_dir=data_dir,
         )
 
     project = Project(
@@ -234,6 +222,7 @@ def evaluate(city: str, lat: float, lon: float, units: int,
         location_lon=lon,
         address=address,
         dwelling_units=units,
+        stories=stories,
         project_name=name,
         apn=apn,
     )
@@ -245,6 +234,7 @@ def evaluate(city: str, lat: float, lon: float, units: int,
         fhsz_gdf=fhsz_gdf,
         config=config,
         city_config=city_config,
+        evacuation_paths=evacuation_paths,
     )
 
     # Save audit trail
@@ -254,11 +244,11 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     audit_path = output_dir / det_filename
     generate_audit_trail(project, audit, audit_path)
 
-    # Save determination brief (HTML)
-    from agents.visualization.brief import create_determination_brief
-    brief_filename = f"brief_{lat_str}_{lon_str}_{units}u.html"
-    brief_path = output_dir / brief_filename
-    create_determination_brief(project, audit, config, city_config, brief_path)
+    # Save determination brief
+    from agents.visualization.brief_v3 import create_determination_brief_v3
+
+    brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
+    create_determination_brief_v3(project, audit, config, city_config, brief_path)
 
     _print_determination(project, audit)
     console.print(f"\n  Full audit trail: [cyan]{audit_path}[/cyan]")
@@ -266,6 +256,44 @@ def evaluate(city: str, lat: float, lon: float, units: int,
     console.print(f"  Open with: [dim]open {brief_path}[/dim]")
 
 
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _load_evacuation_paths(paths_file: Path) -> list:
+    """Load pre-computed EvacuationPath objects from JSON, or return empty list."""
+    if not paths_file.exists():
+        return []
+    try:
+        import json
+        from models.evacuation_path import EvacuationPath
+        data = json.loads(paths_file.read_text())
+        paths = []
+        for d in data:
+            try:
+                paths.append(EvacuationPath(
+                    path_id=d.get("path_id", ""),
+                    origin_block_group=d.get("origin_block_group", ""),
+                    exit_segment_osmid=d.get("exit_segment_osmid", ""),
+                    bottleneck_osmid=d.get("bottleneck_osmid", ""),
+                    bottleneck_name=d.get("bottleneck_name", ""),
+                    bottleneck_fhsz_zone=d.get("bottleneck_fhsz_zone", "non_fhsz"),
+                    bottleneck_road_type=d.get("bottleneck_road_type", "two_lane"),
+                    bottleneck_hcm_capacity_vph=float(d.get("bottleneck_hcm_capacity_vph", 0)),
+                    bottleneck_hazard_degradation=float(d.get("bottleneck_hazard_degradation", 1.0)),
+                    bottleneck_effective_capacity_vph=float(d.get("bottleneck_effective_capacity_vph", 0)),
+                    catchment_units=float(d.get("catchment_units", 0)),
+                    baseline_demand_vph=float(d.get("baseline_demand_vph", 0)),
+                    path_osmids=d.get("path_osmids", []),
+                ))
+            except Exception:
+                continue
+        return paths
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"Could not load evacuation_paths.json: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +324,7 @@ def _print_routes_table(evac_routes, config: dict):
     threshold = config.get("vc_threshold", 0.95)
 
     table = Table(
-        title="Evacuation Routes (top 20 by v/c ratio)",
+        title="Evacuation Routes (top 20 by effective capacity, descending)",
         show_header=True,
         header_style="bold blue",
     )
@@ -304,35 +332,35 @@ def _print_routes_table(evac_routes, config: dict):
     table.add_column("Type")
     table.add_column("Lanes", justify="right")
     table.add_column("Cap (vph)", justify="right")
-    table.add_column("Demand (vph)", justify="right")
-    table.add_column("Catchment HU", justify="right")
+    table.add_column("FHSZ", justify="center")
+    table.add_column("Deg", justify="right")
+    table.add_column("Eff Cap", justify="right")
     table.add_column("v/c", justify="right")
     table.add_column("LOS")
-    table.add_column("Src")
 
-    sorted_routes = evac_routes.sort_values("vc_ratio", ascending=False).head(20)
+    if "effective_capacity_vph" in evac_routes.columns:
+        sorted_routes = evac_routes.sort_values("effective_capacity_vph", ascending=True).head(20)
+    else:
+        sorted_routes = evac_routes.sort_values("vc_ratio", ascending=False).head(20)
 
     for _, row in sorted_routes.iterrows():
-        vc = row.get("vc_ratio", 0)
-        los = row.get("los", "")
-        vc_str = f"{vc:.3f}"
-        style = "red" if vc >= threshold else ("yellow" if vc >= 0.60 else "green")
-        catchment = row.get("catchment_units", 0)
-        catchment_str = f"{catchment:.0f}" if catchment else "—"
-        demand_src = str(row.get("demand_source", ""))
-        # abbreviate demand source for display
-        src_abbr = {"catchment_based": "CB", "aadt_based": "AADT", "road_class_estimated": "RC"}.get(demand_src, demand_src[:4])
+        vc   = row.get("vc_ratio", 0)
+        los  = row.get("los", "")
+        deg  = row.get("hazard_degradation", 1.0)
+        fhsz = row.get("fhsz_zone", "non")
+        eff  = row.get("effective_capacity_vph", row.get("capacity_vph", 0))
+        style = "red" if deg < 0.5 else ("yellow" if deg < 1.0 else "green")
 
         table.add_row(
             str(row.get("name", ""))[:30] or "Unnamed",
             str(row.get("road_type", "")),
             str(row.get("lane_count", "")),
             f"{row.get('capacity_vph', 0):.0f}",
-            f"{row.get('baseline_demand_vph', 0):.0f}",
-            catchment_str,
-            f"[{style}]{vc_str}[/{style}]",
-            f"[{style}]{los}[/{style}]",
-            src_abbr,
+            fhsz[:8],
+            f"[{style}]{deg:.2f}[/{style}]",
+            f"{eff:.0f}",
+            f"{vc:.3f}",
+            los,
         )
 
     console.print(table)
@@ -362,7 +390,7 @@ def _print_determination(project, audit: dict):
     ))
 
     # Per-scenario results table (one row per scenario)
-    table = Table(title="Scenario Results (5-Step Algorithm)", show_header=True, header_style="bold")
+    table = Table(title="Scenario Results (5-Step ΔT Algorithm)", show_header=True, header_style="bold")
     table.add_column("Scenario", min_width=20)
     table.add_column("Tier")
     table.add_column("Triggered")
@@ -378,10 +406,11 @@ def _print_determination(project, audit: dict):
         s1 = steps.get("step1_applicability", {})
         s2 = steps.get("step2_scale", {})
         s3 = steps.get("step3_routes", {})
-        s5 = steps.get("step5_ratio_test", {})
+        s5 = steps.get("step5_delta_t", {})
 
         if stier == "NOT_APPLICABLE":
-            step_parts.append(s1.get("note", "Not applicable")[:55])
+            note = sdata.get("reason", s1.get("note", "Not applicable"))
+            step_parts.append(str(note)[:55])
         else:
             if s2:
                 step_parts.append(
@@ -389,12 +418,14 @@ def _print_determination(project, audit: dict):
                     f"{'✓' if s2.get('result') else '✗'}"
                 )
             if s3:
-                step_parts.append(f"Routes: {s3.get('serving_route_count', 0)}")
+                step_parts.append(f"Paths: {s3.get('serving_paths_count', 0)}")
             if s5:
-                step_parts.append(f"Flagged: {len(s5.get('flagged_route_ids', []))}")
+                step_parts.append(
+                    f"ΔT max {s5.get('max_delta_t_minutes', 0):.1f}/{s5.get('threshold_minutes', 6.0):.2f} min"
+                )
             fz = s1.get("fire_zone_severity_modifier", {})
             if fz:
-                step_parts.append(f"Fire zone: {fz.get('zone_description', 'N/A')}")
+                step_parts.append(f"Zone: {fz.get('hazard_zone', 'non_fhsz')}")
 
         table.add_row(
             sname,
@@ -405,11 +436,14 @@ def _print_determination(project, audit: dict):
 
     console.print(table)
 
-    d = audit.get("determination", {})
+    d      = audit.get("determination", {})
+    max_dt = project.max_delta_t() if hasattr(project, "max_delta_t") else 0.0
     console.print(
         f"\n  [dim]Peak-hour vehicles: {project.project_vehicles_peak_hour:.1f} vph · "
-        f"Serving routes: {len(project.serving_route_ids or [])} · "
-        f"Flagged routes: {len(project.flagged_route_ids or [])}[/dim]"
+        f"Hazard zone: {getattr(project, 'hazard_zone', 'non_fhsz')} · "
+        f"Max ΔT: {max_dt:.2f} min · "
+        f"Egress: {getattr(project, 'egress_minutes', 0):.1f} min · "
+        f"Paths flagged: {project.flagged_path_count() if hasattr(project, 'flagged_path_count') else 0}[/dim]"
     )
     console.print(
         f"  [dim]Aggregation: {d.get('logic', '')}[/dim]"
@@ -498,13 +532,18 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             gpd.read_file(block_groups_path) if block_groups_path.exists() else None
         )
 
-    # Run capacity analysis if the cached roads don't yet have vc_ratio
-    if "vc_ratio" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
+    # Load pre-computed evacuation paths
+    evac_paths_path  = data_dir / "evacuation_paths.json"
+    evacuation_paths = _load_evacuation_paths(evac_paths_path)
+
+    # Run capacity analysis if the cached roads don't yet have effective_capacity_vph
+    if "effective_capacity_vph" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
         console.print("[yellow]Roads not yet analyzed — running capacity analysis...[/yellow]")
         from agents.capacity_analysis import analyze_capacity
-        roads_gdf = analyze_capacity(
+        roads_gdf, evacuation_paths = analyze_capacity(
             roads_gdf, fhsz_gdf, boundary_gdf, config, city_config,
             block_groups_gdf=block_groups_gdf,
+            data_dir=data_dir,
         )
 
     # ── Evaluate each project ──────────────────────────────────────────────
@@ -521,11 +560,12 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
         lat     = float(pdef["lat"])
         lon     = float(pdef["lon"])
         units   = int(pdef["units"])
+        stories = int(pdef.get("stories", 0))
         address = pdef.get("address", "")
 
         console.print(
             f"  [{i}/{len(project_defs)}] [bold]{name}[/bold]  "
-            f"({units} units · {lat:.4f}, {lon:.4f})"
+            f"({units} units, {stories} stories · {lat:.4f}, {lon:.4f})"
         )
 
         project = Project(
@@ -533,6 +573,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             location_lon=lon,
             address=address,
             dwelling_units=units,
+            stories=stories,
             project_name=name,
         )
         project, audit = evaluate_project(
@@ -541,17 +582,19 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             fhsz_gdf=fhsz_gdf,
             config=config,
             city_config=city_config,
+            evacuation_paths=evacuation_paths,
         )
         evaluated.append(project)
         audits.append(audit)
 
-        det   = project.determination
-        style = _TIER_RICH.get(det, "white")
-        n_srv = len(project.serving_route_ids or [])
-        n_flg = len(project.flagged_route_ids or [])
+        det    = project.determination
+        style  = _TIER_RICH.get(det, "white")
+        n_srv  = len(project.serving_route_ids or [])
+        n_flg  = project.flagged_path_count() if hasattr(project, "flagged_path_count") else 0
+        max_dt = project.max_delta_t() if hasattr(project, "max_delta_t") else 0.0
         console.print(
             f"     [{style}]{det}[/{style}]  "
-            f"[dim]{n_srv} serving routes · {n_flg} flagged[/dim]"
+            f"[dim]{n_srv} segments · {n_flg} paths flagged · max ΔT {max_dt:.1f} min[/dim]"
         )
 
         # Regression check: warn if result differs from expected_tier in the YAML.
@@ -565,11 +608,11 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             )
 
         # Generate determination brief so demo map links resolve.
-        from agents.visualization.brief import create_determination_brief
+        from agents.visualization.brief_v3 import create_determination_brief_v3
         lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
         lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-        brief_path = output_dir / f"brief_{lat_str}_{lon_str}_{units}u.html"
-        create_determination_brief(project, audit, config, city_config, brief_path)
+        brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
+        create_determination_brief_v3(project, audit, config, city_config, brief_path)
 
     # ── Summary table ──────────────────────────────────────────────────────
     console.print()
@@ -587,6 +630,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
         output_path=map_path,
         demo_title=demo_title,
         audits=audits,
+        evacuation_paths=evacuation_paths,
     )
     console.print(f"  Map saved: [cyan]{map_path}[/cyan]")
     console.print(f"  Open with: [dim]open {map_path}[/dim]")
@@ -598,23 +642,22 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
 
 def _print_demo_summary(projects: list, config: dict):
     """Print a multi-project comparison table."""
-    vc_threshold = config.get("vc_threshold", 0.95)
-    unit_threshold = config.get("unit_threshold", 50)
+    unit_threshold = config.get("unit_threshold", 15)
 
     table = Table(
-        title="Demo Project Summary",
+        title="Demo Project Summary (v3.1 ΔT Standard)",
         show_header=True,
         header_style="bold blue",
         show_lines=False,
     )
     table.add_column("Project", min_width=22)
     table.add_column("Units", justify="right")
-    table.add_column("Std 2\n(size)", justify="center")
-    table.add_column("Std 3\n(routes)", justify="center")
-    table.add_column("Std 4\n(capacity)", justify="center")
-    table.add_column("Fire\nZone", justify="center")
+    table.add_column("Std 1\n(size)", justify="center")
+    table.add_column("Hazard\nZone", justify="center")
+    table.add_column("Mob\nRate", justify="right")
     table.add_column("Peak Veh\n(vph)", justify="right")
-    table.add_column("Serving\nSegs", justify="right")
+    table.add_column("Max ΔT\n(min)", justify="right")
+    table.add_column("Paths\nFlagged", justify="right")
     table.add_column("Determination")
 
     _TIER_COLOR = {
@@ -624,21 +667,23 @@ def _print_demo_summary(projects: list, config: dict):
     }
 
     for p in projects:
-        det   = p.determination or "UNKNOWN"
-        color = _TIER_COLOR.get(det, "white")
-        std2  = "[green]✓[/green]" if p.meets_size_threshold else "[dim]✗[/dim]"
-        std3  = f"[green]✓[/green]" if p.serving_route_ids else "[dim]✗[/dim]"
-        std4  = "[red]✓[/red]" if p.exceeds_capacity_threshold else "[green]✗[/green]"
-        fzone = (f"[red]Z{p.fire_zone_level}[/red]" if p.in_fire_zone else "[dim]—[/dim]")
+        det     = p.determination or "UNKNOWN"
+        color   = _TIER_COLOR.get(det, "white")
+        std1    = "[green]✓[/green]" if p.meets_size_threshold else "[dim]✗[/dim]"
+        hz      = getattr(p, "hazard_zone", "non_fhsz")
+        mob     = getattr(p, "mobilization_rate", 0.0)
+        max_dt  = p.max_delta_t() if hasattr(p, "max_delta_t") else 0.0
+        n_flagged = p.flagged_path_count() if hasattr(p, "flagged_path_count") else 0
+        fzone   = (f"[red]{hz[:8]}[/red]" if p.in_fire_zone else f"[dim]{hz[:8]}[/dim]")
         table.add_row(
             str(p.project_name)[:24],
             str(p.dwelling_units),
-            std2,
-            std3,
-            std4,
+            std1,
             fzone,
+            f"{mob:.2f}",
             f"{p.project_vehicles_peak_hour:.0f}",
-            str(len(p.serving_route_ids or [])),
+            f"[{'red' if n_flagged > 0 else 'green'}]{max_dt:.1f}[/{'red' if n_flagged > 0 else 'green'}]",
+            str(n_flagged),
             f"[{color} bold]{det}[/{color} bold]",
         )
 
