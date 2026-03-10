@@ -27,8 +27,9 @@ from .themes import (
     _TIER_ROUTE_COLOR, _TIER_ROUTE_COLOR_FLAGGED,
     _SERVING_ROUTE_NEUTRAL_COLOR, _SERVING_ROUTE_NEUTRAL_WEIGHT, _SERVING_ROUTE_NEUTRAL_OPACITY,
     _FLAGGED_ROUTE_WEIGHT, _FLAGGED_ROUTE_OPACITY,
-    _TRAFFIC_BG_BUCKETS,
-    _vc_background_color, _normal_traffic_vc, _vc_heatmap_color,
+    _TRAFFIC_BG_BUCKETS, _EFFECTIVE_CAPACITY_RAMP,
+    _vc_background_color, _normal_traffic_vc,
+    _effective_capacity_heatmap_color,
 )
 from .helpers import (
     _osmid_set, _osmid_matches, _to_int_safe,
@@ -36,9 +37,15 @@ from .helpers import (
     _add_zoom_weight_scaler, _build_global_styles,
     _brief_filename,
 )
-from .popups import _build_route_impact_popup, _build_demo_project_popup, _build_heatmap_route_popup
+from .popups import _build_route_delta_t_popup, _build_demo_project_popup, _build_heatmap_route_popup
 
 logger = logging.getLogger(__name__)
+
+_TIER_ACTION_LABELS = {
+    "DISCRETIONARY":           "Planning Commission review required — public hearing",
+    "CONDITIONAL MINISTERIAL": "Staff approval with conditions — no public hearing",
+    "MINISTERIAL":             "Over-the-counter permit — no discretionary review",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -50,42 +57,69 @@ def _build_capacity_heatmap_layer(
     config: dict,
 ) -> folium.FeatureGroup:
     """
-    Build a FeatureGroup containing all evacuation route segments colored by v/c
-    ratio using the _VC_RAMP scale. Add to the map BEFORE per-project layers so
-    per-project flagged routes render on top.
+    Build a FeatureGroup containing all evacuation route segments colored by
+    effective_capacity_vph using the _EFFECTIVE_CAPACITY_RAMP scale.
+
+    v3.0 ΔT Standard: low effective capacity (bottleneck danger) = red/prominent;
+    high effective capacity (ample headroom) = gray/subdued.
+
+    Coloring is inverted vs. v2.0 v/c ramp: the map now highlights constrained
+    roads (potential evacuation bottlenecks) rather than congested roads.
+
+    Add to the map BEFORE per-project layers so per-project flagged routes
+    render on top.
     """
     fg = folium.FeatureGroup(name="Evacuation Capacity", show=True)
 
-    if "is_evacuation_route" not in roads_gdf.columns or "vc_ratio" not in roads_gdf.columns:
-        logger.warning("Heatmap: missing is_evacuation_route or vc_ratio column — skipping.")
+    if "is_evacuation_route" not in roads_gdf.columns:
+        logger.warning("Heatmap: missing is_evacuation_route column — skipping.")
         return fg
 
-    evac_mask = roads_gdf["is_evacuation_route"].fillna(False).astype(bool)
+    has_eff_cap = "effective_capacity_vph" in roads_gdf.columns
+    if not has_eff_cap:
+        logger.warning(
+            "Heatmap: effective_capacity_vph column not found — "
+            "falling back to capacity_vph. Run 'analyze --refresh' to populate."
+        )
+
+    _zone_labels = {
+        "vhfhsz":        "Very High FHSZ",
+        "high_fhsz":     "High FHSZ",
+        "moderate_fhsz": "Moderate FHSZ",
+        "non_fhsz":      "Non-FHSZ",
+    }
+
+    evac_mask   = roads_gdf["is_evacuation_route"].fillna(False).astype(bool)
     evac_routes = roads_gdf[evac_mask]
 
     for _, row in evac_routes.iterrows():
         if row.geometry is None or row.geometry.is_empty:
             continue
 
-        vc = float(row.get("vc_ratio", 0) or 0)
-        color, opacity = _vc_heatmap_color(vc)
+        # Primary metric: effective_capacity_vph (HCM × hazard degradation factor)
+        hcm_cap   = float(row.get("capacity_vph", 1) or 1)
+        if has_eff_cap:
+            eff_cap = float(row.get("effective_capacity_vph", hcm_cap) or hcm_cap)
+        else:
+            eff_cap = hcm_cap
+
+        color, opacity = _effective_capacity_heatmap_color(eff_cap)
 
         name_raw = row.get("name", "Unnamed") or "Unnamed"
-        if isinstance(name_raw, list):
-            name_str = name_raw[0] if name_raw else "Unnamed"
-        else:
-            name_str = str(name_raw)
+        name_str = (name_raw[0] if isinstance(name_raw, list) and name_raw
+                    else str(name_raw))
         if name_str in ("nan", "None", ""):
             name_str = "Unnamed"
 
-        los         = str(row.get("los", "?") or "?")
-        cap         = float(row.get("capacity_vph", 1) or 1)
-        demand_base = float(row.get("baseline_demand_vph", 0) or 0)
-        vc_threshold = config.get("vc_threshold", 0.95)
+        fhsz_zone  = str(row.get("fhsz_zone", "non_fhsz") or "non_fhsz")
+        hazard_deg = float(row.get("hazard_degradation", 1.0) or 1.0)
+        vc_base    = float(row.get("vc_ratio", 0) or 0)
+        los        = str(row.get("los", "?") or "?")
+        zone_label = _zone_labels.get(fhsz_zone, fhsz_zone)
 
-        tooltip_text = f"{name_str} | v/c {vc:.3f} | LOS {los}"
+        tooltip_text = f"{name_str} | {eff_cap:.0f} vph eff cap | {zone_label}"
         popup_html   = _build_heatmap_route_popup(
-            name_str, los, cap, demand_base, vc, vc_threshold,
+            name_str, eff_cap, hcm_cap, fhsz_zone, hazard_deg, vc_base, los,
         )
 
         folium.GeoJson(
@@ -114,32 +148,33 @@ def create_demo_map(
     output_path: Path,
     demo_title: str = "Fire Evacuation Impact Analysis",
     audits: list[dict] | None = None,
+    evacuation_paths: list | None = None,
 ) -> Path:
     """
-    Generate a multi-project comparison map.
+    Generate a multi-project comparison map — v3.0 ΔT Standard.
 
     Visual hierarchy (bottom → top):
       1. CartoDB Positron base
       2. FHSZ fire zones (light fill)
-      3. Traffic load background — all roads, thin, pastel-colored by v/c
+      3. Traffic background — all roads, thin, pastel-colored by v/c (informational)
       4. City boundary (dashed)
-      5. Per-project FeatureGroup (serving routes + marker + radius)
+      5. Evacuation Capacity heatmap — all evac routes colored by effective_capacity_vph
+      6. Per-project FeatureGroup (serving routes + marker + search radius)
          — only ONE visible at a time, controlled by panel dropdown
-      6. Per-project local5 FeatureGroup (hidden; shown when Scenario B selected)
+         — includes controlling evacuation path corridor (dashed) from buffer to bottleneck
 
-    Pass `audits` (list returned by evaluate_project()) to enable Standard 5.
+    Pass `audits` (list returned by evaluate_project()) to include SB 79 transit
+    flag in per-project detail cards.
 
     Returns the path to the saved HTML file.
     """
     if not projects:
         raise ValueError("No projects to display.")
 
-    vc_threshold   = config.get("vc_threshold", 0.80)
+    vc_threshold   = config.get("vc_threshold", 0.95)   # informational only
     unit_threshold = config.get("unit_threshold", 15)
-    radius_miles = config.get("evacuation_route_radius_miles", 0.5)
-    radius_meters = radius_miles * 1609.344
-    ld_radius = config.get("local_density", {}).get("radius_miles", 0.25)
-    ld_radius_m = ld_radius * 1609.344
+    radius_miles   = config.get("evacuation_route_radius_miles", 0.5)
+    radius_meters  = radius_miles * 1609.344
 
     all_lats = [p.location_lat for p in projects]
     all_lons = [p.location_lon for p in projects]
@@ -225,72 +260,78 @@ def create_demo_map(
     # Per-project Standard 5 data (populated from audits if available)
     proj_ld_data: list[dict] = []
 
+    # Lookup: path_id → path_osmids (for controlling corridor visualization)
+    # Keyed by path_id so each project gets the exact EvacuationPath that was
+    # selected as its controlling path — not just any path sharing the same bottleneck.
+    path_id_to_osmids: dict[str, list[str]] = {
+        str(getattr(_ep, "path_id", "")): list(getattr(_ep, "path_osmids", []))
+        for _ep in (evacuation_paths or [])
+        if getattr(_ep, "path_osmids", [])
+    }
+
     for i, project in enumerate(projects):
         tier         = project.determination or "UNKNOWN"
         marker_color = _TIER_MARKER_COLOR.get(tier, "gray")
         route_color  = _TIER_ROUTE_COLOR.get(tier, "#7f7f7f")
         route_flagged_color = _TIER_ROUTE_COLOR_FLAGGED.get(tier, "#555")
         serving_set  = _osmid_set(project.serving_route_ids)
-        flagged_set  = _osmid_set(project.flagged_route_ids)
+        # v3.0: derive flagged segments from ΔT results (bottleneck osmids of flagged paths)
+        _flagged_osmids = [
+            str(r.get("bottleneck_osmid", ""))
+            for r in (project.delta_t_results or [])
+            if r.get("flagged")
+        ]
+        flagged_set  = _osmid_set(_flagged_osmids)
 
-        # Worst-case marginal impact: full project load tested on each route independently.
-        # Matches the ratio_test() methodology in agents/scenarios/base.py.
-        # DO NOT divide by num_serving — that would contradict the determination engine.
-        project_vph_per_rt = project.project_vehicles_peak_hour
-
-        # ── Extract Standard 5 data from audit ──────────────────────────
+        # ── Extract Standard 5 audit (informational — SB 79 transit flag) ──────
         if audits and i < len(audits):
-            ld = audits[i].get("scenarios", {}).get("local_density_sb79", {})
+            ld = audits[i].get("scenarios", {}).get("sb79_transit", {})
         else:
             ld = {}
         ld_tier      = ld.get("tier", "NOT_APPLICABLE")
-        ld_step3     = ld.get("steps", {}).get("step3_routes", {})
-        ld_step5     = ld.get("steps", {}).get("step5_ratio_test", {})
-        ld_serving_set = _osmid_set([r["osmid"] for r in ld_step3.get("serving_routes", [])])
-        ld_flagged_set = _osmid_set(ld_step5.get("flagged_route_ids", []))
-        ld_n_serving   = ld_step3.get("serving_route_count", len(ld_serving_set))
-        ld_n_flagged   = len(ld_flagged_set)
-        ld_triggered   = ld.get("triggered", False)
+        ld_triggered = ld.get("triggered", False)
         proj_ld_data.append({
-            "tier": ld_tier,
+            "tier":      ld_tier,
             "triggered": ld_triggered,
-            "n_serving": ld_n_serving,
-            "n_flagged": ld_n_flagged,
+            "n_serving": 0,
+            "n_flagged": 0,
         })
 
-        # ── Worst-case route for popup inline display ─────────────────────
-        # Wildland (Std 4): find the flagged route with highest proposed v/c
+        # ── Worst-case ΔT path for popup inline display (v3.0) ───────────────
+        # Use project.delta_t_results (set by Agent 3 WildlandScenario).
+        # Show the flagged path with highest ΔT, or the highest ΔT path overall.
         worst_wildland_route: "dict | None" = None
-        if flagged_set and "osmid" in roads_wgs84.columns:
-            is_flagged_mask = roads_wgs84["osmid"].apply(
-                lambda o: _osmid_matches(o, flagged_set)
+        ctrl_osmid: str = ""    # controlling bottleneck osmid for ⚠ icon lookup
+        ctrl_path_id: str = ""  # controlling path_id for corridor lookup
+        if project.delta_t_results:
+            flagged_dts = [r for r in project.delta_t_results if r.get("flagged")]
+            best_dt     = (
+                max(flagged_dts, key=lambda r: r.get("delta_t_minutes", 0))
+                if flagged_dts else
+                max(project.delta_t_results, key=lambda r: r.get("delta_t_minutes", 0))
             )
-            flagged_roads = roads_wgs84[is_flagged_mask]
-            if not flagged_roads.empty:
-                cap_s = flagged_roads["capacity_vph"].fillna(1).clip(lower=0.001)
-                dem_s = flagged_roads["baseline_demand_vph"].fillna(0)
-                pvc_s = (dem_s + project_vph_per_rt) / cap_s
-                best_idx = pvc_s.idxmax()
-                row_w = flagged_roads.loc[best_idx]
-                cap_w = float(row_w.get("capacity_vph", 1) or 1)
-                dem_w = float(row_w.get("baseline_demand_vph", 0) or 0)
-                worst_wildland_route = {
-                    "name": str(row_w.get("name", "Unnamed") or "Unnamed"),
-                    "baseline_vc": dem_w / max(cap_w, 0.001),
-                    "proposed_vc": (dem_w + project_vph_per_rt) / max(cap_w, 0.001),
-                }
-
-        # Local density (Std 5): pull worst route from audit route_details
-        worst_local_route: "dict | None" = None
-        ld_route_details = ld_step5.get("route_details", [])
-        caused = [r for r in ld_route_details if r.get("project_causes_exceedance")]
-        if caused:
-            worst_ld = max(caused, key=lambda r: r.get("proposed_vc", 0))
-            worst_local_route = {
-                "name": str(worst_ld.get("name") or worst_ld.get("osmid", "Unnamed")),
-                "baseline_vc": float(worst_ld.get("baseline_vc", 0)),
-                "proposed_vc": float(worst_ld.get("proposed_vc", 0)),
+            ctrl_osmid    = str(best_dt.get("bottleneck_osmid", ""))
+            ctrl_path_id  = str(best_dt.get("path_id", ""))
+            worst_wildland_route = {
+                "name":              str(best_dt.get("bottleneck_name", "") or "Bottleneck segment"),
+                "delta_t_minutes":   best_dt.get("delta_t_minutes",  0.0),
+                "threshold_minutes": best_dt.get("threshold_minutes", 10.0),
+                "flagged":           best_dt.get("flagged", False),
             }
+
+        # Store worst path in proj_ld_data for sidebar (unused by current sidebar card
+        # implementation, but preserved for future use).
+        proj_ld_data[-1]["worst_wildland"] = worst_wildland_route
+        proj_ld_data[-1]["worst_local"]    = None   # SB 79 has no route details
+
+        # ── Build bottleneck osmid → ΔT result map for serving route popups ──
+        # Key: str(bottleneck_osmid). Value: worst ΔT result for that segment.
+        bottleneck_dt_map: dict[str, dict] = {}
+        for r in (project.delta_t_results or []):
+            bn = str(r.get("bottleneck_osmid", ""))
+            if bn and (bn not in bottleneck_dt_map or
+                       r.get("delta_t_minutes", 0) > bottleneck_dt_map[bn].get("delta_t_minutes", 0)):
+                bottleneck_dt_map[bn] = r
 
         # ── Wildland project FeatureGroup ────────────────────────────────
         proj_group = folium.FeatureGroup(
@@ -312,7 +353,7 @@ def create_demo_map(
             tooltip=f"{project.project_name} — {radius_miles} mi search radius",
         ).add_to(proj_group)
 
-        # Impact zone: KLD evacuation demand within search radius
+        # Impact zone: all roads within search radius, muted background highlight
         if "vc_ratio" in roads_wgs84.columns:
             lat_rad    = math.radians(project.location_lat)
             radius_deg = radius_meters / (111139.0 * math.cos(lat_rad))
@@ -346,6 +387,30 @@ def create_demo_map(
                     },
                 ).add_to(proj_group)
 
+        # ── Controlling evacuation path corridor (dashed) ────────────────────
+        # Draws the full route of the controlling EvacuationPath from the project
+        # area to the bottleneck (and beyond to the city exit). Explains why the
+        # bottleneck ⚠ icon may appear outside the search radius circle.
+        # Renders below serving routes — segments inside the buffer get the solid
+        # serving route overlay on top; segments outside show only the dashed line.
+        if tier != "MINISTERIAL" and ctrl_path_id and ctrl_path_id in path_id_to_osmids:
+            ctrl_path_set = set(path_id_to_osmids[ctrl_path_id])
+            path_mask = roads_wgs84["osmid"].apply(
+                lambda o: _osmid_matches(o, ctrl_path_set)
+            )
+            bn_label = (worst_wildland_route or {}).get("name", "bottleneck") or "bottleneck"
+            corridor_tip = f"Evacuation corridor → {bn_label} (controlling bottleneck)"
+            for _, row in roads_wgs84[path_mask].iterrows():
+                if row.geometry is None or row.geometry.is_empty:
+                    continue
+                folium.GeoJson(
+                    mapping(row.geometry),
+                    style_function=lambda _, c=route_color: {
+                        "color": c, "weight": 2, "opacity": 0.45, "dashArray": "5 6",
+                    },
+                    tooltip=corridor_tip,
+                ).add_to(proj_group)
+
         # Serving routes (wildland — one GeoJson per segment for popup support)
         if serving_set and "osmid" in roads_wgs84.columns:
             serving_mask   = roads_wgs84["osmid"].apply(
@@ -356,32 +421,50 @@ def create_demo_map(
             for _, row in serving_subset.iterrows():
                 if row.geometry is None or row.geometry.is_empty:
                     continue
-                osmid_val   = row.get("osmid")
-                is_flagged  = _osmid_matches(osmid_val, flagged_set)
-                seg_color   = route_flagged_color if is_flagged else _SERVING_ROUTE_NEUTRAL_COLOR
-                weight      = _FLAGGED_ROUTE_WEIGHT if is_flagged else _SERVING_ROUTE_NEUTRAL_WEIGHT
-                opacity     = _FLAGGED_ROUTE_OPACITY if is_flagged else _SERVING_ROUTE_NEUTRAL_OPACITY
+                osmid_val  = row.get("osmid")
+                is_flagged = _osmid_matches(osmid_val, flagged_set)
+                seg_color  = route_flagged_color if is_flagged else _SERVING_ROUTE_NEUTRAL_COLOR
+                weight     = _FLAGGED_ROUTE_WEIGHT if is_flagged else _SERVING_ROUTE_NEUTRAL_WEIGHT
+                opacity    = _FLAGGED_ROUTE_OPACITY if is_flagged else _SERVING_ROUTE_NEUTRAL_OPACITY
 
-                name_str    = str(row.get("name", "Unnamed") or "Unnamed")
-                vc_base     = float(row.get("vc_ratio", 0) or 0)
-                los         = str(row.get("los", "?"))
-                cap         = float(row.get("capacity_vph", 1) or 1)
-                demand_base = float(row.get("baseline_demand_vph", 0) or 0)
-                demand_prop = demand_base + project_vph_per_rt
-                vc_proposed = demand_prop / cap if cap > 0 else vc_base
+                name_raw = row.get("name", "Unnamed") or "Unnamed"
+                name_str = (name_raw[0] if isinstance(name_raw, list) and name_raw
+                            else str(name_raw))
+                if name_str in ("nan", "None", ""):
+                    name_str = "Unnamed"
 
-                popup_html = _build_route_impact_popup(
-                    name_str, los, cap, demand_base, demand_prop,
-                    vc_base, vc_proposed, vc_threshold,
-                    project_vph_per_rt, is_flagged,
+                # v3.0: effective capacity and hazard zone
+                hcm_cap    = float(row.get("capacity_vph", 1) or 1)
+                eff_cap    = float(row.get("effective_capacity_vph", hcm_cap) or hcm_cap)
+                fhsz_zone  = str(row.get("fhsz_zone", "non_fhsz") or "non_fhsz")
+                hazard_deg = float(row.get("hazard_degradation", 1.0) or 1.0)
+
+                # Look up ΔT result for this bottleneck segment (if any)
+                osmid_strs = (
+                    [str(osmid_val)] if not isinstance(osmid_val, list)
+                    else [str(o) for o in osmid_val]
                 )
-                if is_flagged:
+                dt_result = next(
+                    (bottleneck_dt_map[s] for s in osmid_strs if s in bottleneck_dt_map),
+                    None,
+                )
+
+                popup_html = _build_route_delta_t_popup(
+                    name_str, eff_cap, hcm_cap, fhsz_zone, hazard_deg,
+                    dt_result, is_flagged,
+                )
+
+                if is_flagged and dt_result:
                     tip = (
-                        f"⚠ causes exceedance — {name_str} "
-                        f"| {vc_base:.3f} → {vc_proposed:.3f} v/c"
+                        f"⚠ ΔT exceeded — {name_str} "
+                        f"| {dt_result['delta_t_minutes']:.2f} min "
+                        f"> {dt_result['threshold_minutes']:.2f} min"
                     )
+                elif is_flagged:
+                    tip = f"⚠ ΔT exceeded — {name_str} | bottleneck segment"
                 else:
-                    tip = f"serving route — {name_str} | baseline v/c {vc_base:.3f}"
+                    tip = f"serving route — {name_str} | {eff_cap:.0f} vph eff cap"
+
                 folium.GeoJson(
                     mapping(row.geometry),
                     style_function=lambda _, c=seg_color, w=weight, o=opacity: {
@@ -391,6 +474,47 @@ def create_demo_map(
                     tooltip=tip,
                 ).add_to(proj_group)
 
+        # ── Controlling bottleneck ⚠ icon (static — always visible when project selected) ──
+        # SVG warning triangle (yellow fill, black stroke) at the midpoint of the
+        # worst-ΔT bottleneck segment. Shown/hidden with the FeatureGroup automatically.
+        # Bug fix: roads osmid column stores list values as strings like "[123, 456]",
+        # so use str.contains() instead of _osmid_matches() for reliable lookup.
+        if (tier != "MINISTERIAL"
+                and ctrl_osmid
+                and "osmid" in roads_wgs84.columns):
+            ctrl_mask = roads_wgs84["osmid"].astype(str).str.contains(
+                ctrl_osmid, regex=False
+            )
+            ctrl_rows = roads_wgs84[ctrl_mask]
+            if not ctrl_rows.empty:
+                ctrl_geom = ctrl_rows.iloc[0].geometry
+                if ctrl_geom is not None and not ctrl_geom.is_empty:
+                    try:
+                        mid = ctrl_geom.interpolate(0.5, normalized=True)
+                    except Exception:
+                        mid = ctrl_geom.centroid
+                    icon_html = (
+                        '<div style="width:22px;height:20px;">'
+                        '<svg viewBox="0 0 22 20" width="22" height="20"'
+                        ' xmlns="http://www.w3.org/2000/svg">'
+                        '<polygon points="11,2 21,19 1,19"'
+                        ' fill="#FFD700" stroke="black" stroke-width="1.5"'
+                        ' stroke-linejoin="round"/>'
+                        '<text x="11" y="16" text-anchor="middle"'
+                        ' font-size="11" font-family="sans-serif"'
+                        ' font-weight="bold" fill="black">!</text>'
+                        '</svg></div>'
+                    )
+                    folium.Marker(
+                        location=[mid.y, mid.x],
+                        icon=folium.DivIcon(
+                            html=icon_html,
+                            icon_size=(22, 20),
+                            icon_anchor=(11, 10),
+                        ),
+                        tooltip="Controlling bottleneck segment",
+                    ).add_to(proj_group)
+
         # Project marker (wildland group — visible in Scenario A)
         folium.Marker(
             location=[project.location_lat, project.location_lon],
@@ -398,11 +522,11 @@ def create_demo_map(
                 _build_demo_project_popup(
                     project, route_color, vc_threshold, unit_threshold,
                     worst_wildland_route=worst_wildland_route,
-                    worst_local_route=worst_local_route,
+                    worst_local_route=None,   # SB 79 has no route details
                     ld_tier=ld_tier,
                     ld_triggered=ld_triggered,
                 ),
-                max_width=320,
+                max_width=360,
             ),
             tooltip=f"{project.project_name} · {tier}",
             icon=folium.Icon(color=marker_color, icon="home", prefix="fa"),
@@ -569,6 +693,8 @@ def _build_demo_panel_html(
             ld_triggered=ld.get("triggered", False),
             ld_n_serving=ld.get("n_serving", 0),
             ld_n_flagged=ld.get("n_flagged", 0),
+            worst_wildland_route=ld.get("worst_wildland"),
+            worst_local_route=ld.get("worst_local"),
         )
 
     return f"""
@@ -677,7 +803,7 @@ def _build_demo_panel_html(
     btn.textContent    = (body.style.display === 'none') ? '▶' : '▼';
   }};
 
-  // ── Init: show only project 0 (poll until Leaflet map is ready) ──────
+  // ── Init: show only project 0 ─────────────────────────────────────
   (function initSelect() {{
     var mapObj = window[MAP_NAME];
     if (!mapObj) {{ setTimeout(initSelect, 50); return; }}
@@ -703,84 +829,106 @@ def _build_project_detail_div(
     ld_triggered: bool = False,
     ld_n_serving: int = 0,
     ld_n_flagged: int = 0,
+    worst_wildland_route: "dict | None" = None,
+    worst_local_route: "dict | None" = None,
 ) -> str:
-    """Pre-rendered hidden card for one project. JS toggles display:block/none."""
+    """Pre-rendered hidden card for one project. JS toggles display:block/none.
+
+    v3.1: ΔT gauge replaces three-column strip; what-if analysis collapsible;
+    data-* attributes enable client-side recalculation.
+    """
     tier         = project.determination or "UNKNOWN"
     det_color    = _TIER_CSS_COLOR.get(tier, "#555")
     bg_color     = _TIER_BG_COLOR.get(tier, "#fafafa")
-    border_color = {"DISCRETIONARY": "#e8b4b0", "CONDITIONAL MINISTERIAL": "#f5d49a", "MINISTERIAL": "#a8d5b8"}.get(tier, "#dee2e6")
-    route_color  = _TIER_ROUTE_COLOR.get(tier, "#7f7f7f")
+    border_color = {
+        "DISCRETIONARY":           "#e8b4b0",
+        "CONDITIONAL MINISTERIAL": "#f5d49a",
+        "MINISTERIAL":             "#a8d5b8",
+    }.get(tier, "#dee2e6")
 
-    n_srv  = len(project.serving_route_ids or [])
-    n_flg  = len(project.flagged_route_ids or [])
-    in_fz  = project.in_fire_zone
-    fz_str = f"Zone {project.fire_zone_level}" if in_fz else "Not in FHSZ"
-    fz_color = "#c0392b" if in_fz else "#27ae60"
+    display      = "block" if idx == 0 else "none"
+    action_label = _TIER_ACTION_LABELS.get(tier, "")
 
-    def std_row(label, triggered, detail=""):
-        chip_bg    = "#fde8e8" if triggered else "#e8f5e9"
-        chip_color = "#c0392b" if triggered else "#27ae60"
-        chip_text  = "YES" if triggered else "NO"
-        return (
-            f'<div style="display:flex; justify-content:space-between; '
-            f'align-items:center; padding:4px 0; border-bottom:1px solid #f8f9fa;">'
-            f'<div>'
-            f'<span style="color:#444; font-size:11px;">{label}</span>'
-            + (f'<span style="color:#adb5bd; font-size:10px;"> — {detail}</span>' if detail else '')
-            + f'</div>'
-            f'<span style="padding:2px 8px; border-radius:9px; font-size:10px; '
-            f'font-weight:700; background:{chip_bg}; color:{chip_color}; '
-            f'flex-shrink:0; margin-left:8px;">{chip_text}</span>'
-            f'</div>'
-        )
+    # ── Config values ────────────────────────────────────────────────────
+    max_share_v_cfg = config.get("max_project_share", 0.05)
+    safe_egress_cfg = config.get("safe_egress_window", {})
 
-    standards_html = (
-        std_row("Std 1 · Citywide FHSZ",
-                project.in_fire_zone or n_srv > 0,
-                "city has FHSZ zones")
-        + std_row("Std 2 · Size threshold",
-                  project.meets_size_threshold,
-                  f"{project.dwelling_units} of {unit_threshold} units")
-        + std_row("Std 3 · Serving routes",
-                  n_srv > 0,
-                  f"{n_srv} segment(s) within {project.search_radius_miles} mi")
-        + std_row("Std 4 · Capacity exceeded",
-                  project.exceeds_capacity_threshold,
-                  f"v/c ≥ {vc_threshold:.2f} on {n_flg} route(s)")
-    )
+    # ── Hazard zone / mob rate ────────────────────────────────────────────
+    hazard_zone = getattr(project, "hazard_zone", "non_fhsz") or "non_fhsz"
+    mob_rate    = config.get("mobilization_rate", 0.90)  # NFPA 101 design basis, constant
+    mob_pct     = f"{mob_rate:.0%}"
 
-    # Standard 5 section
-    if ld_tier != "NOT_APPLICABLE":
-        ld_det_color = _TIER_CSS_COLOR.get(ld_tier, "#555")
-        ld_bg_color  = _TIER_BG_COLOR.get(ld_tier, "#f8f9fa")
-        ld_color     = "#c0392b" if ld_triggered else "#0d9488"
-        std5_html = (
-            f'<div style="padding:8px 13px 6px; border-top:1px solid #f1f3f5;">'
-            f'<div style="font-size:10px; color:#adb5bd; text-transform:uppercase; '
-            f'letter-spacing:0.5px; margin-bottom:5px;">Std 5 — Local Density</div>'
-            f'<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">'
-            f'<span style="padding:2px 8px; border-radius:9px; font-size:10px; font-weight:700; '
-            f'background:{ld_bg_color}; color:{ld_det_color};">{ld_tier}</span>'
-            f'</div>'
-            f'<div style="font-size:11px; color:#555;">'
-            f'<span>{ld_n_serving} local egress routes</span>'
-            f' &nbsp;·&nbsp; '
-            f'<span style="color:{ld_color};">{ld_n_flagged} flagged</span>'
-            f'</div>'
-            f'</div>'
-        )
+    _zone_labels = {
+        "vhfhsz":        "VHFHSZ",
+        "high_fhsz":     "High FHSZ",
+        "moderate_fhsz": "Mod. FHSZ",
+        "non_fhsz":      "Non-FHSZ",
+    }
+    hz_label = _zone_labels.get(hazard_zone, hazard_zone)
+
+    # Config-derived fallback threshold
+    safe_window_cfg_val = float(safe_egress_cfg.get(hazard_zone, 120.0))
+    threshold_cfg_val   = safe_window_cfg_val * max_share_v_cfg
+
+    # ── ΔT summary from per-path results ─────────────────────────────────
+    dt_results = project.delta_t_results or []
+    size_met   = project.meets_size_threshold
+
+    if dt_results and size_met:
+        max_dt      = max(r.get("delta_t_minutes", 0) for r in dt_results)
+        best_result = max(dt_results, key=lambda r: r.get("delta_t_minutes", 0))
+        threshold   = best_result.get("threshold_minutes", threshold_cfg_val)
+        safe_window = best_result.get("safe_egress_window_minutes", safe_window_cfg_val)
+        max_share_v = best_result.get("max_project_share", max_share_v_cfg)
+        exceeded    = any(r.get("flagged") for r in dt_results)
+
+        dt_color        = "#c0392b" if exceeded else "#27ae60"
+        indicator_color = dt_color
+        if threshold > 0:
+            gauge_pct    = min((max_dt / (2 * threshold)) * 100.0, 105.0)
+            gauge_numtxt = f"{max_dt:.2f} min / {threshold:.2f} min limit"
+        else:
+            gauge_pct    = 0.0
+            gauge_numtxt = "—"
     else:
-        std5_html = (
-            '<div style="padding:6px 13px; border-top:1px solid #f1f3f5;">'
-            '<div style="font-size:10px; color:#adb5bd;">Std 5 · Local Density: N/A</div>'
-            '</div>'
+        threshold       = threshold_cfg_val
+        safe_window     = safe_window_cfg_val
+        max_share_v     = max_share_v_cfg
+        dt_color        = "#adb5bd"
+        indicator_color = "#adb5bd"
+        gauge_pct       = 0.0
+        gauge_numtxt    = "—"
+
+    # ── Controlling finding line ──────────────────────────────────────────
+    if not size_met:
+        finding_text = (
+            f"{project.dwelling_units} units — below {unit_threshold}-unit threshold"
         )
+    elif dt_results and worst_wildland_route:
+        nm     = (worst_wildland_route.get("name") or "bottleneck segment")[:38]
+        dt_wc  = worst_wildland_route.get("delta_t_minutes", 0)
+        thr_wc = worst_wildland_route.get("threshold_minutes", threshold)
+        if worst_wildland_route.get("flagged"):
+            ratio        = dt_wc / max(thr_wc, 0.001)
+            finding_text = f"{nm}: ΔT {dt_wc:.2f} min — {ratio:.1f}× the {thr_wc:.2f}-min limit"
+        else:
+            rem          = thr_wc - dt_wc
+            pct          = (dt_wc / max(thr_wc, 0.001)) * 100
+            finding_text = f"All paths within limit · {nm}: {dt_wc:.2f} min ({pct:.0f}% used, {rem:.2f} left)"
+    else:
+        finding_text = ""
 
-    reason = project.determination_reason or ""
-    sentences = [s.strip() for s in reason.split(".") if s.strip()]
-    reason_short = ". ".join(sentences[:2]) + ("." if sentences else "")
+    finding_html = (
+        f'<div style="font-size:10px; color:#555; padding:5px 13px 5px; '
+        f'border-bottom:1px solid #f1f3f5; background:#fafbfc; '
+        f'line-height:1.35; font-style:italic;">{finding_text}</div>'
+    ) if finding_text else ""
 
-    display = "block" if idx == 0 else "none"
+    # Egress label for formula strip
+    egress_str = (
+        f" + {project.egress_minutes:.1f} min egress (NFPA 101)"
+        if project.egress_minutes > 0 else ""
+    )
 
     return f"""
 <div class="proj-detail-card" style="display:{display}; padding:0;">
@@ -792,77 +940,91 @@ def _build_project_detail_div(
                 letter-spacing:-0.3px;">
       {tier}
     </div>
-    <div style="font-size:11px; color:#444; margin-top:1px; font-weight:500;">
+    <div style="font-size:10px; color:{det_color}; margin-top:3px;
+                font-weight:600; opacity:0.85; font-style:italic;">
+      {action_label}
+    </div>
+    <div style="font-size:11px; color:#444; margin-top:4px; font-weight:500;">
       {project.project_name or 'Proposed Project'}
     </div>
     {f'<div style="font-size:10px; color:#666; margin-top:1px;">{project.address}</div>' if project.address else ''}
   </div>
 
-  <!-- Quick info strip -->
-  <div style="display:flex; gap:0; border-bottom:1px solid #f1f3f5;">
-    <div style="flex:1; padding:8px 13px; border-right:1px solid #f1f3f5;">
+  <!-- Controlling finding -->
+  {finding_html}
+
+  <!-- ΔT Gauge strip: Units | Gauge bar -->
+  <div style="display:flex; gap:0; border-bottom:1px solid #f1f3f5; align-items:stretch;">
+
+    <!-- Left: Units -->
+    <div style="width:72px; flex-shrink:0; padding:11px 0 11px 13px;
+                border-right:1px solid #f1f3f5;">
       <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                  letter-spacing:0.4px;">Units</div>
+                  letter-spacing:0.4px; margin-bottom:2px;">Units</div>
       <div style="font-size:16px; font-weight:700; color:#212529;">
         {project.dwelling_units}
       </div>
     </div>
-    <div style="flex:1; padding:8px 13px; border-right:1px solid #f1f3f5;">
-      <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                  letter-spacing:0.4px;">Peak vph</div>
-      <div style="font-size:16px; font-weight:700; color:{route_color};">
-        {project.project_vehicles_peak_hour:.0f}
+
+    <!-- Right: Gauge -->
+    <div style="flex:1; padding:11px 14px 11px 12px; min-width:0;">
+
+      <!-- Header row -->
+      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+        <div style="font-size:10px; color:#adb5bd; text-transform:uppercase; letter-spacing:0.4px;">
+          <span title="Marginal evacuation clearance time">&Delta;T</span>
+        </div>
+        <div style="font-size:9px; color:#adb5bd; text-align:right; line-height:1.3;">
+          Limit
+          <div style="font-size:8px; color:#c8cbd0;">
+            {safe_window:.0f} min &times; {max_share_v*100:.0f}%
+          </div>
+        </div>
       </div>
-    </div>
-    <div style="flex:1; padding:8px 13px;">
-      <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                  letter-spacing:0.4px;">Fire zone</div>
-      <div style="font-size:12px; font-weight:600; color:{fz_color}; margin-top:2px;">
-        {fz_str}
+
+      <!-- Bar -->
+      <div style="position:relative; height:12px; border-radius:6px;
+                  overflow:visible; margin-top:2px; margin-bottom:5px; margin-right:10px;">
+        <div style="position:absolute; left:0; top:0; width:100%; height:100%;
+                    background:#d4edda; border-radius:6px;"></div>
+        <div style="position:absolute; left:50%; top:0; right:0; height:100%;
+                    background:#f8d7da; border-radius:0 6px 6px 0;"></div>
+        <!-- Threshold tick at 50% -->
+        <div style="position:absolute; left:50%; top:-2px; width:2px; height:16px;
+                    background:#6c757d; z-index:4; transform:translateX(-50%);"></div>
+        <!-- Indicator dot -->
+        <div style="position:absolute; left:{gauge_pct:.1f}%; top:50%;
+                    transform:translate(-50%,-50%); width:12px; height:12px;
+                    border-radius:50%; background:{indicator_color};
+                    border:2px solid white; box-shadow:0 1px 4px rgba(0,0,0,0.35);
+                    z-index:5;">
+        </div>
+      </div>
+
+      <!-- Numeric text -->
+      <div style="font-size:9px; color:{dt_color}; font-weight:600;">
+        {gauge_numtxt}
       </div>
     </div>
   </div>
 
-  <!-- Standards checklist (Std 1–4) -->
-  <div style="padding:10px 13px 4px;">
-    <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                letter-spacing:0.5px; margin-bottom:6px;">Standards</div>
-    {standards_html}
-  </div>
-
-  <!-- Standard 5 section -->
-  {std5_html}
-
-  <!-- Wildland route impact -->
-  <div style="padding:8px 13px; border-top:1px solid #f1f3f5;">
-    <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                letter-spacing:0.5px; margin-bottom:5px;">Route Impact (Wildland)</div>
-    <div style="display:flex; gap:16px; font-size:11px; color:#555;">
-      <div>{n_srv} serving segments</div>
-      <div style="color:{'#c0392b' if n_flg > 0 else '#27ae60'};">
-        {n_flg} at v/c ≥ {vc_threshold:.2f}
-      </div>
-    </div>
-    <div style="font-size:10px; color:#adb5bd; margin-top:3px;">
-      Click any route on the map for baseline → proposed v/c detail
-    </div>
-  </div>
-
-  <!-- Determination reason -->
-  <div style="padding:8px 13px 8px; border-top:1px solid #f1f3f5;">
-    <div style="font-size:10px; color:#adb5bd; text-transform:uppercase;
-                letter-spacing:0.5px; margin-bottom:5px;">Basis</div>
-    <div style="font-size:10px; color:#555; line-height:1.55;
-                font-style:italic;">
-      {reason_short[:240]}
-    </div>
+  <!-- Formula strip -->
+  <div style="padding:6px 13px 5px; border-bottom:1px solid #f1f3f5;
+              font-size:10px; color:#868e96; display:flex; gap:14px; align-items:center;">
+    <span>
+      <strong style="color:#555;">{project.dwelling_units} units</strong>
+      &times; 2.5 veh/unit
+      &times; <span title="Evacuation rate — Zhao et al. 2022 GPS data (44M records, Kincade Fire)">{mob_pct} evac. rate</span>
+      = {project.project_vehicles_peak_hour:.0f} vph{egress_str}
+    </span>
+    <span style="margin-left:auto; flex-shrink:0;">{hz_label}</span>
   </div>
 
   <!-- Brief link -->
-  <div style="padding:8px 13px 12px; border-top:1px solid #f1f3f5;">
+  <div style="padding:10px 13px 13px;">
     <a href="{_brief_filename(project.location_lat, project.location_lon, project.dwelling_units)}"
        target="_blank"
-       style="display:block; text-align:center; padding:7px 10px;
+       style="display:block; text-align:center; padding:8px 10px;
               background:#f0f4f8; border:1px solid #ccd6e0; border-radius:6px;
               font-size:11px; font-weight:600; color:#1c4a6e; text-decoration:none;
               letter-spacing:0.2px;">
@@ -883,8 +1045,12 @@ def _build_demo_legend_html(
     map_js_name: str = "",
     heatmap_js_name: str = "",
 ) -> str:
-    vc_threshold = config.get("vc_threshold", 0.80)
+    """
+    Legend for the demo map — v3.0 ΔT Standard.
 
+    Evacuation Capacity heatmap section now describes effective_capacity_vph
+    (low = red bottleneck, high = gray safe), replacing v/c bucket labels.
+    """
     route_tier_items = (
         '<div style="display:flex; align-items:center; gap:7px; margin-bottom:4px;">'
         f'<span style="display:inline-block; width:28px; height:5px; '
@@ -902,19 +1068,19 @@ def _build_demo_legend_html(
         '<span style="color:#444;">Ministerial (MIN)</span></div>'
     )
 
-    traffic_labels = [
-        "v/c < 0.40 — uncongested",
-        "v/c 0.40–0.60 — moderate",
-        "v/c 0.60–0.80 — heavy",
-        "v/c 0.80–1.00 — near capacity",
-        "v/c > 1.00 — over capacity",
+    # Effective capacity heatmap items — from _EFFECTIVE_CAPACITY_RAMP
+    eff_cap_labels = [
+        "< 350 vph — severe constraint",
+        "350–700 vph — low capacity",
+        "700–1,200 vph — moderate",
+        "> 1,200 vph — ample headroom",
     ]
-    traffic_items = "".join(
+    eff_cap_items = "".join(
         f'<div style="display:flex; align-items:center; gap:7px; margin-bottom:4px;">'
         f'<span style="display:inline-block; width:28px; height:5px; '
-        f'background:{color}; border-radius:2px; flex-shrink:0; opacity:0.9;"></span>'
+        f'background:{color}; border-radius:2px; flex-shrink:0; opacity:{opacity + 0.05:.2f};"></span>'
         f'<span style="color:#555;">{label}</span></div>'
-        for (_, color), label in zip(_TRAFFIC_BG_BUCKETS, traffic_labels)
+        for (_, color, opacity), label in zip(_EFFECTIVE_CAPACITY_RAMP, eff_cap_labels)
     )
 
     fhsz_items = "".join(
@@ -931,7 +1097,7 @@ def _build_demo_legend_html(
     position: fixed;
     bottom: 26px; right: 10px;
     z-index: 9999;
-    width: 200px;
+    width: 210px;
     background: white;
     border: 1px solid #dee2e6;
     border-radius: 10px;
@@ -944,20 +1110,24 @@ def _build_demo_legend_html(
   <div style="font-weight:700; font-size:12px; color:#212529; margin-bottom:10px;
               border-bottom:1px solid #f1f3f5; padding-bottom:7px;">Legend</div>
 
+  <!-- Serving Route Tiers -->
   <div style="font-weight:600; font-size:10px; color:#868e96; text-transform:uppercase;
-              letter-spacing:0.5px; margin-bottom:6px;">Evacuation Routes</div>
+              letter-spacing:0.5px; margin-bottom:6px;">Serving Routes (flagged)</div>
   {route_tier_items}
   <div style="font-size:10px; color:#adb5bd; margin-top:2px; margin-bottom:10px;">
-    Darker = at or above v/c {vc_threshold:.2f}
+    Bold = bottleneck segment where &Delta;T &gt; threshold<br>
+    Limit = safe egress window (NIST) &times; 5% project share
   </div>
 
+  <!-- Evacuation Capacity Heatmap — effective_capacity_vph -->
   <div style="font-weight:600; font-size:10px; color:#868e96; text-transform:uppercase;
-              letter-spacing:0.5px; margin-bottom:6px;">Evacuation Capacity (v/c)</div>
-  {traffic_items}
+              letter-spacing:0.5px; margin-bottom:6px;">Evac. Capacity (eff. vph)</div>
+  {eff_cap_items}
   <div style="font-size:10px; color:#adb5bd; margin-top:2px; margin-bottom:10px;">
-    KLD AB 747 max demand · impact zone bolder
+    HCM capacity &times; hazard degradation factor
   </div>
 
+  <!-- FHSZ Fire Hazard Zones -->
   <div style="font-weight:600; font-size:10px; color:#868e96; text-transform:uppercase;
               letter-spacing:0.5px; margin-bottom:6px;">Fire Hazard Zones</div>
   {fhsz_items}
@@ -973,18 +1143,19 @@ def _build_demo_legend_html(
              onchange="toggleHeatmap(this.checked)">
       Evacuation Capacity
     </label>
+    <!-- Gradient: red (severe) → orange → yellow → gray (ample) — matches _EFFECTIVE_CAPACITY_RAMP -->
     <div style="margin-top:6px; height:8px; border-radius:4px;
-                background: linear-gradient(to right, #adb5bd, #ffc107, #fd7e14, #dc3545);
+                background: linear-gradient(to right, #dc3545, #fd7e14, #ffc107, #adb5bd);
                 opacity:0.85;">
     </div>
     <div style="display:flex; justify-content:space-between; font-size:10px;
                 color:#868e96; margin-top:2px;">
-      <span>LOS A–D</span><span>LOS E</span><span>LOS F</span>
+      <span>Severe</span><span>Low</span><span>Mod</span><span>Ample</span>
     </div>
   </div>
 
   <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
-              font-size:9px; color:#adb5bd;">JOSH &middot; California Stewardship Alliance</div>
+              font-size:9px; color:#adb5bd;">JOSH v3.1 &middot; California Stewardship Alliance</div>
 </div>
 
 <script>
