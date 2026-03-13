@@ -1,0 +1,12 @@
+block_groups:
+  downloaded: '2026-03-11T19:45:49.036334'
+  source: U.S. Census ACS 5-year / Census TIGER
+boundary:
+  downloaded: '2026-03-11T19:45:34.023347'
+  source: U.S. Census TIGER / OSMnx
+fhsz:
+  downloaded: '2026-03-11T19:45:34.323004'
+  source: CAL FIRE OSFM ArcGIS REST API
+roads:
+  downloaded: '2026-03-11T19:45:36.926557'
+  source: OpenStreetMap via OSMnx
