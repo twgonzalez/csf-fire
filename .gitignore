@@ -1,4 +1,5 @@
-data/
+data/*
+!data/berkeley/
 output/
 prompts/
 __pycache__/
