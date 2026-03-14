@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JOSH — Document Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:     #1a2b4a;
+      --navy-mid: #243a60;
+      --red:      #c0392b;
+      --red-dark: #a93226;
+      --white:    #ffffff;
+      --gray-100: #f8f9fa;
+      --gray-200: #e9ecef;
+      --gray-400: #ced4da;
+      --gray-600: #6c757d;
+      --gray-800: #343a40;
+      --text:     #212529;
+      --serif:    Georgia, "Times New Roman", serif;
+      --sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --mono:     "Menlo", "Consolas", "Courier New", monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--gray-100);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    /* ── HEADER ─────────────────────────────────────────────── */
+    header {
+      background: var(--navy);
+      color: var(--white);
+      border-bottom: 4px solid var(--red);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .back-link {
+      color: #8ea8cc;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .back-link:hover { color: var(--white); }
+    .back-link svg { fill: currentColor; }
+    .header-divider {
+      width: 1px;
+      height: 18px;
+      background: #2e4a72;
+      flex-shrink: 0;
+    }
+    .doc-breadcrumb {
+      font-size: 12px;
+      color: #6a8ab0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .header-actions button {
+      background: none;
+      border: 1px solid #2e4a72;
+      color: #8ea8cc;
+      border-radius: 4px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .header-actions button:hover { border-color: #8ea8cc; color: var(--white); }
+
+    /* ── LOADING / ERROR ─────────────────────────────────────── */
+    #loading, #error {
+      max-width: 860px;
+      margin: 80px auto;
+      padding: 0 32px;
+      text-align: center;
+      color: var(--gray-600);
+      font-size: 15px;
+    }
+    #error { color: var(--red); }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--gray-200);
+      border-top-color: var(--navy);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── DOCUMENT CONTAINER ──────────────────────────────────── */
+    #doc-container { display: none; }
+
+    .doc-meta {
+      background: var(--navy);
+      color: #8ea8cc;
+      border-bottom: 1px solid #2e4a72;
+    }
+    .doc-meta-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 10px 32px;
+      font-size: 12px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    .doc-meta span { display: flex; align-items: center; gap: 5px; }
+
+    .doc-body {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 48px 32px 80px;
+    }
+
+    /* ── MARKDOWN TYPOGRAPHY ─────────────────────────────────── */
+    .md h1 {
+      font-family: var(--serif);
+      font-size: 30px;
+      font-weight: 700;
+      color: var(--navy);
+      line-height: 1.25;
+      margin-bottom: 8px;
+      padding-bottom: 16px;
+      border-bottom: 3px solid var(--red);
+    }
+    .md h2 {
+      font-family: var(--serif);
+      font-size: 21px;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 44px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--gray-200);
+    }
+    .md h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 28px 0 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .md h4 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--gray-800);
+      margin: 20px 0 6px;
+    }
+    .md p {
+      font-size: 15px;
+      color: var(--gray-800);
+      margin-bottom: 16px;
+      line-height: 1.75;
+    }
+    .md > p:first-of-type {
+      font-size: 16px;
+      color: var(--text);
+    }
+    .md strong { color: var(--navy); }
+    .md em { font-style: italic; }
+
+    /* Horizontal rule */
+    .md hr {
+      border: none;
+      border-top: 2px solid var(--gray-200);
+      margin: 40px 0;
+    }
+
+    /* Lists */
+    .md ul, .md ol {
+      margin: 8px 0 16px 24px;
+      font-size: 15px;
+      color: var(--gray-800);
+      line-height: 1.75;
+    }
+    .md li { margin-bottom: 4px; }
+    .md li > p { margin-bottom: 4px; }
+
+    /* Blockquotes */
+    .md blockquote {
+      border-left: 4px solid var(--red);
+      margin: 24px 0;
+      padding: 16px 20px;
+      background: var(--gray-100);
+      border-radius: 0 6px 6px 0;
+    }
+    .md blockquote p {
+      font-family: var(--serif);
+      font-size: 16px;
+      font-style: italic;
+      color: var(--navy);
+      margin-bottom: 0;
+      line-height: 1.6;
+    }
+
+    /* Code */
+    .md code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--gray-200);
+      color: var(--navy);
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+    .md pre {
+      background: var(--navy);
+      border-radius: 6px;
+      padding: 20px 22px;
+      margin: 16px 0;
+      overflow-x: auto;
+    }
+    .md pre code {
+      background: none;
+      color: #c8d8f0;
+      font-size: 13px;
+      padding: 0;
+      line-height: 1.7;
+    }
+
+    /* Tables */
+    .md table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin: 20px 0;
+      border: 1px solid var(--gray-200);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .md thead tr { background: var(--navy); color: var(--white); }
+    .md thead th {
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .md tbody tr { border-top: 1px solid var(--gray-200); }
+    .md tbody tr:hover { background: var(--gray-100); }
+    .md tbody td { padding: 10px 14px; vertical-align: top; }
+
+    /* Links */
+    .md a {
+      color: #1a56a0;
+      text-decoration: none;
+      border-bottom: 1px solid #1a56a044;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .md a:hover { color: var(--red); border-color: var(--red); }
+
+    /* ── TOC SIDEBAR (desktop) ───────────────────────────────── */
+    .doc-layout {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      gap: 0;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .toc-sidebar {
+      padding: 48px 0 80px 32px;
+      position: sticky;
+      top: 60px;
+      height: fit-content;
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
+    }
+    .toc-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gray-600);
+      margin-bottom: 10px;
+    }
+    .toc-list {
+      list-style: none;
+      padding: 0;
+    }
+    .toc-list li { margin-bottom: 2px; }
+    .toc-list a {
+      display: block;
+      font-size: 12px;
+      color: var(--gray-600);
+      text-decoration: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      line-height: 1.4;
+      border-left: 2px solid transparent;
+      transition: color 0.15s, background 0.15s;
+    }
+    .toc-list a:hover {
+      color: var(--navy);
+      background: var(--gray-200);
+    }
+    .toc-list a.active {
+      color: var(--navy);
+      border-left-color: var(--red);
+      background: var(--gray-100);
+      font-weight: 600;
+    }
+    .toc-list .toc-h3 { padding-left: 18px; }
+
+    /* ── FOOTER ─────────────────────────────────────────────── */
+    footer {
+      background: var(--navy);
+      color: #8ea8cc;
+      border-top: 4px solid var(--red);
+      padding: 20px 0;
+    }
+    .footer-inner {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+    }
+    .footer-inner a {
+      color: #8ea8cc;
+      text-decoration: none;
+    }
+    .footer-inner a:hover { color: var(--white); }
+
+    /* ── PRINT ───────────────────────────────────────────────── */
+    @media print {
+      header { position: static; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      footer { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .header-actions, .toc-sidebar { display: none; }
+      .doc-layout { grid-template-columns: 1fr; }
+      .doc-body { padding: 24px 0; }
+      .md pre { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .md thead tr { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+
+    /* ── RESPONSIVE ─────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .doc-layout { grid-template-columns: 1fr; }
+      .toc-sidebar { display: none; }
+      .doc-body { padding: 32px 20px 60px; }
+      .header-inner { padding: 12px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="back-link" href="index.html">
+      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M8.5 2L4 7l4.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      JOSH Home
+    </a>
+    <div class="header-divider"></div>
+    <div class="doc-breadcrumb" id="breadcrumb">Loading…</div>
+    <div class="header-actions">
+      <button onclick="window.print()">Print / PDF</button>
+    </div>
+  </div>
+</header>
+
+<div id="loading">
+  <div class="spinner"></div>
+  Loading document…
+</div>
+
+<div id="error" style="display:none"></div>
+
+<div id="doc-container">
+  <div class="doc-meta">
+    <div class="doc-meta-inner">
+      <span id="meta-title"></span>
+      <span id="meta-file" style="margin-left:auto;opacity:0.7;font-family:monospace;font-size:11px"></span>
+    </div>
+  </div>
+
+  <div class="doc-layout">
+    <div class="doc-body">
+      <article class="md" id="md-content"></article>
+    </div>
+    <aside class="toc-sidebar" id="toc-sidebar">
+      <div class="toc-label">Contents</div>
+      <ul class="toc-list" id="toc-list"></ul>
+    </aside>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-inner">
+    <span>JOSH — Fire Evacuation Capacity Analysis System &nbsp;&bull;&nbsp; California Stewardship Fund</span>
+    <a href="index.html">← Return to overview</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // ── Parse ?doc= param ────────────────────────────────────────
+  const params  = new URLSearchParams(window.location.search);
+  const docPath = params.get('doc');
+
+  // Resolve the base URL so the viewer works both:
+  //   • locally served from repo root: /pages/viewer.html → base = /
+  //   • deployed to GitHub Pages:      /josh/viewer.html  → base = /josh/
+  function resolveDocURL(path) {
+    if (/^https?:\/\//.test(path)) return path;          // absolute URL — use as-is
+    let base = new URL('.', window.location.href).href;  // directory containing viewer.html
+    if (base.endsWith('/pages/')) base = base.slice(0, -'pages/'.length); // strip pages/ when local
+    return new URL(path, base).href;
+  }
+
+  if (!docPath) {
+    showError('No document specified. Add <code>?doc=path/to/file.md</code> to the URL.');
+    return;
+  }
+
+  // Update breadcrumb immediately
+  const filename = docPath.split('/').pop();
+  document.getElementById('breadcrumb').textContent = filename;
+  document.getElementById('meta-file').textContent  = docPath;
+  document.title = filename.replace(/\.md$/i, '').replace(/[-_]/g, ' ') + ' — JOSH';
+
+  // ── Fetch & render ───────────────────────────────────────────
+  fetch(resolveDocURL(docPath))
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status} — ${r.statusText}`);
+      return r.text();
+    })
+    .then(md => render(md, filename))
+    .catch(err => showError(`Could not load <strong>${docPath}</strong>.<br><small>${err.message}</small>`));
+
+  function render(mdText, filename) {
+    // Configure marked
+    marked.setOptions({
+      breaks: false,
+      gfm: true,
+    });
+
+    const html = marked.parse(mdText);
+
+    // Inject into DOM
+    const content = document.getElementById('md-content');
+    content.innerHTML = html;
+
+    // Extract title for meta bar
+    const h1 = content.querySelector('h1');
+    if (h1) {
+      document.getElementById('meta-title').textContent = h1.textContent;
+      document.title = h1.textContent + ' — JOSH';
+    } else {
+      document.getElementById('meta-title').textContent =
+        filename.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
+    }
+
+    // ── Slug headings for TOC links ──────────────────────────
+    const headings = content.querySelectorAll('h1, h2, h3');
+    const slugs    = {};
+    headings.forEach(h => {
+      let base = h.textContent.toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim().replace(/\s+/g, '-');
+      if (slugs[base] !== undefined) { slugs[base]++; base += '-' + slugs[base]; }
+      else slugs[base] = 0;
+      h.id = base;
+    });
+
+    // ── Build TOC ────────────────────────────────────────────
+    const tocList = document.getElementById('toc-list');
+    const tocItems = [];
+    headings.forEach(h => {
+      if (h.tagName === 'H1') return; // skip H1 from TOC
+      const li  = document.createElement('li');
+      const a   = document.createElement('a');
+      a.href    = '#' + h.id;
+      a.textContent = h.textContent;
+      if (h.tagName === 'H3') a.classList.add('toc-h3');
+      li.appendChild(a);
+      tocList.appendChild(li);
+      tocItems.push({ el: h, link: a });
+    });
+
+    // Highlight active TOC item on scroll
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          tocItems.forEach(t => t.link.classList.remove('active'));
+          const match = tocItems.find(t => t.el === e.target);
+          if (match) match.link.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-10% 0px -80% 0px' });
+
+    headings.forEach(h => obs.observe(h));
+
+    // Show document
+    document.getElementById('loading').style.display     = 'none';
+    document.getElementById('doc-container').style.display = 'block';
+  }
+
+  function showError(msg) {
+    document.getElementById('loading').style.display = 'none';
+    const err = document.getElementById('error');
+    err.innerHTML = '<p>' + msg + '</p>';
+    err.style.display = 'block';
+  }
+})();
+</script>
+
+</body>
+</html>

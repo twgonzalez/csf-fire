@@ -29,8 +29,11 @@ jobs:
       - name: Generate index page
         run: uv run python ci/make_index.py
 
-      - name: Copy root landing page
-        run: cp pages/index.html output/index.html
+      - name: Copy root landing page and viewer
+        run: |
+          cp pages/index.html output/index.html
+          cp pages/viewer.html output/viewer.html
+          cp -r docs output/docs
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
