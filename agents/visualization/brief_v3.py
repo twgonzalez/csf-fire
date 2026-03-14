@@ -43,7 +43,8 @@ def create_determination_brief_v3(
     output_path: Path,
 ) -> Path:
     """Write a legally defensible HTML determination letter (v3) and return output_path."""
-    html = _render_brief_v3(project, audit, config, city_config)
+    city_slug = output_path.parent.name  # e.g. "berkeley" — used to build viewer URL
+    html = _render_brief_v3(project, audit, config, city_config, city_slug)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
     return output_path
@@ -53,7 +54,7 @@ def create_determination_brief_v3(
 # Renderer
 # ---------------------------------------------------------------------------
 
-def _render_brief_v3(project, audit: dict, config: dict, city_config: dict) -> str:
+def _render_brief_v3(project, audit: dict, config: dict, city_config: dict, city_slug: str = "berkeley") -> str:
     city_name = city_config.get("city_name", city_config.get("name", city_config.get("city", "City")))
     determination = audit.get("determination", {})
     tier = determination.get("result", project.determination or "MINISTERIAL")
@@ -92,7 +93,7 @@ def _render_brief_v3(project, audit: dict, config: dict, city_config: dict) -> s
         _build_standards_analysis_v3(tier_upper, wildland, local5, config),
         _build_determination_box(tier_upper, determination, wildland, local5),
         _build_conditions_v3(tier_upper, wildland, local5),
-        _build_legal_authority(project, audit, config),
+        _build_legal_authority(project, audit, config, city_slug),
         _build_appeal_rights(city_name),
         "</main>",
         _build_footer(),
@@ -1113,7 +1114,7 @@ def _conditions_discretionary_v3(wildland: dict, local5: dict) -> str:
 # Legal Authority (replaces Methodology section)
 # ---------------------------------------------------------------------------
 
-def _build_legal_authority(project, audit: dict, config: dict) -> str:
+def _build_legal_authority(project, audit: dict, config: dict, city_slug: str = "berkeley") -> str:
     """Numbered citation table tracing every value in the determination to a published source."""
     scenarios = audit.get("scenarios", {})
     wildland  = scenarios.get("wildland_ab747", {})
@@ -1182,6 +1183,7 @@ def _build_legal_authority(project, audit: dict, config: dict) -> str:
     lat_str = f"{audit.get('project', {}).get('location_lat', project.location_lat):.4f}".replace(".", "_").replace("-", "n")
     lon_str = f"{audit.get('project', {}).get('location_lon', project.location_lon):.4f}".replace(".", "_").replace("-", "n")
     audit_file = f"determination_{lat_str}_{lon_str}.txt"
+    audit_viewer_url = f"../viewer.html?doc={city_slug}/{audit_file}"
 
     def badge(n, derived=False):
         cls = "legal-num-badge derived" if derived else "legal-num-badge"
@@ -1299,7 +1301,7 @@ def _build_legal_authority(project, audit: dict, config: dict) -> str:
     This determination applies the above authorities mechanically. No engineering judgment was
     exercised. The same methodology is applied uniformly to all projects under AB 747.
     Full reproducible audit trail:
-    <a href="{audit_file}" style="font-family:monospace; font-size:10px; background:#f1f3f5;
+    <a href="{audit_viewer_url}" style="font-family:monospace; font-size:10px; background:#f1f3f5;
        padding:2px 6px; border-radius:3px; color:#1a56db; text-decoration:none;">{audit_file}</a>
   </p>
 </div>"""
