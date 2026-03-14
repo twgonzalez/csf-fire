@@ -280,6 +280,22 @@
     }
     .md a:hover { color: var(--red); border-color: var(--red); }
 
+    /* ── AUDIT TRAIL (plain-text .txt files) ────────────────── */
+    .audit-pre {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.65;
+      color: var(--gray-800);
+      background: var(--gray-100);
+      border: 1px solid var(--gray-200);
+      border-left: 4px solid var(--navy);
+      border-radius: 0 6px 6px 0;
+      padding: 24px 28px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+
     /* ── TOC SIDEBAR (desktop) ───────────────────────────────── */
     .doc-layout {
       display: grid;
@@ -461,6 +477,33 @@
     .catch(err => showError(`Could not load <strong>${docPath}</strong>.<br><small>${err.message}</small>`));
 
   function render(mdText, filename) {
+    const isTxt = /\.txt$/i.test(filename);
+    const content = document.getElementById('md-content');
+
+    if (isTxt) {
+      // ── Plain-text audit trail: render as styled <pre> block ─
+      // Extract title from first non-empty line (typically the === header block)
+      const lines = mdText.split('\n');
+      let titleLine = '';
+      for (const l of lines) {
+        const t = l.replace(/^=+\s*|\s*=+$/g, '').trim();
+        if (t && !t.startsWith('=')) { titleLine = t; break; }
+      }
+      const title = titleLine || filename.replace(/\.txt$/i, '').replace(/[-_]/g, ' ');
+
+      content.innerHTML = `<pre class="audit-pre">${mdText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`;
+
+      document.getElementById('meta-title').textContent = title;
+      document.title = title + ' — JOSH';
+      document.getElementById('toc-sidebar').style.display = 'none';
+
+      // Show immediately — no TOC needed
+      document.getElementById('loading').style.display     = 'none';
+      document.getElementById('doc-container').style.display = 'block';
+      return;
+    }
+
+    // ── Markdown path ────────────────────────────────────────
     // Configure marked
     marked.setOptions({
       breaks: false,
@@ -470,7 +513,6 @@
     const html = marked.parse(mdText);
 
     // Inject into DOM
-    const content = document.getElementById('md-content');
     content.innerHTML = html;
 
     // Extract title for meta bar
