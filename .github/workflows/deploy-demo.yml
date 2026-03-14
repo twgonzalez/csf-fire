@@ -29,13 +29,16 @@ jobs:
       - name: Generate index page
         run: uv run python ci/make_index.py
 
+      - name: Copy root landing page
+        run: cp pages/index.html output/index.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: output/berkeley
+          path: output
 
   deploy:
     needs: build
