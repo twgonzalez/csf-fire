@@ -4,3 +4,5 @@ output/
 prompts/
 __pycache__/
 .venv/
+# Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
+config/cities/fhsz/*.geojson

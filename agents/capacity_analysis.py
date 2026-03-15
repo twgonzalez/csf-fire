@@ -459,16 +459,23 @@ def _identify_evacuation_routes(
     trigger_zones = config.get("fhsz", {}).get("trigger_zones", [2, 3])
     max_origins   = int(config.get("census", {}).get("max_origins", 100))
 
+    # For non-FHSZ cities (fhsz_gdf empty or no trigger zones), fall through to
+    # block-group-based routing.  _resolve_origins() prefers block groups over
+    # FHSZ centroids, so passing an empty fhsz_proj is safe and correct.
+    # Roads retain effective_capacity_vph == capacity_vph (degradation=1.0 set above).
     if fhsz_gdf.empty:
-        logger.warning("FHSZ data is empty — skipping evacuation route identification.")
-        return roads_gdf, []
+        logger.info("  No FHSZ data — routing from all block groups (non-FHSZ city).")
+        fhsz_proj = gpd.GeoDataFrame(columns=["HAZ_CLASS", "geometry"], crs=analysis_crs)
+    else:
+        fhsz_trigger = fhsz_gdf[fhsz_gdf["HAZ_CLASS"].isin(trigger_zones)]
+        if fhsz_trigger.empty:
+            logger.info(
+                f"  No FHSZ zones {trigger_zones} — routing from all block groups."
+            )
+            fhsz_proj = gpd.GeoDataFrame(columns=["HAZ_CLASS", "geometry"], crs=analysis_crs)
+        else:
+            fhsz_proj = fhsz_trigger.to_crs(analysis_crs)
 
-    fhsz_trigger = fhsz_gdf[fhsz_gdf["HAZ_CLASS"].isin(trigger_zones)]
-    if fhsz_trigger.empty:
-        logger.warning(f"No FHSZ zones {trigger_zones} found — no evacuation routes identified.")
-        return roads_gdf, []
-
-    fhsz_proj     = fhsz_trigger.to_crs(analysis_crs)
     boundary_proj = boundary_gdf.to_crs(analysis_crs)
 
     place_boundary = boundary_gdf.unary_union
