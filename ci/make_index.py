@@ -53,7 +53,7 @@ def main() -> None:
 
         lat_s, lon_s = _fmt(lat, lon)
         brief_file = f"brief_v3_{lat_s}_{lon_s}_{units}u.html"
-        audit_file = f"determination_{lat_s}_{lon_s}.txt"
+        audit_file = f"determination_{lat_s}_{lon_s}_{units}u.txt"
 
         fg, bg = TIER_COLORS.get(tier, ("#333", "#eee"))
         short = TIER_SHORT.get(tier, tier)
