@@ -659,6 +659,79 @@
       white-space: nowrap;
     }
 
+    /* ─── OPEN SOURCE ────────────────────────────────────────── */
+    .opensource {
+      background: var(--gray-100);
+    }
+    .oss-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+    .oss-body p {
+      font-size: 15px;
+      color: var(--gray-800);
+      margin-bottom: 14px;
+      line-height: 1.7;
+    }
+    .oss-body .oss-note {
+      font-size: 13px;
+      color: var(--gray-600);
+      font-style: italic;
+      margin-top: 4px;
+    }
+    .oss-card {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 8px;
+      padding: 28px 24px;
+      border-top: 4px solid var(--navy);
+    }
+    .oss-card .oss-label {
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      color: var(--gray-600);
+      margin-bottom: 14px;
+    }
+    .oss-card .oss-row {
+      display: flex;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--gray-200);
+      font-size: 13px;
+      color: var(--gray-800);
+      align-items: baseline;
+    }
+    .oss-card .oss-row:last-child { border-bottom: none; }
+    .oss-card .oss-key {
+      font-weight: 700;
+      color: var(--navy);
+      min-width: 90px;
+      flex-shrink: 0;
+    }
+    .oss-card .oss-btns {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .btn-outline {
+      display: inline-block;
+      padding: 9px 18px;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      background: transparent;
+      color: var(--navy);
+      border: 1px solid var(--navy);
+    }
+    .btn-outline:hover { background: var(--navy); color: var(--white); }
+
     /* ─── PRINT ──────────────────────────────────────────────── */
     @media print {
       header, footer { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -678,6 +751,7 @@
       .pillar-grid { grid-template-columns: 1fr; }
       .steps-grid { grid-template-columns: 1fr 1fr; }
       .adds-grid { grid-template-columns: 1fr; }
+      .oss-grid { grid-template-columns: 1fr; }
       .tier-grid { grid-template-columns: 1fr; }
       .doc-grid { grid-template-columns: 1fr; }
       .calc-example { grid-template-columns: 1fr; }
@@ -707,6 +781,7 @@
       <a href="#methodology">Methodology</a>
       <a href="#adoption">Adoption</a>
       <a href="#documents">Documents</a>
+      <a href="#software">Open Source</a>
       <a href="berkeley/demo_map.html">Live Demo &rarr;</a>
     </nav>
   </div>
@@ -1112,20 +1187,75 @@
   </div>
 </section>
 
+<!-- ── OPEN SOURCE SOFTWARE ─────────────────────────────────────── -->
+<section class="opensource" id="software">
+  <div class="container">
+    <h2>Open Source Software</h2>
+    <p class="section-lead">JOSH is a Python command-line tool, not an AI system. Every determination it produces is the output of four arithmetic operations on published data. The code is open source under AGPL-3.0 so any city, engineer, or developer can inspect, verify, and run the calculation independently.</p>
+    <div class="oss-grid">
+      <div class="oss-body">
+        <p>
+          JOSH downloads data automatically from four public sources — Cal Fire, OpenStreetMap, the
+          U.S. Census Bureau, and the city boundary from Census TIGER — and applies the HCM 2022
+          capacity table, NFPA 101 mobilization design basis, and NIST Camp Fire timeline as a
+          pipeline of deterministic calculations. There is no machine learning, no model training,
+          and no probabilistic inference. The software is an automation layer over arithmetic.
+        </p>
+        <p>
+          The pipeline has three stages: data acquisition (Stage 1 downloads and caches all inputs),
+          capacity analysis (Stage 2 builds the road network, applies hazard degradation, and
+          identifies evacuation route bottlenecks), and the objective standards engine (Stage 3 runs
+          the ΔT test and generates the determination and audit trail). Every stage reads from config
+          files that expose every parameter, making the full calculation transparent to any reviewer.
+        </p>
+        <p>
+          Because the methodology does not belong to JOSH — it belongs to HCM, NFPA, NIST, and
+          Cal Fire — a city that stops using the software retains every legal position it established.
+          The determination letters cite the standards, not the software.
+        </p>
+        <p class="oss-note">
+          Commercial licenses are available for proprietary deployments. Contact Thomas Gonzalez.
+        </p>
+      </div>
+      <div>
+        <div class="oss-card">
+          <div class="oss-label">Technical Specifications</div>
+          <div class="oss-row"><span class="oss-key">Language</span> Python 3.11+</div>
+          <div class="oss-row"><span class="oss-key">License</span> AGPL-3.0-or-later (open source) · Commercial license available</div>
+          <div class="oss-row"><span class="oss-key">GIS engine</span> GeoPandas · OSMnx · Shapely · PyProj</div>
+          <div class="oss-row"><span class="oss-key">Routing</span> NetworkX shortest-path (Dijkstra)</div>
+          <div class="oss-row"><span class="oss-key">Data cache</span> 90-day TTL in <code>data/{city}/</code></div>
+          <div class="oss-row"><span class="oss-key">Run time</span> ~30 seconds first run (data download); &lt;5 s cached</div>
+          <div class="oss-row"><span class="oss-key">Output</span> Interactive HTML map · Per-project brief · Plaintext audit trail · CSV route inventory</div>
+          <div class="oss-btns">
+            <a class="btn btn-primary" href="https://github.com/twgonzalez/josh" target="_blank" rel="noopener">View on GitHub &rarr;</a>
+            <a class="btn btn-outline" href="viewer.html?doc=docs/JOSH_v3_Specification.md">v3.2 Specification</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ── FOOTER ───────────────────────────────────────────────────── -->
 <footer>
   <div class="footer-inner">
     <div>
       <div class="footer-brand">JOSH — Fire Evacuation Capacity Analysis System</div>
       <div class="footer-text">
-        Developed by the California Stewardship Fund. JOSH is an automation layer over
-        established national and state standards. The methodology is not proprietary — every input,
-        every formula, and every threshold is traceable to a publicly available source. The software
-        is open source. The standards belong to the agencies that published them.
+        Developed by the California Stewardship Fund. JOSH is a Python CLI tool — an automation
+        layer over established national and state standards. The methodology is not proprietary —
+        every input, every formula, and every threshold is traceable to a publicly available source.
+        The software is open source under AGPL-3.0. The standards belong to the agencies that
+        published them.
         <br><br>
         All determinations produced by JOSH are objective and reproducible. No professional
         discretion is applied. Any licensed engineer can independently verify any result using
         the same published sources.
+        <br><br>
+        <a href="https://github.com/twgonzalez/josh" target="_blank" rel="noopener"
+           style="color:#8ea8cc;text-decoration:underline;">github.com/twgonzalez/josh</a>
+        &nbsp;&mdash;&nbsp;AGPL-3.0-or-later
       </div>
     </div>
     <div class="footer-citations">

@@ -1,8 +1,8 @@
 # JOSH — Jurisdictional Objective Standards for Housing
 
-**AI agent system for fire evacuation capacity analysis in California cities.**
+**Open-source Python tool for fire evacuation capacity analysis in California cities.**
 
-JOSH gives cities and applicants a legally defensible, fully algorithmic determination of whether a proposed housing project triggers discretionary review under AB 747 — with zero engineering judgment and a full audit trail.
+JOSH is a first-principles calculator built entirely from established national and state standards — HCM 2022, NFPA 101, NIST TN 2135, Cal Fire FHSZ, and U.S. Census data. It gives cities and applicants a legally defensible, fully algorithmic determination of whether a proposed housing project triggers discretionary review under AB 747, with zero engineering judgment and a full audit trail. Every result is reproducible by any licensed engineer with a spreadsheet.
 
 ---
 
@@ -99,9 +99,9 @@ Data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-
 
 ```
 agents/
-  data_acquisition.py    # Agent 1: CAL FIRE FHSZ, OSM roads, Census data
-  capacity_analysis.py   # Agent 2: HCM capacity, hazard degradation, route ID
-  objective_standards.py # Agent 3: ΔT determination, audit trail generation
+  data_acquisition.py    # Stage 1: download CAL FIRE FHSZ, OSM roads, Census data
+  capacity_analysis.py   # Stage 2: HCM capacity, hazard degradation, route ID
+  objective_standards.py # Stage 3: ΔT determination, audit trail generation
   scenarios/             # WildlandScenario (Standards 1–4), Sb79TransitScenario (Std 5)
   visualization/         # Folium demo map, determination briefs, popups
 models/                  # Project, EvacuationPath, RoadSegment dataclasses
