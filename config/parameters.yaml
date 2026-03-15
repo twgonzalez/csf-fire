@@ -221,6 +221,32 @@ speed_defaults:
   road: 25
 
 # ============================================================
+# Width-Based Speed Inference
+# ============================================================
+# When OSM maxspeed tag is absent, infer speed from the OSM width tag (if present).
+# Thresholds are in meters; first bracket where width_m < width_max_m wins.
+# Source: IFC §503 fire apparatus access road minimums (20 ft one-way, 26 ft two-way)
+# and AASHTO geometric design guidelines for low-speed residential streets.
+#
+# IFC width reference points (ft → m):
+#   15 ft = 4.57 m  (alley / single-track access)
+#   20 ft = 6.10 m  (IFC §503 one-way minimum — below this is non-compliant)
+#   24 ft = 7.32 m  (narrow two-way)
+#   26 ft = 7.92 m  (IFC §503 two-way minimum)
+#
+# Example: Union St / Clark Ave (Encinitas) at 19–21 ft (5.8–6.4 m) → tier 2 → 15 mph → 900 vph
+# Compare: standard residential at 25 mph default → 1125 vph (25% overcapacity for this road)
+
+width_speed_inference:
+  - width_max_m: 4.57    # < 15 ft — alley / single-track
+    inferred_speed_mph: 10
+  - width_max_m: 6.10    # < 20 ft — below IFC §503 one-way minimum (substandard)
+    inferred_speed_mph: 15
+  - width_max_m: 7.32    # < 24 ft — narrow two-way
+    inferred_speed_mph: 20
+  # >= 7.32 m: fall through to speed_defaults (no width-based correction)
+
+# ============================================================
 # Evacuation Route Identification
 # ============================================================
 
