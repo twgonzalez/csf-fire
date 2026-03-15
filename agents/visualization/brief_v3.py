@@ -1187,7 +1187,8 @@ def _build_legal_authority(project, audit: dict, config: dict, city_slug: str = 
 
     lat_str = f"{audit.get('project', {}).get('location_lat', project.location_lat):.4f}".replace(".", "_").replace("-", "n")
     lon_str = f"{audit.get('project', {}).get('location_lon', project.location_lon):.4f}".replace(".", "_").replace("-", "n")
-    audit_file = f"determination_{lat_str}_{lon_str}.txt"
+    units_str = audit.get('project', {}).get('dwelling_units', project.dwelling_units)
+    audit_file = f"determination_{lat_str}_{lon_str}_{units_str}u.txt"
     audit_viewer_url = f"../viewer.html?doc={city_slug}/{audit_file}"
 
     def badge(n, derived=False):

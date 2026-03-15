@@ -245,7 +245,7 @@ def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
     # Save audit trail
     lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
     lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-    det_filename = f"determination_{lat_str}_{lon_str}.txt"
+    det_filename = f"determination_{lat_str}_{lon_str}_{units}u.txt"
     audit_path = output_dir / det_filename
     generate_audit_trail(project, audit, audit_path)
 
@@ -619,7 +619,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
         lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
         brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
         create_determination_brief_v3(project, audit, config, city_config, brief_path)
-        audit_path = output_dir / f"determination_{lat_str}_{lon_str}.txt"
+        audit_path = output_dir / f"determination_{lat_str}_{lon_str}_{units}u.txt"
         generate_audit_trail(project, audit, audit_path)
 
     # ── Summary table ──────────────────────────────────────────────────────
