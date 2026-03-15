@@ -20,6 +20,7 @@ Every download is logged to metadata.yaml for audit trail purposes.
 """
 import gzip
 import io
+import json
 import logging
 import re
 import tempfile
@@ -79,10 +80,11 @@ def acquire_data(
     # FHSZ zones
     fhsz_path = data_dir / "fhsz.geojson"
     if force_refresh or _is_stale(metadata, "fhsz", ttl_days):
-        logger.info("Fetching FHSZ zones from CAL FIRE...")
         bbox = tuple(gdf.total_bounds)  # (minx, miny, maxx, maxy)
-        fhsz_gdf = fetch_fhsz_zones(bbox, fhsz_path, config)
-        metadata["fhsz"] = _meta_entry("CAL FIRE OSFM ArcGIS REST API")
+        fhsz_gdf = fetch_fhsz_zones(bbox, fhsz_path, config, city_config)
+        local_file = city_config.get("fhsz_local_file")
+        source = f"Local file: {local_file}" if local_file else "CAL FIRE OSFM ArcGIS REST API"
+        metadata["fhsz"] = _meta_entry(source)
     else:
         logger.info("Using cached FHSZ zones.")
         fhsz_gdf = gpd.read_file(fhsz_path)
@@ -184,27 +186,73 @@ def fetch_fhsz_zones(
     bbox: tuple,
     output_path: Path,
     config: dict,
+    city_config: Optional[dict] = None,
 ) -> gpd.GeoDataFrame:
     """
-    Fetch Fire Hazard Severity Zones from CAL FIRE ArcGIS REST API.
+    Fetch Fire Hazard Severity Zones, preferring a local file if configured.
 
-    Endpoint: FRAP/HHZ_ref_FHSZ MapServer, layer 0
-    Field: FHSZ9 with values like 'SRA_VeryHigh', 'LRA_High', 'FRA_Moderate'
+    If city_config contains 'fhsz_local_file', loads that GeoJSON/shapefile
+    (path relative to project root) instead of hitting the CAL FIRE API.
+    This is required for LRA cities (e.g. Encinitas 2025 adoption) where the
+    HHZ_ref_FHSZ MapServer only returns SRA zones and yields 0 features.
+
+    Otherwise falls back to the CAL FIRE ArcGIS REST API:
+      Endpoint: FRAP/HHZ_ref_FHSZ MapServer, layer 0
+      Field: FHSZ9 with values like 'SRA_VeryHigh', 'LRA_High', 'FRA_Moderate'
 
     bbox: (minx, miny, maxx, maxy) in EPSG:4326
     Returns GeoDataFrame with 'HAZ_CLASS' column (1=Moderate, 2=High, 3=VeryHigh).
     """
+    city_config = city_config or {}
+
+    # --- Local file path (LRA cities where CAL FIRE API returns 0 features) ---
+    local_file = city_config.get("fhsz_local_file")
+    if local_file:
+        local_path = Path(local_file)
+        if not local_path.is_absolute():
+            local_path = Path.cwd() / local_path
+        if not local_path.exists():
+            logger.info(
+                f"  fhsz_local_file not found: {local_path}\n"
+                f"  Attempting auto-provisioning from public APIs..."
+            )
+            _auto_provision_fhsz_local_file(local_path, bbox, config, city_config)
+
+        if local_path.exists():
+            logger.info(f"Loading FHSZ from local file: {local_path}")
+            try:
+                gdf = gpd.read_file(local_path)
+                gdf = gdf.to_crs("EPSG:4326")
+                gdf = _normalize_fhsz_column(gdf)
+                gdf.to_file(output_path, driver="GeoJSON")
+                logger.info(f"  FHSZ zones saved: {output_path} ({len(gdf)} features)")
+                return gdf
+            except Exception as e:
+                logger.error(f"  Failed to load local FHSZ file {local_path}: {e}")
+                logger.warning("  Falling back to CAL FIRE API...")
+        else:
+            logger.warning(
+                f"  Auto-provisioning failed and {local_path} still missing.\n"
+                f"  See config/cities/fhsz/README.md to obtain and place the file manually.\n"
+                f"  Falling back to CAL FIRE API (may return 0 features for LRA cities)."
+            )
+
     api_base = config.get("fhsz", {}).get("api_base",
         "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer")
 
     minx, miny, maxx, maxy = bbox
-    geometry_filter = f"{minx},{miny},{maxx},{maxy}"
+    # Pass geometry as a JSON envelope object with embedded spatialReference.
+    # The ArcGIS REST API requires this form when querying a 3857-native service
+    # with WGS84 coordinates — a bare comma-separated bbox + inSR param is ignored.
+    geometry_filter = json.dumps({
+        "xmin": minx, "ymin": miny, "xmax": maxx, "ymax": maxy,
+        "spatialReference": {"wkid": 4326},
+    })
 
     url = f"{api_base}/0/query"
     params = {
         "geometry": geometry_filter,
         "geometryType": "esriGeometryEnvelope",
-        "inSR": "4326",
         "spatialRel": "esriSpatialRelIntersects",
         "outFields": "FHSZ9",
         "f": "geojson",
@@ -227,7 +275,9 @@ def fetch_fhsz_zones(
 
     if not all_gdfs:
         logger.warning("  No FHSZ data returned from API — returning empty GeoDataFrame.")
-        return gpd.GeoDataFrame(columns=["HAZ_CLASS", "geometry"], crs="EPSG:4326")
+        empty = gpd.GeoDataFrame(columns=["HAZ_CLASS", "geometry"], crs="EPSG:4326")
+        empty.to_file(output_path, driver="GeoJSON")
+        return empty
 
     combined = pd.concat(all_gdfs, ignore_index=True)
     combined = gpd.GeoDataFrame(combined, crs="EPSG:4326")
@@ -242,17 +292,23 @@ def _normalize_fhsz_column(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Normalize the FHSZ zone column to a standard 'HAZ_CLASS' integer column.
 
-    Handles the FHSZ9 field format from CAL FIRE: 'SRA_VeryHigh', 'LRA_High',
-    'FRA_Moderate', etc. Also handles legacy formats.
+    Handles multiple source formats (case-insensitive column lookup):
+    - FHSZ9   : CAL FIRE HHZ_ref_FHSZ API — 'SRA_VeryHigh', 'LRA_High', etc.
+    - haz_class: San Diego County OES and other county GIS portals — 'Very High', 'High', etc.
+    - HAZ_CLASS: already normalized integer or string
+    - SRA_ZONE, FHSZ, ZONE, CLASS: legacy/alternate formats
     """
-    # FHSZ9 is the field from the HHZ_ref_FHSZ service
-    if "FHSZ9" in gdf.columns:
-        gdf = gdf.rename(columns={"FHSZ9": "HAZ_CLASS"})
-    else:
-        for col in ["HAZ_CLASS", "SRA_ZONE", "FHSZ", "ZONE", "CLASS"]:
-            if col in gdf.columns:
-                gdf = gdf.rename(columns={col: "HAZ_CLASS"})
-                break
+    # Case-insensitive column index
+    col_map = {c.lower(): c for c in gdf.columns}
+
+    # Priority: FHSZ9 → haz_class/HAZ_CLASS → SRA_ZONE → FHSZ → ZONE → CLASS
+    priority = ["fhsz9", "haz_class", "sra_zone", "zone", "class"]
+    for target in priority:
+        if target in col_map:
+            orig = col_map[target]
+            if orig != "HAZ_CLASS":
+                gdf = gdf.rename(columns={orig: "HAZ_CLASS"})
+            break
 
     if "HAZ_CLASS" not in gdf.columns:
         logger.warning("  Could not identify FHSZ zone column; defaulting all to Zone 3.")
@@ -276,6 +332,115 @@ def _normalize_fhsz_column(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     gdf["HAZ_CLASS"] = gdf["HAZ_CLASS"].map(_to_zone_int)
     return gdf
+
+
+def _query_fhsz_endpoint(
+    endpoint_url: str,
+    bbox: tuple,
+    out_fields: str = "*",
+    timeout: int = 60,
+) -> Optional[gpd.GeoDataFrame]:
+    """
+    Query an ArcGIS REST FeatureServer or MapServer layer for FHSZ polygons.
+
+    Handles both:
+    - FeatureServer/0  → appends /query
+    - MapServer/0/query → used as-is
+
+    Returns GeoDataFrame in EPSG:4326, or None on failure/empty.
+    """
+    minx, miny, maxx, maxy = bbox
+    geometry_filter = json.dumps({
+        "xmin": minx, "ymin": miny, "xmax": maxx, "ymax": maxy,
+        "spatialReference": {"wkid": 4326},
+    })
+    url = endpoint_url if endpoint_url.rstrip("/").endswith("/query") else endpoint_url.rstrip("/") + "/query"
+    params = {
+        "geometry": geometry_filter,
+        "geometryType": "esriGeometryEnvelope",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": out_fields,
+        "f": "geojson",
+        "returnGeometry": "true",
+        "resultRecordCount": 2000,  # request max to avoid silent truncation
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("error"):
+            logger.warning(f"  API error from {url}: {data['error']}")
+            return None
+        features = data.get("features", [])
+        if not features:
+            return None
+        gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+        logger.info(f"  {len(gdf)} features from {url}")
+        return gdf
+    except Exception as e:
+        logger.warning(f"  FHSZ endpoint query failed ({url}): {e}")
+        return None
+
+
+def _auto_provision_fhsz_local_file(
+    local_path: Path,
+    bbox: tuple,
+    config: dict,
+    city_config: dict,
+) -> bool:
+    """
+    Auto-download FHSZ data from public APIs and save to local_path.
+
+    Query order (first non-empty result wins):
+    1. city_config['fhsz_fallback_api']  — county GIS portal (most complete LRA data)
+    2. CAL FIRE HHZ_ref_FHSZ MapServer  — SRA+LRA for forested areas, High+VH only
+
+    Returns True if the file was written, False if no data could be obtained.
+    """
+    logger.info(f"  Auto-provisioning FHSZ local file: {local_path}")
+
+    sources_tried = []
+
+    # 1. County / city-configured fallback API (e.g., county OES portal)
+    fallback_api = city_config.get("fhsz_fallback_api")
+    if fallback_api:
+        logger.info(f"  Trying city fhsz_fallback_api: {fallback_api}")
+        gdf = _query_fhsz_endpoint(fallback_api, bbox)
+        if gdf is not None and not gdf.empty:
+            gdf = _normalize_fhsz_column(gdf)
+            gdf = gdf[gdf["HAZ_CLASS"] > 0].copy()  # drop "No Designation"
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            gdf.to_file(local_path, driver="GeoJSON")
+            logger.info(f"  Saved {len(gdf)} FHSZ features → {local_path}")
+            return True
+        sources_tried.append(fallback_api)
+
+    # 2. CAL FIRE egis.fire.ca.gov HHZ_ref_FHSZ (partial: forested areas, High+VH only)
+    api_base = config.get("fhsz", {}).get(
+        "api_base",
+        "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HHZ_ref_FHSZ/MapServer",
+    )
+    calfire_url = f"{api_base}/0"
+    logger.info(f"  Trying CAL FIRE HHZ_ref_FHSZ: {calfire_url}")
+    gdf = _query_fhsz_endpoint(calfire_url, bbox, out_fields="FHSZ9")
+    if gdf is not None and not gdf.empty:
+        gdf = _normalize_fhsz_column(gdf)
+        gdf = gdf[gdf["HAZ_CLASS"] > 0].copy()
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        gdf.to_file(local_path, driver="GeoJSON")
+        logger.info(
+            f"  Saved {len(gdf)} FHSZ features (forested-area subset) → {local_path}\n"
+            f"  NOTE: HHZ_ref_FHSZ covers only conifer/woodland areas (High+VH).\n"
+            f"  For full LRA coverage, set fhsz_fallback_api to a county GIS portal."
+        )
+        return True
+    sources_tried.append(calfire_url)
+
+    logger.warning(
+        f"  Could not auto-provision FHSZ local file — all sources returned 0 features:\n"
+        + "\n".join(f"    {s}" for s in sources_tried)
+    )
+    return False
 
 
 # ---------------------------------------------------------------------------
