@@ -644,6 +644,211 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
     console.print(f"  Open with: [dim]open {map_path}[/dim]")
 
 
+@cli.command()
+@click.option("--city", required=True, help="City name (used to resolve default projects file)")
+@click.option("--state", default="CA", show_default=True, help="State abbreviation for geocoding")
+@click.option(
+    "--projects", "projects_file", default=None,
+    help="Path to projects YAML (default: config/projects/{city}_demo.yaml)",
+)
+@click.option(
+    "--apply", is_flag=True,
+    help="Write corrected lat/lon back to the YAML file in place (preserves comments).",
+)
+@click.option(
+    "--threshold", default=0.5, show_default=True, type=float,
+    help="Distance in km beyond which a stored coordinate is flagged as a mismatch.",
+)
+def geocode(city: str, state: str, projects_file: str, apply: bool, threshold: float):
+    """
+    Validate and optionally fix project coordinates in a demo YAML.
+
+    For each project that has an 'address' (or 'geocode_address') field, calls the
+    U.S. Census Bureau Geocoder and compares the result to the stored lat/lon.
+    Projects whose pin is more than --threshold km from the geocoded address are
+    flagged as MISMATCH.
+
+    Use --apply to write corrected coordinates back to the YAML file.  All YAML
+    comments and structure are preserved — only the numeric lat/lon values change.
+
+    Add a 'geocode_address' field to any project whose 'address' field is not a
+    clean street address (e.g. intersection descriptions, annotated access notes).
+
+    Example:
+      uv run python main.py geocode --city "Encinitas"
+      uv run python main.py geocode --city "Encinitas" --apply
+    """
+    import math
+    import re
+    import requests
+
+    CENSUS_URL = "https://geocoding.geo.census.gov/geocoder/locations/address"
+
+    base_dir = Path(__file__).parent
+    city_slug = city.lower().replace(" ", "_")
+
+    if projects_file is None:
+        projects_file = base_dir / "config" / "projects" / f"{city_slug}_demo.yaml"
+    else:
+        projects_file = Path(projects_file)
+
+    if not projects_file.exists():
+        console.print(f"[red]ERROR: {projects_file} not found[/red]")
+        sys.exit(1)
+
+    raw_text = projects_file.read_text()
+    demo_cfg = yaml.safe_load(raw_text)
+    project_defs = demo_cfg.get("projects", [])
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6371.0
+        φ1, φ2 = math.radians(lat1), math.radians(lat2)
+        dφ = math.radians(lat2 - lat1)
+        dλ = math.radians(lon2 - lon1)
+        a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+        return R * 2 * math.asin(math.sqrt(a))
+
+    def clean_street(raw: str) -> str:
+        """Strip parentheticals and secondary access notes; return first address token."""
+        s = re.sub(r"\(.*?\)", "", raw)          # remove (parens)
+        s = re.split(r"[,/&]", s)[0]             # take first segment before , / & separators
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def census_geocode(address_str: str, city_name: str, state_abbr: str):
+        """Return (lat, lon, matched_address) tuple or (None, None, None) on failure."""
+        street = clean_street(address_str)
+        if not street or len(street) < 4:
+            return None, None, None
+        try:
+            resp = requests.get(
+                CENSUS_URL,
+                params={
+                    "street": street,
+                    "city":   city_name,
+                    "state":  state_abbr,
+                    "benchmark": "2020",
+                    "format": "json",
+                },
+                timeout=12,
+            )
+            resp.raise_for_status()
+            matches = resp.json().get("result", {}).get("addressMatches", [])
+            if matches:
+                coords = matches[0]["coordinates"]
+                matched_addr = matches[0].get("matchedAddress", "")
+                return float(coords["y"]), float(coords["x"]), matched_addr
+        except Exception:
+            pass
+        return None, None, None
+
+    def patch_yaml_coords(text: str, project_name: str, new_lat: float, new_lon: float) -> str:
+        """Replace lat/lon values for a named project in raw YAML text, preserving comments."""
+        lines = text.split("\n")
+        in_project = False
+        result = []
+        for line in lines:
+            # Detect entry into this project's block
+            if f'name: "{project_name}"' in line or f"name: '{project_name}'" in line:
+                in_project = True
+            elif in_project and re.match(r"\s*-\s+name:", line):
+                in_project = False  # entered the next project block
+
+            if in_project and re.match(r"(\s+lat:\s*)[-\d.]+", line):
+                line = re.sub(r"(lat:\s*)[-\d.]+", rf"\g<1>{new_lat:.6f}", line)
+            elif in_project and re.match(r"(\s+lon:\s*)[-\d.]+", line):
+                line = re.sub(r"(lon:\s*)[-\d.]+", rf"\g<1>{new_lon:.6f}", line)
+
+            result.append(line)
+        return "\n".join(result)
+
+    # ------------------------------------------------------------------
+    # Check each project
+    # ------------------------------------------------------------------
+
+    table = Table(
+        title=f"Geocode Validation — {projects_file.name}",
+        header_style="bold blue",
+        show_lines=False,
+    )
+    table.add_column("Project", min_width=28)
+    table.add_column("Stored lat, lon", min_width=22)
+    table.add_column("Geocoded lat, lon", min_width=22)
+    table.add_column("Matched Address (verify this!)", min_width=38)
+    table.add_column("Dist (km)", justify="right")
+    table.add_column("Status", min_width=14)
+
+    updates: list[tuple[str, float, float]] = []
+
+    for pdef in project_defs:
+        name        = pdef.get("name", "?")
+        # Prefer explicit geocode_address; fall back to address
+        address     = pdef.get("geocode_address") or pdef.get("address", "")
+        stored_lat  = pdef.get("lat")
+        stored_lon  = pdef.get("lon")
+
+        if not address:
+            stored_str = f"{stored_lat:.6f}, {stored_lon:.6f}" if stored_lat else "MISSING"
+            table.add_row(name, stored_str, "—", "—", "—", "[dim]no address[/dim]")
+            continue
+
+        geo_lat, geo_lon, matched_addr = census_geocode(address, city, state)
+
+        stored_str = (
+            f"{stored_lat:.6f}, {stored_lon:.6f}" if stored_lat is not None else "MISSING"
+        )
+
+        if geo_lat is None:
+            table.add_row(name, stored_str, "geocode failed", "—", "—", "[yellow]WARN[/yellow]")
+            continue
+
+        geo_str = f"{geo_lat:.6f}, {geo_lon:.6f}"
+        addr_str = matched_addr or "[dim]—[/dim]"
+
+        if stored_lat is None or stored_lon is None:
+            table.add_row(name, "MISSING", geo_str, addr_str, "—", "[cyan]NEW[/cyan]")
+            updates.append((name, geo_lat, geo_lon))
+            continue
+
+        dist = haversine_km(stored_lat, stored_lon, geo_lat, geo_lon)
+
+        if dist > threshold:
+            status = f"[bold red]MISMATCH {dist:.2f}km[/bold red]"
+            updates.append((name, geo_lat, geo_lon))
+        elif dist > 0.1:
+            status = f"[yellow]warn {dist:.2f}km[/yellow]"
+        else:
+            status = "[green]OK[/green]"
+
+        table.add_row(name, stored_str, geo_str, addr_str, f"{dist:.2f}", status)
+
+    console.print(table)
+
+    if not updates:
+        console.print("[green]  All coordinates within tolerance.[/green]")
+        return
+
+    console.print(
+        f"\n  [bold]{len(updates)} project(s)[/bold] have coordinates outside "
+        f"{threshold:.1f} km tolerance."
+    )
+
+    if apply:
+        patched = raw_text
+        for proj_name, new_lat, new_lon in updates:
+            patched = patch_yaml_coords(patched, proj_name, new_lat, new_lon)
+        projects_file.write_text(patched)
+        console.print(f"  [green]Patched {projects_file}[/green]")
+    else:
+        console.print(
+            "  Run with [cyan]--apply[/cyan] to write corrected coordinates to the YAML."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Rich output helpers
 # ---------------------------------------------------------------------------

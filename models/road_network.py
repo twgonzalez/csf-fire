@@ -30,11 +30,13 @@ class RoadSegment:
     lane_count: int = 1
     speed_limit: int = 25               # mph
     length_meters: float = 0.0
+    width_meters: Optional[float] = None  # Physical road width from OSM width tag (meters)
 
     # Data quality flags
-    lane_count_estimated: bool = False  # True if lane_count is estimated, not measured
-    speed_estimated: bool = False       # True if speed_limit is estimated, not measured
-    aadt_estimated: bool = False        # True if AADT is estimated, not measured
+    lane_count_estimated: bool = False       # True if lane_count is estimated, not measured
+    speed_estimated: bool = False            # True if speed_limit is estimated, not measured
+    speed_inferred_from_width: bool = False  # True if speed was inferred from OSM width tag
+    aadt_estimated: bool = False             # True if AADT is estimated, not measured
 
     # HCM 2022 Capacity (Agent 2 — Step 1)
     capacity_vph: float = 0.0           # Raw HCM capacity (before hazard degradation)
@@ -78,6 +80,8 @@ class RoadSegment:
             "road_type":               self.road_type,
             "lane_count":              self.lane_count,
             "speed_limit":             self.speed_limit,
+            "speed_inferred_from_width": self.speed_inferred_from_width,
+            "width_meters":            round(self.width_meters, 2) if self.width_meters is not None else None,
             "length_meters":           round(self.length_meters, 1),
             "capacity_vph":            round(self.capacity_vph, 0),
             "fhsz_zone":               self.fhsz_zone,

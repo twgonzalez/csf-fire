@@ -469,26 +469,38 @@ def fetch_road_network(
     lane_defaults = config.get("lane_defaults", {})
     speed_defaults = config.get("speed_defaults", {})
     road_type_mapping = config.get("road_type_mapping", {})
+    width_inference = config.get("width_speed_inference", [])
 
     has_lanes_col = "lanes" in gdf.columns
+    has_width_col = "width" in gdf.columns
 
     def _process_row(row):
         hw = _normalize_highway_tag(row.get("highway", "unclassified"))
         lanes_val = row.get("lanes", None) if has_lanes_col else None
+        width_val = row.get("width", None) if has_width_col else None
+        width_m = _parse_width_meters(width_val)
         lane_count, lane_estimated = _resolve_lanes(hw, lanes_val, lane_defaults)
-        speed, speed_estimated = _resolve_speed(hw, row.get("maxspeed", None), speed_defaults)
+        speed, speed_estimated, speed_from_width = _resolve_speed(
+            hw, row.get("maxspeed", None), speed_defaults, width_m, width_inference
+        )
         road_type = _classify_road_type(row.get("highway", "unclassified"), road_type_mapping)
-        return lane_count, lane_estimated, speed, speed_estimated, road_type
+        return lane_count, lane_estimated, speed, speed_estimated, road_type, width_m, speed_from_width
 
     results = gdf.apply(_process_row, axis=1, result_type="expand")
-    results.columns = ["lane_count", "lane_count_estimated", "speed_limit", "speed_estimated", "road_type"]
+    results.columns = [
+        "lane_count", "lane_count_estimated",
+        "speed_limit", "speed_estimated",
+        "road_type",
+        "width_meters", "speed_inferred_from_width",
+    ]
     gdf = gdf.join(results)
 
     # Retain only needed columns
     keep_cols = [
         "osmid", "name", "highway", "geometry", "length",
         "lane_count", "lane_count_estimated",
-        "speed_limit", "speed_estimated",
+        "speed_limit", "speed_estimated", "speed_inferred_from_width",
+        "width_meters",
         "road_type",
     ]
     if "lanes" in gdf.columns:
@@ -524,9 +536,45 @@ def _resolve_lanes(hw: str, osm_lanes_value, lane_defaults: dict) -> tuple[int, 
     return default, True
 
 
-def _resolve_speed(highway_tag, maxspeed_value, speed_defaults: dict) -> tuple[int, bool]:
-    """Return (speed_mph, is_estimated)."""
+def _parse_width_meters(raw) -> float | None:
+    """Parse an OSM width tag value to meters. Returns None if absent or unparseable.
+
+    Handles formats: "5.8", "5.8 m", "19 ft", "19'", lists thereof.
+    OSM convention is meters when no unit is specified.
+    """
+    if raw is None:
+        return None
+    try:
+        val = raw[0] if isinstance(raw, list) else raw
+        s = str(val).strip().lower()
+        # Feet: "19 ft", "19ft", "19'", "19 '"
+        if "ft" in s or "'" in s:
+            num_str = s.replace("ft", "").replace("'", "").strip()
+            return float(num_str) * 0.3048
+        # Meters: "5.8 m", "5.8m", "5.8"
+        s = s.replace(" m", "").replace("m", "").strip()
+        return float(s)
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
+def _resolve_speed(
+    highway_tag,
+    maxspeed_value,
+    speed_defaults: dict,
+    width_meters: float | None = None,
+    width_inference: list | None = None,
+) -> tuple[int, bool, bool]:
+    """Return (speed_mph, is_estimated, speed_inferred_from_width).
+
+    Resolution order:
+      1. OSM maxspeed tag   → measured, authoritative
+      2. OSM width tag      → infer from width_speed_inference table if maxspeed absent
+      3. highway type default → last resort
+    """
     hw = _normalize_highway_tag(highway_tag)
+
+    # 1. Explicit maxspeed tag
     if maxspeed_value is not None:
         try:
             val = maxspeed_value
@@ -534,14 +582,21 @@ def _resolve_speed(highway_tag, maxspeed_value, speed_defaults: dict) -> tuple[i
                 val = val[0]
             s = str(val).lower().replace("mph", "").replace("km/h", "").strip()
             speed = int(s.split(";")[0].strip())
-            # If value looks like km/h (>80), convert
-            if speed > 80:
+            if speed > 80:  # looks like km/h — convert
                 speed = round(speed * 0.621371)
-            return speed, False
+            return speed, False, False
         except (ValueError, TypeError):
             pass
+
+    # 2. Infer from physical width (IFC §503 / AASHTO thresholds)
+    if width_meters is not None and width_inference:
+        for tier in width_inference:
+            if width_meters < tier["width_max_m"]:
+                return tier["inferred_speed_mph"], True, True
+
+    # 3. Highway type default
     default = speed_defaults.get(hw, 25)
-    return default, True
+    return default, True, False
 
 
 def _classify_road_type(highway_tag, road_type_mapping: dict) -> str:

@@ -34,7 +34,42 @@ uv run python main.py analyze --city "Berkeley" --state "CA" --refresh
 # Regenerate the primary demo map (REQUIRED after any visualization code change)
 uv run python main.py demo --city "Berkeley"
 # → output/berkeley/demo_map.html
+
+# Validate project coordinates against the Census geocoder (REQUIRED after adding projects)
+uv run python main.py geocode --city "Berkeley"
+uv run python main.py geocode --city "Berkeley" --apply   # write corrections to YAML in place
 ```
+
+## Adding Projects to a Demo YAML — Coordinate Protocol
+
+**NEVER estimate or guess lat/lon coordinates.** Wrong coordinates place pins on the
+wrong road segments and produce incorrect FHSZ lookups, ΔT calculations, and route
+assignments — invalidating the legal analysis.
+
+**Required workflow when adding a new project to any `config/projects/{city}_demo.yaml`:**
+
+1. Set the `address` field to the human-readable project address.
+2. If `address` is not a clean geocodable street address (e.g. it's an intersection
+   description, annotated access note, or address range), also add a `geocode_address`
+   field with a clean single-address geocodable form:
+   ```yaml
+   address: "599 Union St (ingress/egress) / Clark Ave (egress only), Leucadia"
+   geocode_address: "599 Union St, Encinitas"
+   ```
+3. Set `lat`/`lon` from the Census geocoder result — run:
+   ```bash
+   uv run python main.py geocode --city "CityName" --apply
+   ```
+   This calls the U.S. Census Bureau Geocoder (no API key required) and patches the
+   YAML in place while preserving all comments.
+4. For projects where geocoding fails (intersection descriptions with no street number),
+   look up coordinates using the parcel APN in the county assessor GIS portal or
+   San Diego County SANDAG parcel viewer, then run `geocode` to confirm distance is
+   within 0.5 km.
+5. Regenerate the demo map:
+   ```bash
+   uv run python main.py demo --city "CityName"
+   ```
 
 ## Primary UX Artifact
 
@@ -193,7 +228,38 @@ Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 
 ## Pending Methodology Work
 
-1. **Physical site access standard (new Standard 6)** — no file yet
+1. **Demo map hand-placement of project pins** — no file yet
+   The Census geocoder can silently match the wrong block of a street that crosses I-5
+   or another major barrier (e.g., "599 Union St" matched the west-of-I-5 segment when
+   the actual project entry is east of I-5). The fix is a click-to-place UI in the demo map:
+   - Add a "drop pin" mode to `output/{city}/demo_map.html` — user clicks the map, the
+     lat/lon appears in a panel and can be copied directly into the YAML
+   - OR: a standalone `place_pin.html` helper (no server needed, pure Leaflet) that opens
+     the city bounding box and lets the user click to get coordinates
+   - Coordinates set this way should be noted in the YAML comment as "hand-placed YYYY-MM-DD"
+     rather than geocoded (see Clark Avenue Apartments in encinitas_demo.yaml for the pattern)
+   - The `geocode` command already detects mismatches (MISMATCH status + km distance) and
+     shows the matched address string — that is the first line of defense. Hand-placement
+     is the resolution when geocoder quality is insufficient.
+
+2. **Dual / multiple egress accounting** — methodology pending
+   Clark Avenue Apartments has TWO egress points:
+   - 599 Union St: primary ingress/egress (two-way, 19.5 ft wide)
+   - Clark Ave: egress only (one-way outbound, 19–21 ft wide)
+   The current ΔT engine finds the bottleneck of the *single worst-case* EvacuationPath.
+   If a project has two independent egress paths, total egress capacity may be the sum of
+   both — vehicles split across routes during evacuation.
+   Questions to resolve:
+   - OSM `oneway` tag is already in the graph but not surfaced to the ΔT engine — needed
+     to distinguish one-way egress-only from bidirectional access
+   - Should ΔT sum effective capacities across all exit paths, or take worst-case single
+     path? (Conservative: worst-case; realistic: proportional capacity-split model)
+   - City conditions of approval (Clark Ave egress-only by COA) must be modelable via
+     `{city}_road_overrides.yaml` — not just OSM tags
+   TODO: after width inference ships, inspect the Clark Ave Apartments audit trail to
+   verify both Union St and Clark Ave appear as separate EvacuationPath bottlenecks.
+
+3. **Physical site access standard (new Standard 6)** — no file yet
    The Clark Street (Encinitas) problem — 200 units at end of an 18' wide dead-end street —
    is not a v/c ratio problem. It is a physical access problem governed by IFC §503
    (fire apparatus access roads). Objective thresholds already exist in adopted fire code:
