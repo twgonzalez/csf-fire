@@ -257,6 +257,22 @@ evacuation:
                                     # than 2× optimal represent routes that would never be chosen when
                                     # shorter alternatives exist (legally defensible route-choice bound)
 
+  # Regional network exit node filter (v3.4)
+  # Exit nodes are boundary nodes connected to roads of these OSM highway types.
+  # These represent capacity handoff points: where the local road network delivers
+  # evacuees into the regional system (freeway, trunk highway, major arterial).
+  # A fire does not respect city boundaries — the relevant destination is entry
+  # into the regional network, not crossing a political line.
+  # Override per city in config/cities/{city}.yaml for cities where secondary
+  # roads are the primary evacuation corridors (no freeway access).
+  exit_highway_types:
+    - motorway        # Interstate / State freeway (I-5, I-80, SR-101, etc.)
+    - motorway_link   # On-ramp / off-ramp to freeway
+    - trunk           # State highway not on freeway standard (CA-1, SR-78, etc.)
+    - trunk_link      # Ramp connections to trunk highways
+    - primary         # Major city arterial (El Camino Real, Rancho Santa Fe Rd)
+    - primary_link    # Ramp/slip connections to primary roads
+
 # ============================================================
 # LOS (Level of Service) Thresholds — INFORMATIONAL ONLY
 # Not used in ΔT determination. Retained for KLD cross-check and planning context.
