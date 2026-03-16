@@ -233,7 +233,8 @@ class WildlandScenario(EvacuationScenario):
 
                 method_note = (
                     f"Project-origin Dijkstra (v3.4) — "
-                    f"shortest path from project site to each city exit node; "
+                    f"shortest path from project site to each regional-network "
+                    f"exit node (motorway/trunk/primary at city boundary); "
                     f"{len(reachable_nodes)} nodes within {radius} mi network zone; "
                     f"respects road barriers (I-5, rail, etc.)"
                 )
