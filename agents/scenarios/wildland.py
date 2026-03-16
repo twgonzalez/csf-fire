@@ -394,8 +394,25 @@ class WildlandScenario(EvacuationScenario):
 
                 # Build WGS84 coordinate chain from node positions.
                 # Node (x, y) are in the projected CRS; _to_wgs84 converts to (lon, lat).
+                #
+                # Freeway truncation: stop at the first motorway/motorway_link edge.
+                # Once evacuees reach the freeway mainline they may go north or south —
+                # we cannot predict direction, so we animate only to the on-ramp entry
+                # point and let the map marker convey "→ freeway."  The full path
+                # (osmids, travel_time, bottleneck) is still computed below for ΔT.
+                _FREEWAY_HW = {"motorway", "motorway_link"}
+                _cutoff = len(path_nodes)          # default: include all nodes
+                for _ei, (_eu, _ev) in enumerate(zip(path_nodes[:-1], path_nodes[1:])):
+                    _eed = G.get_edge_data(_eu, _ev) or G.get_edge_data(_ev, _eu) or {}
+                    for _ekd in (_eed.values() if isinstance(_eed, dict) else [_eed]):
+                        if str(_ekd.get("highway", "")) in _FREEWAY_HW:
+                            _cutoff = _ei + 1      # include node _eu, stop before _ev
+                            break
+                    if _cutoff < len(path_nodes):
+                        break
+
                 path_wgs84_local: list[list[float]] = []
-                for _nid in path_nodes:
+                for _nid in path_nodes[:_cutoff]:
                     _nx_x = G.nodes[_nid].get("x", 0)
                     _nx_y = G.nodes[_nid].get("y", 0)
                     _lon, _lat = _to_wgs84.transform(_nx_x, _nx_y)
