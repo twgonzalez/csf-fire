@@ -240,6 +240,7 @@ def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
         config=config,
         city_config=city_config,
         evacuation_paths=evacuation_paths,
+        graph_path=data_dir / "graph.graphml",
     )
 
     # Save audit trail
@@ -588,6 +589,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             config=config,
             city_config=city_config,
             evacuation_paths=evacuation_paths,
+            graph_path=data_dir / "graph.graphml",
         )
         evaluated.append(project)
         audits.append(audit)

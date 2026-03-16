@@ -41,7 +41,8 @@ class Project:
     unit_threshold_used: int = 15
 
     # Standard 2 results (serving evacuation routes)
-    serving_route_ids: list = field(default_factory=list)  # osmids of serving segments
+    serving_route_ids: list = field(default_factory=list)        # osmids of near-bottleneck segments
+    reachable_network_osmids: list = field(default_factory=list) # all osmids reachable from egress (v3.3 viz)
     search_radius_miles: float = 0.5
 
     # Standard 4 results (ΔT capacity test)
