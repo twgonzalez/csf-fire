@@ -400,13 +400,72 @@ class WildlandScenario(EvacuationScenario):
                     ).to_crs(analysis_crs)
                     _aep_x    = _aep_pt.geometry.iloc[0].x
                     _aep_y    = _aep_pt.geometry.iloc[0].y
-                    _aep_node = ox.distance.nearest_nodes(G, _aep_x, _aep_y)
-                    _all_origins.append((_aep_node, f"project_egress_{_aei}"))
-                    logger.info(
-                        f"  Additional egress {_aei} "
-                        f"({_aep.get('label', 'unlabeled')!r}): "
-                        f"snapped to node {_aep_node}"
-                    )
+                    # Honor explicit node override first — city engineers use this when
+                    # auto-snap lands on a freeway or unmapped road.
+                    _override_id = _aep.get("additional_egress_node_id")
+                    if _override_id is not None:
+                        _aep_node = str(_override_id)
+                        logger.info(
+                            f"  Additional egress {_aei} "
+                            f"({_aep.get('label', 'unlabeled')!r}): "
+                            f"using explicit node_id override {_aep_node}"
+                        )
+                    else:
+                        _raw_node = ox.distance.nearest_nodes(G, _aep_x, _aep_y)
+                        # Guard: don't snap to motorway/motorway_link — those are
+                        # exit sinks, not valid Dijkstra origins.
+                        _raw_hw = set()
+                        for _, _, _ed in G.edges(_raw_node, data=True):
+                            _hw = _ed.get("highway", "")
+                            _raw_hw.update(
+                                _hw if isinstance(_hw, list) else [_hw]
+                            )
+                        _motorway_types = {"motorway", "motorway_link"}
+                        if _raw_hw and _raw_hw.issubset(_motorway_types):
+                            # Fall back: nearest non-motorway node
+                            _best_dist, _aep_node = float("inf"), _raw_node
+                            for _cand, _cdata in G.nodes(data=True):
+                                _cx = float(_cdata.get("x", 0))
+                                _cy = float(_cdata.get("y", 0))
+                                _d  = ((_cx - _aep_x) ** 2 + (_cy - _aep_y) ** 2) ** 0.5
+                                if _d >= _best_dist:
+                                    continue
+                                _e_hw: set[str] = set()
+                                for _, _, _ed in G.edges(_cand, data=True):
+                                    _h = _ed.get("highway", "")
+                                    _e_hw.update(
+                                        _h if isinstance(_h, list) else [_h]
+                                    )
+                                if not _e_hw.issubset(_motorway_types):
+                                    _best_dist, _aep_node = _d, _cand
+                            logger.warning(
+                                f"  Additional egress {_aei} "
+                                f"({_aep.get('label', 'unlabeled')!r}): raw snap "
+                                f"landed on motorway (node {_raw_node}); "
+                                f"fell back to nearest non-motorway node {_aep_node}. "
+                                f"Use additional_egress_node_id in YAML to pin explicitly."
+                            )
+                        else:
+                            _aep_node = _raw_node
+                    _existing_nodes = {n for n, _ in _all_origins}
+                    if _aep_node in _existing_nodes:
+                        logger.warning(
+                            f"  Additional egress {_aei} "
+                            f"({_aep.get('label', 'unlabeled')!r}) snapped to "
+                            f"node {_aep_node} — same as an existing origin. "
+                            f"Road is likely not in the OSM drivable graph "
+                            f"(private/unmapped access road). Skipping to avoid "
+                            f"duplicate paths. Add road to OSM or override the "
+                            f"snap node via additional_egress_node_id in the YAML "
+                            f"to model this egress independently."
+                        )
+                    else:
+                        _all_origins.append((_aep_node, f"project_egress_{_aei}"))
+                        logger.info(
+                            f"  Additional egress {_aei} "
+                            f"({_aep.get('label', 'unlabeled')!r}): "
+                            f"snapped to node {_aep_node}"
+                        )
                 except Exception as _snap_err:
                     logger.warning(
                         f"  Additional egress {_aei} snap failed: {_snap_err}"
