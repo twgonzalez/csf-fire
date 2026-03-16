@@ -91,9 +91,21 @@ def analyze_capacity(
     # Step 2: Hazard Degradation (NEW in v3.0)
     roads_gdf = _apply_hazard_degradation(roads_gdf, fhsz_gdf, config, analysis_crs)
 
+    # Resolve exit highway types: city config overrides global default.
+    # City engineers can add "secondary" for cities without freeway access.
+    _default_hw = ["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"]
+    _city_evac  = city_config.get("evacuation", {})
+    _glob_evac  = config.get("evacuation", {})
+    exit_hw_types = set(
+        _city_evac.get("exit_highway_types",
+            _glob_evac.get("exit_highway_types", _default_hw))
+    )
+
     # Step 3: Evacuation routes + catchment weights + bottleneck tracking
     roads_gdf, evacuation_paths = _identify_evacuation_routes(
-        roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf
+        roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf,
+        data_dir=data_dir,
+        exit_highway_types=exit_hw_types,
     )
 
     # Step 4: Baseline demand
@@ -437,6 +449,8 @@ def _identify_evacuation_routes(
     config: dict,
     analysis_crs: str,
     block_groups_gdf: Optional[gpd.GeoDataFrame] = None,
+    data_dir: Optional[Path] = None,
+    exit_highway_types: set | None = None,
 ) -> tuple[gpd.GeoDataFrame, list]:
     """
     Identify evacuation routes via Dijkstra network analysis.
@@ -489,11 +503,24 @@ def _identify_evacuation_routes(
     G_proj  = ox.project_graph(G, to_crs=analysis_crs)
     G_undir = G_proj.to_undirected()
 
-    exits = _find_exit_nodes(G_proj, boundary_proj)
-    logger.info(f"  Found {len(exits)} potential exit nodes.")
+    # Persist projected graph for network-distance proximity queries (v3.3)
+    if data_dir is not None:
+        graph_path = Path(data_dir) / "graph.graphml"
+        graph_path.parent.mkdir(parents=True, exist_ok=True)
+        ox.save_graphml(G_proj, filepath=str(graph_path))
+        logger.info(f"  Saved road graph → {graph_path}")
+
+    exits = _find_exit_nodes(G_proj, boundary_proj, exit_highway_types=exit_highway_types)
+    logger.info(f"  Found {len(exits)} regional-network exit nodes.")
     if not exits:
         logger.warning("  No exit nodes found — skipping route identification.")
         return roads_gdf, []
+
+    # Persist exit nodes for project-origin Dijkstra routing (v3.4)
+    if data_dir is not None:
+        exit_nodes_path = Path(data_dir) / "exit_nodes.json"
+        exit_nodes_path.write_text(json.dumps(exits))
+        logger.info(f"  Saved {len(exits)} exit nodes → {exit_nodes_path}")
 
     VIRTUAL_SINK = -999999
     G_undir.add_node(VIRTUAL_SINK)
@@ -775,13 +802,117 @@ def _sample_fhsz_centroids(fhsz_proj: gpd.GeoDataFrame, max_points: int = 100) -
     return all_points
 
 
-def _find_exit_nodes(G_proj, boundary_proj: gpd.GeoDataFrame) -> list:
+def _find_exit_nodes(
+    G_proj,
+    boundary_proj: gpd.GeoDataFrame,
+    exit_highway_types: set | None = None,
+) -> list:
+    """
+    Find OSM nodes that represent handoff points into the regional evacuation network.
+
+    v3.4 methodology: exit nodes are capacity handoff points — where the local
+    road network delivers evacuees into the regional system (freeway, trunk
+    highway, major arterial).  A fire does not respect city limits; the relevant
+    destination is entry into the regional network, not crossing a political line.
+
+    Algorithm:
+      1. Find all nodes within 50 m of the city boundary line.
+      2. Of those, keep only nodes connected to at least one edge whose OSM
+         highway type is in exit_highway_types (motorway, trunk, primary, etc.).
+      3. If step 2 yields no nodes, fall back to all boundary nodes (warning).
+      4. **Freeway on-ramp merge nodes (interior to city):** add any node where
+         at least one incident edge is motorway_link AND at least one incident
+         edge is motorway.  These are the merge points where a vehicle enters the
+         freeway mainline — a true capacity handoff regardless of city boundary
+         position.  Without this step, a freeway running through the city interior
+         (e.g. I-5 through Encinitas) has no reachable exit points, so Dijkstra
+         routes away from the freeway to distant boundary crossings instead.
+
+    Args:
+        G_proj:              Projected OSMnx graph for the city.
+        boundary_proj:       City boundary GeoDataFrame (projected CRS).
+        exit_highway_types:  Set of OSM highway tag values that qualify as
+                             regional network connections.  Defaults to
+                             motorway/motorway_link/trunk/trunk_link/primary/
+                             primary_link.
+
+    Returns:
+        Deduplicated list of OSM node IDs qualifying as exit nodes.
+    """
+    _DEFAULT_EXIT_TYPES = {
+        "motorway", "motorway_link",
+        "trunk",    "trunk_link",
+        "primary",  "primary_link",
+    }
+    if exit_highway_types is None:
+        exit_highway_types = _DEFAULT_EXIT_TYPES
+
     boundary_geom = boundary_proj.unary_union.boundary
     node_data     = [(n, d["x"], d["y"]) for n, d in G_proj.nodes(data=True)]
-    return [
+
+    # Step 1: all nodes near the city boundary
+    boundary_nodes = [
         node_id for node_id, x, y in node_data
         if boundary_geom.distance(Point(x, y)) < 50
     ]
+
+    if not boundary_nodes:
+        return []
+
+    # Step 2: filter to nodes connected to regional-network road types
+    regional_exits = []
+    for node_id in boundary_nodes:
+        # Check every edge incident to this node (in or out)
+        incident_edges = list(G_proj.edges(node_id, data=True)) + \
+                         list(G_proj.in_edges(node_id, data=True))
+        for _, _, data in incident_edges:
+            hw = data.get("highway", "")
+            hw_list = hw if isinstance(hw, list) else [hw]
+            if any(h in exit_highway_types for h in hw_list):
+                regional_exits.append(node_id)
+                break
+
+    if not regional_exits:
+        logger.warning(
+            f"  No boundary nodes on regional-network roads "
+            f"({sorted(exit_highway_types)}) — "
+            f"falling back to all {len(boundary_nodes)} boundary nodes. "
+            f"Consider adding 'secondary' to exit_highway_types in city config."
+        )
+        return boundary_nodes
+
+    # Step 4: freeway on-ramp merge nodes (interior to city).
+    # A merge node is where at least one edge is motorway_link (the on-ramp)
+    # and at least one other edge is motorway (the mainline).  These are valid
+    # capacity handoff points even when far from the city boundary.
+    exit_set = set(regional_exits)
+    onramp_merges = []
+    for node_id in G_proj.nodes():
+        if node_id in exit_set:
+            continue  # already counted
+        incident_edges = list(G_proj.edges(node_id, data=True)) + \
+                         list(G_proj.in_edges(node_id, data=True))
+        hw_types = set()
+        for _, _, data in incident_edges:
+            hw = data.get("highway", "")
+            for h in (hw if isinstance(hw, list) else [hw]):
+                hw_types.add(str(h))
+        if "motorway_link" in hw_types and "motorway" in hw_types:
+            onramp_merges.append(node_id)
+
+    if onramp_merges:
+        logger.info(
+            f"  Freeway on-ramp merge nodes: {len(onramp_merges)} added as "
+            f"interior exit points (motorway_link → motorway handoff)."
+        )
+
+    all_exits = list(exit_set) + onramp_merges
+    logger.info(
+        f"  Exit nodes: {len(regional_exits)} boundary + {len(onramp_merges)} "
+        f"freeway on-ramp = {len(all_exits)} total; "
+        f"types: {sorted(exit_highway_types)}"
+    )
+    return all_exits
 
 
 def _build_evac_osmid_map(G_proj, edge_scores: dict) -> dict:

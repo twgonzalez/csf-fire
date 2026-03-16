@@ -22,7 +22,9 @@ from pathlib import Path
 
 import folium
 import geopandas as gpd
+from folium.plugins import AntPath
 from shapely.geometry import Point, mapping
+from shapely.ops import unary_union
 
 from models.project import Project
 
@@ -269,16 +271,28 @@ def create_demo_map(
     # Per-project Standard 5 data (populated from audits if available)
     proj_ld_data: list[dict] = []
 
-    # Lookup: path_id → path_osmids (for controlling corridor visualization)
-    # Keyed by path_id so each project gets the exact EvacuationPath that was
-    # selected as its controlling path — not just any path sharing the same bottleneck.
-    path_id_to_osmids: dict[str, list[str]] = {
+    # Population-level path lookup (used as fallback for path_id_to_osmids below)
+    _population_path_osmids: dict[str, list[str]] = {
         str(getattr(_ep, "path_id", "")): list(getattr(_ep, "path_osmids", []))
         for _ep in (evacuation_paths or [])
         if getattr(_ep, "path_osmids", [])
     }
 
     for i, project in enumerate(projects):
+        # v3.4: Build path_id → path_osmids from this project's ΔT results.
+        # Project-origin Dijkstra paths carry their own path_osmids in delta_t_results,
+        # so the flow-trace visualization works without the population paths list.
+        # Falls back to population paths lookup for any path_ids not found here.
+        path_id_to_osmids: dict[str, list[str]] = {
+            r["path_id"]: r.get("path_osmids", [])
+            for r in (project.delta_t_results or [])
+            if r.get("path_osmids")
+        }
+        # Merge in population paths for any missing path_ids (backward compat)
+        for pid, osmids in _population_path_osmids.items():
+            if pid not in path_id_to_osmids:
+                path_id_to_osmids[pid] = osmids
+
         tier         = project.determination or "UNKNOWN"
         marker_color = _TIER_MARKER_COLOR.get(tier, "gray")
         route_color  = _TIER_ROUTE_COLOR.get(tier, "#7f7f7f")
@@ -396,29 +410,169 @@ def create_demo_map(
                     },
                 ).add_to(proj_group)
 
-        # ── Controlling evacuation path corridor (dashed) ────────────────────
-        # Draws the full route of the controlling EvacuationPath from the project
-        # area to the bottleneck (and beyond to the city exit). Explains why the
-        # bottleneck ⚠ icon may appear outside the search radius circle.
-        # Renders below serving routes — segments inside the buffer get the solid
-        # serving route overlay on top; segments outside show only the dashed line.
-        if tier != "MINISTERIAL" and ctrl_path_id and ctrl_path_id in path_id_to_osmids:
-            ctrl_path_set = set(path_id_to_osmids[ctrl_path_id])
-            path_mask = roads_wgs84["osmid"].apply(
-                lambda o: _osmid_matches(o, ctrl_path_set)
-            )
-            bn_label = (worst_wildland_route or {}).get("name", "bottleneck") or "bottleneck"
-            corridor_tip = f"Evacuation corridor → {bn_label} (controlling bottleneck)"
-            for _, row in roads_wgs84[path_mask].iterrows():
-                if row.geometry is None or row.geometry.is_empty:
-                    continue
+        # ── Network reachability zone (v3.3) ─────────────────────────────────
+        # Roads reachable from the project's egress via actual road network.
+        # I-5 and other barriers appear as natural gaps — no trans-barrier segments.
+        # Replaces the Euclidean dashed circle as the proximity indicator.
+        reachable_set = _osmid_set(getattr(project, "reachable_network_osmids", []))
+        if reachable_set and "osmid" in roads_wgs84.columns:
+            reach_mask  = roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, reachable_set))
+            reach_roads = roads_wgs84[reach_mask]
+            reach_geoms = [
+                mapping(row.geometry) for _, row in reach_roads.iterrows()
+                if row.geometry is not None and not row.geometry.is_empty
+            ]
+            if reach_geoms:
                 folium.GeoJson(
-                    mapping(row.geometry),
+                    {"type": "FeatureCollection",
+                     "features": [{"type": "Feature", "geometry": g, "properties": {}}
+                                  for g in reach_geoms]},
                     style_function=lambda _, c=route_color: {
-                        "color": c, "weight": 2, "opacity": 0.45, "dashArray": "5 6",
+                        "color": c, "weight": 3, "opacity": 0.22,
                     },
-                    tooltip=corridor_tip,
+                    tooltip=f"{project.project_name} — network reachable zone",
                 ).add_to(proj_group)
+
+        # ── Evacuation flow traces — all serving paths (v3.3) ────────────────
+        # Full route for every serving EvacuationPath, colored by ΔT severity.
+        # Green = within threshold, orange = >70% of threshold, red = exceeded.
+        # Renders below serving-route highlights so the bottleneck stands out.
+        _FLOW_GREEN  = "#2e7d32"
+        _FLOW_ORANGE = "#e65100"
+        _FLOW_RED    = "#b71c1c"
+
+        exit_osmids_drawn: set[str] = set()  # avoid duplicate exit markers
+
+        for dt_result in (project.delta_t_results or []):
+            pid      = str(dt_result.get("path_id", ""))
+            dt_min   = float(dt_result.get("delta_t_minutes", 0))
+            thresh   = float(dt_result.get("threshold_minutes", 6.0)) or 6.0
+            flagged  = dt_result.get("flagged", False)
+            bn_name  = str(dt_result.get("bottleneck_name", "") or "bottleneck")
+            exit_oid = str(dt_result.get("exit_segment_osmid", ""))
+
+            severity = dt_min / thresh
+            if flagged or severity >= 1.0:
+                flow_color, flow_w, flow_op = _FLOW_RED,    3.5, 0.75
+            elif severity >= 0.70:
+                flow_color, flow_w, flow_op = _FLOW_ORANGE, 2.5, 0.65
+            else:
+                flow_color, flow_w, flow_op = _FLOW_GREEN,  2.0, 0.50
+
+            if pid not in path_id_to_osmids:
+                continue
+            path_osmid_set = set(path_id_to_osmids[pid])
+
+            # Prefer the exact WGS84 coordinate chain stored in delta_t_results
+            # (computed from graph node positions in wildland.py — unambiguous).
+            # Fall back to the osmid-chain approach only for legacy paths that
+            # predate path_wgs84_coords storage.
+            _direct_coords = dt_result.get("path_wgs84_coords", [])
+
+            if len(_direct_coords) >= 2:
+                # v3.4+: use exact node coordinates — one AntPath, no gaps,
+                # no osmid-ambiguity (a single way ID can match many road segments).
+                ant_chains: list[list[list[float]]] = [_direct_coords]
+            else:
+                # Legacy fallback: reconstruct from osmid → geometry lookup.
+                path_osmids_ordered = path_id_to_osmids.get(pid, [])
+                path_rows = roads_wgs84[
+                    roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, path_osmid_set))
+                ]
+                osmid_to_seg_geom: dict[str, object] = {}
+                for _, _row in path_rows.iterrows():
+                    _oid = _row.get("osmid")
+                    if _oid is None or _row.geometry is None:
+                        continue
+                    _strs = ([str(o) for o in _oid] if isinstance(_oid, list)
+                             else [str(_oid)])
+                    for _s in _strs:
+                        if _s not in osmid_to_seg_geom:
+                            osmid_to_seg_geom[_s] = _row.geometry
+
+                _GAP_DEG      = 0.0005
+                proj_ref      = Point(project.location_lon, project.location_lat)
+                prev_exit_pt  = proj_ref
+                ant_chains    = []
+                current_chain: list[list[float]] = []
+
+                for _oid_str in path_osmids_ordered:
+                    _sg = osmid_to_seg_geom.get(_oid_str)
+                    if _sg is None or _sg.is_empty:
+                        if len(current_chain) >= 2:
+                            ant_chains.append(current_chain)
+                        current_chain = []
+                        continue
+                    _raw = list(_sg.coords)
+                    if len(_raw) < 2:
+                        continue
+                    _pt_a = Point(_raw[0])
+                    _pt_b = Point(_raw[-1])
+                    _ordered = _raw if prev_exit_pt.distance(_pt_a) <= prev_exit_pt.distance(_pt_b) \
+                               else list(reversed(_raw))
+                    _entry = Point(_ordered[0])
+                    if current_chain:
+                        _last = current_chain[-1]
+                        if math.hypot(_entry.y - _last[0], _entry.x - _last[1]) > _GAP_DEG:
+                            if len(current_chain) >= 2:
+                                ant_chains.append(current_chain)
+                            current_chain = []
+                    for _i, (_lon, _lat) in enumerate(_ordered):
+                        if _i == 0 and current_chain:
+                            _last = current_chain[-1]
+                            if abs(_lat - _last[0]) < 1e-7 and abs(_lon - _last[1]) < 1e-7:
+                                continue
+                        current_chain.append([_lat, _lon])
+                    if _ordered:
+                        prev_exit_pt = Point(_ordered[-1])
+                if len(current_chain) >= 2:
+                    ant_chains.append(current_chain)
+
+            tip = (
+                f"{'⚠ FLAGGED' if flagged else '✓ OK'} — {bn_name} | "
+                f"ΔT {dt_min:.1f} min / {thresh:.1f} min threshold | "
+                f"animated dashes flow project → exit"
+            )
+
+            # One AntPath per connected sub-chain.  Slow animation (2 s flagged,
+            # 3 s ok) so flow direction is easy to read at a glance.
+            _ant_weight = flow_w + 2.0
+            _ant_delay  = 2000 if flagged else 3000
+            for _chain in ant_chains:
+                if len(_chain) >= 2:
+                    AntPath(
+                        locations=_chain,
+                        color=flow_color,
+                        pulse_color="rgba(255,255,255,0.95)",
+                        weight=_ant_weight,
+                        delay=_ant_delay,
+                        dash_array=[10, 18],
+                        tooltip=tip,
+                    ).add_to(proj_group)
+
+            # Exit point marker (triangle flag at city-boundary exit)
+            if exit_oid and exit_oid not in exit_osmids_drawn:
+                exit_mask = roads_wgs84["osmid"].astype(str).str.contains(exit_oid, regex=False)
+                exit_rows = roads_wgs84[exit_mask]
+                if not exit_rows.empty:
+                    exit_geom = exit_rows.iloc[0].geometry
+                    if exit_geom is not None and not exit_geom.is_empty:
+                        try:
+                            exit_pt = exit_geom.interpolate(1.0, normalized=True)
+                        except Exception:
+                            exit_pt = exit_geom.centroid
+                        exit_html = (
+                            '<div style="width:18px;height:18px;line-height:18px;'
+                            'text-align:center;font-size:13px;'
+                            'background:white;border-radius:50%;'
+                            'border:2px solid #1565c0;color:#1565c0;">⚑</div>'
+                        )
+                        folium.Marker(
+                            location=[exit_pt.y, exit_pt.x],
+                            icon=folium.DivIcon(html=exit_html, icon_size=(18, 18), icon_anchor=(9, 9)),
+                            tooltip="City exit point",
+                        ).add_to(proj_group)
+                        exit_osmids_drawn.add(exit_oid)
 
         # Serving routes (wildland — one GeoJson per segment for popup support)
         if serving_set and "osmid" in roads_wgs84.columns:
@@ -487,46 +641,75 @@ def create_demo_map(
                     tooltip=tip,
                 ).add_to(proj_group)
 
-        # ── Controlling bottleneck ⚠ icon (static — always visible when project selected) ──
-        # SVG warning triangle (yellow fill, black stroke) at the midpoint of the
-        # worst-ΔT bottleneck segment. Shown/hidden with the FeatureGroup automatically.
-        # Bug fix: roads osmid column stores list values as strings like "[123, 456]",
-        # so use str.contains() instead of _osmid_matches() for reliable lookup.
-        if (tier != "MINISTERIAL"
-                and ctrl_osmid
-                and "osmid" in roads_wgs84.columns):
-            ctrl_mask = roads_wgs84["osmid"].astype(str).str.contains(
-                ctrl_osmid, regex=False
-            )
-            ctrl_rows = roads_wgs84[ctrl_mask]
-            if not ctrl_rows.empty:
-                ctrl_geom = ctrl_rows.iloc[0].geometry
-                if ctrl_geom is not None and not ctrl_geom.is_empty:
-                    try:
-                        mid = ctrl_geom.interpolate(0.5, normalized=True)
-                    except Exception:
-                        mid = ctrl_geom.centroid
-                    icon_html = (
-                        '<div style="width:22px;height:20px;">'
-                        '<svg viewBox="0 0 22 20" width="22" height="20"'
-                        ' xmlns="http://www.w3.org/2000/svg">'
-                        '<polygon points="11,2 21,19 1,19"'
-                        ' fill="#FFD700" stroke="black" stroke-width="1.5"'
-                        ' stroke-linejoin="round"/>'
-                        '<text x="11" y="16" text-anchor="middle"'
-                        ' font-size="11" font-family="sans-serif"'
-                        ' font-weight="bold" fill="black">!</text>'
-                        '</svg></div>'
-                    )
-                    folium.Marker(
-                        location=[mid.y, mid.x],
-                        icon=folium.DivIcon(
-                            html=icon_html,
-                            icon_size=(22, 20),
-                            icon_anchor=(11, 10),
-                        ),
-                        tooltip="Controlling bottleneck segment",
+        # ── Bottleneck concentric rings — one set per unique flagged bottleneck ──
+        # Three concentric CircleMarkers + filled center dot placed at the midpoint
+        # of each flagged bottleneck road segment.  Fixed pixel radii so the rings
+        # stay the same visual size at any zoom level.  Replaces the single warning
+        # triangle — all constraint surfaces are shown, not just the worst-ΔT path.
+        if tier != "MINISTERIAL" and "osmid" in roads_wgs84.columns:
+            _drawn_bns: set[str] = set()   # deduplicate by bottleneck osmid
+            for _dt_r in (project.delta_t_results or []):
+                if not _dt_r.get("flagged"):
+                    continue
+                _bn_osmid = str(_dt_r.get("bottleneck_osmid", ""))
+                if not _bn_osmid or _bn_osmid in _drawn_bns:
+                    continue
+                _drawn_bns.add(_bn_osmid)
+
+                _dt_min   = float(_dt_r.get("delta_t_minutes", 0))
+                _thresh   = float(_dt_r.get("threshold_minutes", 6.0)) or 6.0
+                _severity = _dt_min / _thresh
+                # Severe (ΔT > 2× threshold) → deep red; otherwise project red/orange
+                if _severity >= 2.0:
+                    _rc = "#7f0000"
+                elif _severity >= 1.0:
+                    _rc = "#b71c1c"
+                else:
+                    _rc = "#e65100"
+
+                # Road midpoint from roads_wgs84 geometry
+                _bn_mask = roads_wgs84["osmid"].astype(str).str.contains(
+                    _bn_osmid, regex=False
+                )
+                _bn_rows = roads_wgs84[_bn_mask]
+                if _bn_rows.empty:
+                    continue
+                _bn_geom = _bn_rows.iloc[0].geometry
+                if _bn_geom is None or _bn_geom.is_empty:
+                    continue
+                try:
+                    _mid = _bn_geom.interpolate(0.5, normalized=True)
+                except Exception:
+                    _mid = _bn_geom.centroid
+
+                _bn_name = str(_dt_r.get("bottleneck_name", "") or "Bottleneck")
+                _bn_tip  = (
+                    f"Bottleneck — {_bn_name} | "
+                    f"ΔT {_dt_min:.1f} min / {_thresh:.1f} min threshold"
+                )
+
+                # Three rings: outer → inner, fading opacity inward → out
+                for _r_px, _op in ((22, 0.25), (14, 0.50), (7, 0.80)):
+                    folium.CircleMarker(
+                        location=[_mid.y, _mid.x],
+                        radius=_r_px,
+                        color=_rc,
+                        weight=1.2,
+                        fill=False,
+                        opacity=_op,
+                        tooltip=_bn_tip,
                     ).add_to(proj_group)
+                # Solid center dot
+                folium.CircleMarker(
+                    location=[_mid.y, _mid.x],
+                    radius=3,
+                    color=_rc,
+                    weight=0,
+                    fill=True,
+                    fill_color=_rc,
+                    fill_opacity=0.90,
+                    tooltip=_bn_tip,
+                ).add_to(proj_group)
 
         # Project marker (wildland group — visible in Scenario A)
         folium.Marker(
@@ -544,6 +727,36 @@ def create_demo_map(
             tooltip=f"{project.project_name} · {tier}",
             icon=folium.Icon(color=marker_color, icon="home", prefix="fa"),
         ).add_to(proj_group)
+
+        # Additional egress point markers — city-planner-defined secondary exits.
+        # Drawn as small circle markers distinct from the primary home pin.
+        for _aep in getattr(project, "additional_egress_points", []):
+            _aep_lat   = float(_aep.get("lat", 0))
+            _aep_lon   = float(_aep.get("lon", 0))
+            _aep_label = _aep.get("label", "Additional egress")
+            _aep_note  = _aep.get("note", "")
+            _aep_tip   = f"{_aep_label}" + (f" — {_aep_note}" if _aep_note else "")
+            # Outer ring + filled centre — visually paired with primary pin color
+            # but smaller and with an "egress-only" visual language.
+            folium.CircleMarker(
+                location=[_aep_lat, _aep_lon],
+                radius=10,
+                color=marker_color,
+                weight=2,
+                fill=False,
+                opacity=0.85,
+                tooltip=_aep_tip,
+            ).add_to(proj_group)
+            folium.CircleMarker(
+                location=[_aep_lat, _aep_lon],
+                radius=4,
+                color=marker_color,
+                weight=0,
+                fill=True,
+                fill_color=marker_color,
+                fill_opacity=0.90,
+                tooltip=_aep_tip,
+            ).add_to(proj_group)
 
         proj_group.add_to(m)
 

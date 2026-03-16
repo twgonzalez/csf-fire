@@ -274,7 +274,10 @@ class EvacuationScenario(ABC):
             results.append({
                 "path_id":                       path_id,
                 "origin_block_group":            getattr(path, "origin_block_group", ""),
+                "exit_segment_osmid":            getattr(path, "exit_segment_osmid", ""),
                 "path_segment_count":            len(getattr(path, "path_osmids", [])),
+                "path_osmids":                   list(getattr(path, "path_osmids", [])),
+                "path_wgs84_coords":             list(getattr(path, "path_wgs84_coords", [])),
                 "bottleneck_osmid":              bn_osmid,
                 "bottleneck_name":               bn_name,
                 "bottleneck_fhsz_zone":          bn_fhsz,
