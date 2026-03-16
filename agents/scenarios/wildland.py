@@ -232,9 +232,10 @@ class WildlandScenario(EvacuationScenario):
                         nearby_osmids.update(oid_strs)
 
                 method_note = (
-                    f"Project-origin Dijkstra (v3.4) — "
-                    f"shortest path from project site to each regional-network "
+                    f"Project-origin Dijkstra (v3.4, travel-time weight) — "
+                    f"fastest path from project site to each regional-network "
                     f"exit node (motorway/trunk/primary at city boundary); "
+                    f"weight=length/speed_limit (seconds) per speed_defaults config; "
                     f"{len(reachable_nodes)} nodes within {radius} mi network zone; "
                     f"respects road barriers (I-5, rail, etc.)"
                 )
@@ -342,9 +343,29 @@ class WildlandScenario(EvacuationScenario):
         if G is not None and nearest_node is not None and exit_nodes:
             G_undir_full = G.to_undirected()
 
-            # ── Pass 1: compute all paths, record length ──────────────────
-            # Collect raw candidates before length-filtering or dedup.
-            # Each candidate: (path_length, exit_node_id, path_osmids, exit_osmid)
+            # Add travel_time_s edge weight for time-optimal Dijkstra.
+            # Evacuation routing is time-critical: a 2-mile freeway (2 min) is
+            # categorically faster than a 2-mile residential street (8 min).
+            # Dijkstra on travel time finds the fastest escape route — the route
+            # a rational evacuee actually takes and the standard traffic engineers
+            # use for evacuation modeling.
+            # Source: speed_defaults in config (mph); converted to m/s for SI.
+            speed_defaults_mph = self.config.get("speed_defaults", {})
+            _MPH_TO_MPS = 0.44704  # exact: 1 mph = 0.44704 m/s
+            for _u, _v, _ed in G_undir_full.edges(data=True):
+                _hw  = _ed.get("highway", "")
+                _hw_str = _hw[0] if isinstance(_hw, list) else str(_hw)
+                _spd_mph = speed_defaults_mph.get(_hw_str, 25)  # default: 25 mph
+                _spd_mps = _spd_mph * _MPH_TO_MPS
+                _len_m   = float(_ed.get("length", 0) or 0)
+                _ed["travel_time_s"] = _len_m / _spd_mps if _spd_mps > 0 else _len_m
+
+            # ── Pass 1: compute all paths, record travel time ─────────────
+            # Collect raw candidates before time-filtering or dedup.
+            # weight="travel_time_s" → Dijkstra finds fastest path, not shortest.
+            # Each candidate: (path_travel_time_s, exit_node_id, path_osmids,
+            #                  exit_osmid, path_length_m)
+            # travel_time_s drives routing and ratio filter; length_m is for logging.
             candidates: list[tuple] = []
 
             for exit_node in exit_nodes:
@@ -353,7 +374,8 @@ class WildlandScenario(EvacuationScenario):
                     continue
                 try:
                     path_nodes = nx.shortest_path(
-                        G_undir_full, nearest_node, exit_node_id, weight="length"
+                        G_undir_full, nearest_node, exit_node_id,
+                        weight="travel_time_s",
                     )
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
                     continue
@@ -361,43 +383,54 @@ class WildlandScenario(EvacuationScenario):
                     continue
 
                 path_osmids_local: list[str] = []
-                path_length = 0.0
+                path_length       = 0.0   # metres — for logging only
+                path_travel_time  = 0.0   # seconds — drives filter + dedup
                 exit_osmid = ""
                 for u, v in zip(path_nodes[:-1], path_nodes[1:]):
                     ed = G.get_edge_data(u, v) or G.get_edge_data(v, u)
                     if ed:
                         for kd in (ed.values() if isinstance(ed, dict) else [ed]):
-                            oid = kd.get("osmid")
+                            oid     = kd.get("osmid")
                             seg_len = float(kd.get("length", 0) or 0)
+                            hw_str  = str(kd.get("highway", ""))
+                            spd_mph = speed_defaults_mph.get(hw_str, 25)
+                            seg_tt  = seg_len / (spd_mph * _MPH_TO_MPS) if spd_mph > 0 else seg_len
                             if oid:
                                 oid_str = str(oid[0]) if isinstance(oid, list) else str(oid)
                                 path_osmids_local.append(oid_str)
-                                path_length += seg_len
+                                path_length      += seg_len
+                                path_travel_time += seg_tt
                                 break
                     if v == exit_node_id or u == exit_node_id:
                         exit_osmid = path_osmids_local[-1] if path_osmids_local else ""
 
-                if path_osmids_local and path_length > 0:
+                if path_osmids_local and path_travel_time > 0:
                     candidates.append(
-                        (path_length, exit_node_id, path_osmids_local, exit_osmid)
+                        (path_travel_time, exit_node_id, path_osmids_local,
+                         exit_osmid, path_length)
                     )
 
-            # ── Pass 2: filter by distance ratio, then dedup by bottleneck ─
-            # Route-choice bound: include exits within max_path_ratio × nearest exit.
+            # ── Pass 2: filter by travel-time ratio, then dedup by bottleneck
+            # Route-choice bound: include exits reachable within max_path_ratio ×
+            # fastest-exit travel time.  A rational evacuee who can reach safety in
+            # T minutes will never take a route that takes > 2T minutes when a
+            # shorter alternative exists.  Using travel time (not distance) correctly
+            # accounts for road class: a 2-mile freeway is faster than a 1-mile
+            # residential street and should be preferred.
             if candidates:
-                min_path_len = min(c[0] for c in candidates)
-                max_allowed  = min_path_len * max_path_ratio
-                filtered     = [c for c in candidates if c[0] <= max_allowed]
-                excluded     = len(candidates) - len(filtered)
+                min_travel_time = min(c[0] for c in candidates)   # seconds
+                max_allowed     = min_travel_time * max_path_ratio
+                filtered        = [c for c in candidates if c[0] <= max_allowed]
+                excluded        = len(candidates) - len(filtered)
                 if excluded:
                     logger.info(
                         f"  Path filter: {excluded} exit(s) excluded "
-                        f"(>{max_path_ratio:.1f}× nearest-exit distance of "
-                        f"{min_path_len:.0f} m); {len(filtered)} remain"
+                        f"(>{max_path_ratio:.1f}× fastest-exit travel time of "
+                        f"{min_travel_time/60:.1f} min); {len(filtered)} remain"
                     )
 
-                seen_bottlenecks: dict[str, float] = {}  # osmid → shortest path length
-                for path_length, exit_node_id, path_osmids_local, exit_osmid in filtered:
+                seen_bottlenecks: dict[str, float] = {}  # osmid → fastest travel time (s)
+                for path_travel_time, exit_node_id, path_osmids_local, exit_osmid, path_length in filtered:
                     bottleneck_osmid = min(
                         path_osmids_local,
                         key=lambda o: osmid_to_eff_cap.get(o, 9999),
@@ -407,11 +440,14 @@ class WildlandScenario(EvacuationScenario):
                     if eff_cap <= 0:
                         continue
 
-                    # Dedup: keep only the shortest path to each unique bottleneck
-                    prior_len = seen_bottlenecks.get(bottleneck_osmid)
-                    if prior_len is not None and path_length >= prior_len:
+                    # Dedup: keep only the fastest-travel-time path to each unique bottleneck.
+                    # Travel time (not distance) is the dedup key because Dijkstra now routes
+                    # on time — two paths to the same bottleneck may have different lengths
+                    # but the faster one is the correct evacuation route to preserve.
+                    prior_tt = seen_bottlenecks.get(bottleneck_osmid)
+                    if prior_tt is not None and path_travel_time >= prior_tt:
                         continue
-                    seen_bottlenecks[bottleneck_osmid] = path_length
+                    seen_bottlenecks[bottleneck_osmid] = path_travel_time
 
                     path_id = f"proj_{nearest_node}_{exit_node_id}"
                     evac_path = EvacuationPath(
@@ -433,9 +469,9 @@ class WildlandScenario(EvacuationScenario):
                     project_paths.append(evac_path)
 
             logger.info(
-                f"  Project-origin Dijkstra: {len(project_paths)} unique-bottleneck paths "
-                f"for {project.project_name} "
-                f"(ratio ≤{max_path_ratio:.1f}× nearest exit, from {len(exit_nodes)} exits)"
+                f"  Project-origin Dijkstra (travel-time weight): {len(project_paths)} "
+                f"unique-bottleneck paths for {project.project_name} "
+                f"(ratio ≤{max_path_ratio:.1f}× fastest exit, from {len(exit_nodes)} exits)"
             )
 
         if project_paths:
