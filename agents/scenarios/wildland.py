@@ -404,7 +404,7 @@ class WildlandScenario(EvacuationScenario):
                     # auto-snap lands on a freeway or unmapped road.
                     _override_id = _aep.get("additional_egress_node_id")
                     if _override_id is not None:
-                        _aep_node = str(_override_id)
+                        _aep_node = int(_override_id)   # graph node IDs are int
                         logger.info(
                             f"  Additional egress {_aei} "
                             f"({_aep.get('label', 'unlabeled')!r}): "
