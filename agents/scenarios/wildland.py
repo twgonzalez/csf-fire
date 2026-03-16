@@ -36,6 +36,7 @@ Three-tier output:
   MINISTERIAL WITH STANDARD CONDITIONS — size threshold met AND ΔT within threshold on all paths
   MINISTERIAL             — below size threshold
 """
+import json
 import logging
 from pathlib import Path
 
@@ -185,10 +186,24 @@ class WildlandScenario(EvacuationScenario):
         radius_meters = radius * 1609.344
 
         # ------------------------------------------------------------------
-        # v3.3: Network-distance proximity — respects road barriers (e.g. I-5)
-        # Falls back to Euclidean buffer if graph is unavailable.
+        # v3.4: Project-origin Dijkstra routing
+        # Compute the shortest path from this project's driveway to every city
+        # exit node.  Each computed path is, by construction, the optimal route
+        # this project's residents would take to safety — no upstream-entry check
+        # needed because the path always starts at the project.
+        #
+        # Also walk the 0.5-mi reachable network for the visualization overlay
+        # (reachable_osmids), which shows what roads are within reach of the
+        # project regardless of exit direction.
+        #
+        # Falls back to population-path upstream-entry filter if graph or exit
+        # nodes are unavailable (pre-v3.4 data or analysis not yet re-run).
         # ------------------------------------------------------------------
         graph_path = context.get("graph_path")
+        G = None  # loaded projected graph (reused for reachability + routing)
+        nearest_node = None
+        proj_x = project_pt.geometry.iloc[0].x
+        proj_y = project_pt.geometry.iloc[0].y
         nearby_osmids: set[str] = set()
         reachable_osmids: set[str] = set()  # full reachable network (for viz)
         method_note = ""
@@ -196,19 +211,16 @@ class WildlandScenario(EvacuationScenario):
         if graph_path and Path(graph_path).exists():
             try:
                 G = ox.load_graphml(graph_path)
-                proj_x = project_pt.geometry.iloc[0].x
-                proj_y = project_pt.geometry.iloc[0].y
                 nearest_node = ox.distance.nearest_nodes(G, proj_x, proj_y)
 
-                # Walk the network from the project's nearest node
+                # Walk the network from the project's nearest node up to radius_meters.
+                # Used for the reachable-zone visualization layer on the map.
                 G_undir = G.to_undirected()
                 reachable = nx.single_source_dijkstra_path_length(
                     G_undir, nearest_node, cutoff=radius_meters, weight="length"
                 )
                 reachable_nodes = set(reachable.keys())
 
-                # Collect edge osmids: full reachable set (either endpoint reachable)
-                # and strict set (both endpoints reachable — used for path filtering)
                 for u, v, data in G.edges(data=True):
                     oid = data.get("osmid")
                     if not oid:
@@ -220,8 +232,9 @@ class WildlandScenario(EvacuationScenario):
                         nearby_osmids.update(oid_strs)
 
                 method_note = (
-                    f"Network-distance graph traversal (v3.3) — "
-                    f"{len(reachable_nodes)} nodes reachable within {radius} mi; "
+                    f"Project-origin Dijkstra (v3.4) — "
+                    f"shortest path from project site to each city exit node; "
+                    f"{len(reachable_nodes)} nodes within {radius} mi network zone; "
                     f"respects road barriers (I-5, rail, etc.)"
                 )
                 logger.info(
@@ -229,11 +242,12 @@ class WildlandScenario(EvacuationScenario):
                     f"{len(nearby_osmids)} edge osmids for {project.project_name}"
                 )
             except Exception as e:
-                logger.warning(f"  Graph traversal failed ({e}) — falling back to Euclidean buffer")
-                graph_path = None  # trigger fallback below
+                logger.warning(f"  Graph load failed ({e}) — falling back to population paths")
+                G = None
+                nearest_node = None
 
-        if not graph_path or not Path(str(graph_path)).exists():
-            # Euclidean buffer fallback (pre-v3.3 or graph unavailable)
+        if not G:
+            # Euclidean buffer fallback (graph unavailable or analysis not yet re-run)
             roads_proj = roads_gdf.to_crs(analysis_crs)
             buffer     = project_pt.geometry.iloc[0].buffer(radius_meters)
             if "is_evacuation_route" not in roads_proj.columns:
@@ -249,38 +263,185 @@ class WildlandScenario(EvacuationScenario):
                 else:
                     nearby_osmids.add(str(osmid_val))
                     reachable_osmids.add(str(osmid_val))
-            method_note = "Euclidean buffer (graph unavailable — pre-v3.3 fallback)"
+            method_note = "Euclidean buffer (graph unavailable — pre-v3.4 fallback)"
 
-        # Update project display fields
-        project.serving_route_ids      = list(nearby_osmids)
+        # Update project display fields (reachable zone for map viz)
+        project.serving_route_ids       = list(nearby_osmids)
         project.reachable_network_osmids = list(reachable_osmids)
-        project.search_radius_miles    = radius
+        project.search_radius_miles     = radius
 
-        # Filter EvacuationPaths: project must be able to ENTER the path upstream of the
-        # bottleneck. A path is relevant only if at least one segment between the path
-        # origin and the bottleneck (inclusive) is within the project's reachable network.
-        # This prevents false positives where the bottleneck is reachable but the project
-        # enters the path DOWNSTREAM of the bottleneck (e.g. Quail Meadows / Ecke Ranch Rd).
+        # ------------------------------------------------------------------
+        # Build osmid → capacity lookup from roads_gdf.
+        # Used by project-origin Dijkstra to identify bottlenecks.
+        # ------------------------------------------------------------------
+        _ZONE_TO_HAZ_CLASS = {"vhfhsz": 3, "high_fhsz": 2, "moderate_fhsz": 1, "non_fhsz": 0}
+        osmid_to_eff_cap   = {}
+        osmid_to_fhsz      = {}
+        osmid_to_rtype     = {}
+        osmid_to_hcm       = {}
+        osmid_to_deg       = {}
+        osmid_to_name      = {}
+        osmid_to_lanes     = {}
+        osmid_to_speed     = {}
+        osmid_to_haz_class = {}
+        for _, row in roads_gdf.iterrows():
+            oid = row.get("osmid")
+            if oid is None:
+                continue
+            eff = float(row.get("effective_capacity_vph", row.get("capacity_vph", 1000.0)))
+            fz  = str(row.get("fhsz_zone", "non_fhsz"))
+            rt  = str(row.get("road_type", "two_lane"))
+            hcm = float(row.get("capacity_vph", 0.0))
+            dg  = float(row.get("hazard_degradation", 1.0))
+            nm  = str(row.get("name", ""))
+            lc  = int(row.get("lane_count", 0) or 0)
+            sp  = int(row.get("speed_limit", 0) or 0)
+            hc  = _ZONE_TO_HAZ_CLASS.get(fz, 0)
+            for o in (oid if isinstance(oid, list) else [oid]):
+                key = str(o)
+                osmid_to_eff_cap[key]   = max(osmid_to_eff_cap.get(key, 0), eff)
+                osmid_to_fhsz[key]      = fz
+                osmid_to_rtype[key]     = rt
+                osmid_to_hcm[key]       = hcm
+                osmid_to_deg[key]       = dg
+                osmid_to_name[key]      = nm
+                osmid_to_lanes[key]     = lc
+                osmid_to_speed[key]     = sp
+                osmid_to_haz_class[key] = hc
+
+        # ------------------------------------------------------------------
+        # v3.4: Compute project-origin paths via Dijkstra to each exit node.
+        # Deduplication: keep the shortest-distance path to each unique
+        # bottleneck segment.  This prevents the same bottleneck from
+        # appearing dozens of times (once per nearby exit node) while
+        # preserving distinct constraints on different corridors.
+        # ------------------------------------------------------------------
         all_evac_paths: list = context.get("evacuation_paths", [])
-        serving_paths: list[EvacuationPath] = [
-            p for p in all_evac_paths
-            if _is_upstream_match(
-                getattr(p, "path_osmids", []),
-                str(getattr(p, "bottleneck_osmid", "")),
-                reachable_osmids,
-            )
-        ]
-
+        project_paths: list[EvacuationPath] = []
         fallback_used = False
-        if not serving_paths and all_evac_paths:
-            serving_paths = list(all_evac_paths)
-            fallback_used = True
-            logger.warning(
-                f"  No paths matched network proximity for "
-                f"({lat:.4f}, {lon:.4f}) — using all {len(all_evac_paths)} paths (conservative)"
+
+        exit_nodes_path = Path(str(graph_path)).parent / "exit_nodes.json" if graph_path else None
+        exit_nodes: list = []
+        if exit_nodes_path and exit_nodes_path.exists():
+            try:
+                exit_nodes = json.loads(exit_nodes_path.read_text())
+            except Exception as e:
+                logger.warning(f"  Could not load exit_nodes.json ({e})")
+
+        if G is not None and nearest_node is not None and exit_nodes:
+            G_undir_full = G.to_undirected()
+            seen_bottlenecks: dict[str, float] = {}  # osmid → shortest path length so far
+
+            for exit_node in exit_nodes:
+                exit_node_id = int(exit_node)
+                if exit_node_id == nearest_node:
+                    continue
+                try:
+                    path_nodes = nx.shortest_path(
+                        G_undir_full, nearest_node, exit_node_id, weight="length"
+                    )
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    continue
+                if len(path_nodes) < 2:
+                    continue
+
+                path_osmids_local: list[str] = []
+                path_length = 0.0
+                exit_osmid = ""
+                for u, v in zip(path_nodes[:-1], path_nodes[1:]):
+                    ed = G.get_edge_data(u, v) or G.get_edge_data(v, u)
+                    if ed:
+                        for kd in (ed.values() if isinstance(ed, dict) else [ed]):
+                            oid = kd.get("osmid")
+                            seg_len = float(kd.get("length", 0) or 0)
+                            if oid:
+                                oid_str = str(oid[0]) if isinstance(oid, list) else str(oid)
+                                path_osmids_local.append(oid_str)
+                                path_length += seg_len
+                                break
+                    if v == exit_node_id or u == exit_node_id:
+                        exit_osmid = path_osmids_local[-1] if path_osmids_local else ""
+
+                if not path_osmids_local:
+                    continue
+
+                bottleneck_osmid = min(
+                    path_osmids_local,
+                    key=lambda o: osmid_to_eff_cap.get(o, 9999),
+                    default=path_osmids_local[0],
+                )
+                eff_cap = osmid_to_eff_cap.get(bottleneck_osmid, 0.0)
+                if eff_cap <= 0:
+                    continue
+
+                # Dedup: keep only the shortest path to each unique bottleneck
+                prior_len = seen_bottlenecks.get(bottleneck_osmid)
+                if prior_len is not None and path_length >= prior_len:
+                    continue
+                seen_bottlenecks[bottleneck_osmid] = path_length
+
+                path_id = f"proj_{nearest_node}_{exit_node_id}"
+                evac_path = EvacuationPath(
+                    path_id=path_id,
+                    origin_block_group="project_origin",
+                    exit_segment_osmid=exit_osmid,
+                    bottleneck_osmid=bottleneck_osmid,
+                    bottleneck_name=osmid_to_name.get(bottleneck_osmid, ""),
+                    bottleneck_fhsz_zone=osmid_to_fhsz.get(bottleneck_osmid, "non_fhsz"),
+                    bottleneck_road_type=osmid_to_rtype.get(bottleneck_osmid, "two_lane"),
+                    bottleneck_hcm_capacity_vph=osmid_to_hcm.get(bottleneck_osmid, eff_cap),
+                    bottleneck_hazard_degradation=osmid_to_deg.get(bottleneck_osmid, 1.0),
+                    bottleneck_effective_capacity_vph=eff_cap,
+                    bottleneck_lane_count=osmid_to_lanes.get(bottleneck_osmid, 0),
+                    bottleneck_speed_limit=osmid_to_speed.get(bottleneck_osmid, 0),
+                    bottleneck_haz_class=osmid_to_haz_class.get(bottleneck_osmid, 0),
+                    path_osmids=path_osmids_local,
+                )
+                project_paths.append(evac_path)
+
+            logger.info(
+                f"  Project-origin Dijkstra: {len(project_paths)} unique-bottleneck paths "
+                f"for {project.project_name} (from {len(exit_nodes)} exit nodes)"
             )
 
-        # Build serving_routes list from roads_gdf for audit trail
+        if project_paths:
+            serving_paths = project_paths
+        else:
+            # Fallback to population paths with upstream-entry filter
+            serving_paths = [
+                p for p in all_evac_paths
+                if _is_upstream_match(
+                    getattr(p, "path_osmids", []),
+                    str(getattr(p, "bottleneck_osmid", "")),
+                    reachable_osmids,
+                )
+            ]
+            if not serving_paths and all_evac_paths:
+                serving_paths = list(all_evac_paths)
+                fallback_used = True
+                logger.warning(
+                    f"  No project-origin paths or population paths matched for "
+                    f"({lat:.4f}, {lon:.4f}) — using all {len(all_evac_paths)} paths (conservative)"
+                )
+            elif not project_paths:
+                fallback_used = True
+                logger.warning(
+                    f"  Graph/exit nodes unavailable — using population-path upstream-entry filter "
+                    f"({len(serving_paths)} paths) for {project.project_name}"
+                )
+
+        # Build serving_routes list from roads_gdf for audit trail.
+        # For v3.4 project-origin paths, show the union of all computed path osmids
+        # (the actual segments the project would traverse to exits).
+        # For fallback cases, show the nearby_osmids proximity zone.
+        if project_paths:
+            path_osmids_union: set[str] = set()
+            for p in project_paths:
+                path_osmids_union.update(str(o) for o in getattr(p, "path_osmids", []))
+            audit_osmids = path_osmids_union
+        else:
+            audit_osmids = nearby_osmids
+
         roads_wgs84 = roads_gdf if roads_gdf.crs and roads_gdf.crs.to_epsg() == 4326 \
                       else roads_gdf.to_crs("EPSG:4326")
         serving_route_details = []
@@ -288,7 +449,7 @@ class WildlandScenario(EvacuationScenario):
             osmid_val = row.get("osmid")
             osmid_strs = [str(osmid_val)] if not isinstance(osmid_val, list) \
                          else [str(o) for o in osmid_val]
-            if any(s in nearby_osmids for s in osmid_strs):
+            if any(s in audit_osmids for s in osmid_strs):
                 serving_route_details.append({
                     "osmid":                  str(osmid_val),
                     "name":                   row.get("name", ""),

@@ -504,6 +504,12 @@ def _identify_evacuation_routes(
         logger.warning("  No exit nodes found — skipping route identification.")
         return roads_gdf, []
 
+    # Persist exit nodes for project-origin Dijkstra routing (v3.4)
+    if data_dir is not None:
+        exit_nodes_path = Path(data_dir) / "exit_nodes.json"
+        exit_nodes_path.write_text(json.dumps(exits))
+        logger.info(f"  Saved {len(exits)} exit nodes → {exit_nodes_path}")
+
     VIRTUAL_SINK = -999999
     G_undir.add_node(VIRTUAL_SINK)
     for exit_node in exits:
