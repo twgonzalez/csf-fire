@@ -37,8 +37,11 @@ Three-tier output:
   MINISTERIAL             — below size threshold
 """
 import logging
+from pathlib import Path
 
 import geopandas as gpd
+import networkx as nx
+import osmnx as ox
 from shapely.geometry import Point
 
 from models.project import Project
@@ -179,37 +182,82 @@ class WildlandScenario(EvacuationScenario):
             {"geometry": [Point(lon, lat)]}, crs="EPSG:4326"
         ).to_crs(analysis_crs)
 
-        roads_proj    = roads_gdf.to_crs(analysis_crs)
         radius_meters = radius * 1609.344
-        buffer        = project_pt.geometry.iloc[0].buffer(radius_meters)
 
-        # Find nearby evacuation route segments
-        if "is_evacuation_route" not in roads_proj.columns:
-            evac_nearby = roads_proj[roads_proj.geometry.intersects(buffer)]
-        else:
-            evac_only   = roads_proj[roads_proj["is_evacuation_route"] == True]
-            evac_nearby = evac_only[evac_only.geometry.intersects(buffer)]
-
-        # Build set of nearby osmids (handle list-type osmid columns)
+        # ------------------------------------------------------------------
+        # v3.3: Network-distance proximity — respects road barriers (e.g. I-5)
+        # Falls back to Euclidean buffer if graph is unavailable.
+        # ------------------------------------------------------------------
+        graph_path = context.get("graph_path")
         nearby_osmids: set[str] = set()
-        for osmid_val in evac_nearby["osmid"].tolist():
-            if isinstance(osmid_val, list):
-                for o in osmid_val:
-                    nearby_osmids.add(str(o))
+        reachable_osmids: set[str] = set()  # full reachable network (for viz)
+        method_note = ""
+
+        if graph_path and Path(graph_path).exists():
+            try:
+                G = ox.load_graphml(graph_path)
+                proj_x = project_pt.geometry.iloc[0].x
+                proj_y = project_pt.geometry.iloc[0].y
+                nearest_node = ox.distance.nearest_nodes(G, proj_x, proj_y)
+
+                # Walk the network from the project's nearest node
+                G_undir = G.to_undirected()
+                reachable = nx.single_source_dijkstra_path_length(
+                    G_undir, nearest_node, cutoff=radius_meters, weight="length"
+                )
+                reachable_nodes = set(reachable.keys())
+
+                # Collect edge osmids: full reachable set (either endpoint reachable)
+                # and strict set (both endpoints reachable — used for path filtering)
+                for u, v, data in G.edges(data=True):
+                    oid = data.get("osmid")
+                    if not oid:
+                        continue
+                    oid_strs = [str(o) for o in oid] if isinstance(oid, list) else [str(oid)]
+                    if u in reachable_nodes or v in reachable_nodes:
+                        reachable_osmids.update(oid_strs)
+                    if u in reachable_nodes and v in reachable_nodes:
+                        nearby_osmids.update(oid_strs)
+
+                method_note = (
+                    f"Network-distance graph traversal (v3.3) — "
+                    f"{len(reachable_nodes)} nodes reachable within {radius} mi; "
+                    f"respects road barriers (I-5, rail, etc.)"
+                )
+                logger.info(
+                    f"  Network proximity: {len(reachable_nodes)} reachable nodes, "
+                    f"{len(nearby_osmids)} edge osmids for {project.project_name}"
+                )
+            except Exception as e:
+                logger.warning(f"  Graph traversal failed ({e}) — falling back to Euclidean buffer")
+                graph_path = None  # trigger fallback below
+
+        if not graph_path or not Path(str(graph_path)).exists():
+            # Euclidean buffer fallback (pre-v3.3 or graph unavailable)
+            roads_proj = roads_gdf.to_crs(analysis_crs)
+            buffer     = project_pt.geometry.iloc[0].buffer(radius_meters)
+            if "is_evacuation_route" not in roads_proj.columns:
+                evac_nearby = roads_proj[roads_proj.geometry.intersects(buffer)]
             else:
-                nearby_osmids.add(str(osmid_val))
+                evac_only   = roads_proj[roads_proj["is_evacuation_route"] == True]
+                evac_nearby = evac_only[evac_only.geometry.intersects(buffer)]
+            for osmid_val in evac_nearby["osmid"].tolist():
+                if isinstance(osmid_val, list):
+                    for o in osmid_val:
+                        nearby_osmids.add(str(o))
+                        reachable_osmids.add(str(o))
+                else:
+                    nearby_osmids.add(str(osmid_val))
+                    reachable_osmids.add(str(osmid_val))
+            method_note = "Euclidean buffer (graph unavailable — pre-v3.3 fallback)"
 
         # Update project display fields
-        project.serving_route_ids   = list(nearby_osmids)
-        project.search_radius_miles = radius
+        project.serving_route_ids      = list(nearby_osmids)
+        project.reachable_network_osmids = list(reachable_osmids)
+        project.search_radius_miles    = radius
 
-        # Filter EvacuationPaths from context by proximity of bottleneck only.
-        # Exit proximity is intentionally excluded: a path's city-boundary exit can be
-        # coincidentally near the project even when the path originates from a distant
-        # block group traveling in the wrong direction (e.g., flatland block group whose
-        # path exits at a hills boundary near a hills project). The bottleneck is the
-        # capacity constraint the project's traffic must pass through; it must be in the
-        # project's road shed for the path to be meaningfully "serving" the project.
+        # Filter EvacuationPaths: bottleneck must be within network-reachable set.
+        # Network distance ensures trans-barrier paths (e.g. across I-5) are excluded.
         all_evac_paths: list = context.get("evacuation_paths", [])
         serving_paths: list[EvacuationPath] = [
             p for p in all_evac_paths
@@ -218,30 +266,24 @@ class WildlandScenario(EvacuationScenario):
 
         fallback_used = False
         if not serving_paths and all_evac_paths:
-            # Conservative: if no proximity match, evaluate against all paths
             serving_paths = list(all_evac_paths)
             fallback_used = True
             logger.warning(
-                f"  No evacuation paths matched proximity filter for "
+                f"  No paths matched network proximity for "
                 f"({lat:.4f}, {lon:.4f}) — using all {len(all_evac_paths)} paths (conservative)"
             )
 
-        detail = {
-            "project_lat":          lat,
-            "project_lon":          lon,
-            "radius_miles":         radius,
-            "radius_meters":        round(radius_meters, 1),
-            "method":               (
-                "Buffer project location + filter EvacuationPath objects "
-                "by bottleneck/exit osmid proximity"
-            ),
-            "serving_route_count":  len(evac_nearby),
-            "serving_paths_count":  len(serving_paths),
-            "fallback_all_paths":   fallback_used,
-            "triggers_standard":    len(serving_paths) > 0,
-            "serving_routes": [
-                {
-                    "osmid":                  str(row["osmid"]),
+        # Build serving_routes list from roads_gdf for audit trail
+        roads_wgs84 = roads_gdf if roads_gdf.crs and roads_gdf.crs.to_epsg() == 4326 \
+                      else roads_gdf.to_crs("EPSG:4326")
+        serving_route_details = []
+        for _, row in roads_wgs84.iterrows():
+            osmid_val = row.get("osmid")
+            osmid_strs = [str(osmid_val)] if not isinstance(osmid_val, list) \
+                         else [str(o) for o in osmid_val]
+            if any(s in nearby_osmids for s in osmid_strs):
+                serving_route_details.append({
+                    "osmid":                  str(osmid_val),
                     "name":                   row.get("name", ""),
                     "fhsz_zone":              row.get("fhsz_zone", "non_fhsz"),
                     "hazard_degradation":     row.get("hazard_degradation", 1.0),
@@ -250,9 +292,19 @@ class WildlandScenario(EvacuationScenario):
                     ),
                     "vc_ratio":               round(row.get("vc_ratio", 0), 4),
                     "los":                    row.get("los", ""),
-                }
-                for _, row in evac_nearby.iterrows()
-            ],
+                })
+
+        detail = {
+            "project_lat":          lat,
+            "project_lon":          lon,
+            "radius_miles":         radius,
+            "radius_meters":        round(radius_meters, 1),
+            "method":               method_note,
+            "serving_route_count":  len(serving_route_details),
+            "serving_paths_count":  len(serving_paths),
+            "fallback_all_paths":   fallback_used,
+            "triggers_standard":    len(serving_paths) > 0,
+            "serving_routes":       serving_route_details,
         }
         return serving_paths, detail
 

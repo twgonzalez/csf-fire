@@ -23,6 +23,7 @@ from pathlib import Path
 import folium
 import geopandas as gpd
 from shapely.geometry import Point, mapping
+from shapely.ops import unary_union
 
 from models.project import Project
 
@@ -396,29 +397,131 @@ def create_demo_map(
                     },
                 ).add_to(proj_group)
 
-        # ── Controlling evacuation path corridor (dashed) ────────────────────
-        # Draws the full route of the controlling EvacuationPath from the project
-        # area to the bottleneck (and beyond to the city exit). Explains why the
-        # bottleneck ⚠ icon may appear outside the search radius circle.
-        # Renders below serving routes — segments inside the buffer get the solid
-        # serving route overlay on top; segments outside show only the dashed line.
-        if tier != "MINISTERIAL" and ctrl_path_id and ctrl_path_id in path_id_to_osmids:
-            ctrl_path_set = set(path_id_to_osmids[ctrl_path_id])
-            path_mask = roads_wgs84["osmid"].apply(
-                lambda o: _osmid_matches(o, ctrl_path_set)
-            )
-            bn_label = (worst_wildland_route or {}).get("name", "bottleneck") or "bottleneck"
-            corridor_tip = f"Evacuation corridor → {bn_label} (controlling bottleneck)"
-            for _, row in roads_wgs84[path_mask].iterrows():
-                if row.geometry is None or row.geometry.is_empty:
-                    continue
+        # ── Network reachability zone (v3.3) ─────────────────────────────────
+        # Roads reachable from the project's egress via actual road network.
+        # I-5 and other barriers appear as natural gaps — no trans-barrier segments.
+        # Replaces the Euclidean dashed circle as the proximity indicator.
+        reachable_set = _osmid_set(getattr(project, "reachable_network_osmids", []))
+        if reachable_set and "osmid" in roads_wgs84.columns:
+            reach_mask  = roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, reachable_set))
+            reach_roads = roads_wgs84[reach_mask]
+            reach_geoms = [
+                mapping(row.geometry) for _, row in reach_roads.iterrows()
+                if row.geometry is not None and not row.geometry.is_empty
+            ]
+            if reach_geoms:
                 folium.GeoJson(
-                    mapping(row.geometry),
+                    {"type": "FeatureCollection",
+                     "features": [{"type": "Feature", "geometry": g, "properties": {}}
+                                  for g in reach_geoms]},
                     style_function=lambda _, c=route_color: {
-                        "color": c, "weight": 2, "opacity": 0.45, "dashArray": "5 6",
+                        "color": c, "weight": 3, "opacity": 0.22,
                     },
-                    tooltip=corridor_tip,
+                    tooltip=f"{project.project_name} — network reachable zone",
                 ).add_to(proj_group)
+
+        # ── Evacuation flow traces — all serving paths (v3.3) ────────────────
+        # Full route for every serving EvacuationPath, colored by ΔT severity.
+        # Green = within threshold, orange = >70% of threshold, red = exceeded.
+        # Renders below serving-route highlights so the bottleneck stands out.
+        _FLOW_GREEN  = "#2e7d32"
+        _FLOW_ORANGE = "#e65100"
+        _FLOW_RED    = "#b71c1c"
+
+        exit_osmids_drawn: set[str] = set()  # avoid duplicate exit markers
+
+        for dt_result in (project.delta_t_results or []):
+            pid      = str(dt_result.get("path_id", ""))
+            dt_min   = float(dt_result.get("delta_t_minutes", 0))
+            thresh   = float(dt_result.get("threshold_minutes", 6.0)) or 6.0
+            flagged  = dt_result.get("flagged", False)
+            bn_name  = str(dt_result.get("bottleneck_name", "") or "bottleneck")
+            exit_oid = str(dt_result.get("exit_segment_osmid", ""))
+
+            severity = dt_min / thresh
+            if flagged or severity >= 1.0:
+                flow_color, flow_w, flow_op = _FLOW_RED,    3.5, 0.75
+            elif severity >= 0.70:
+                flow_color, flow_w, flow_op = _FLOW_ORANGE, 2.5, 0.65
+            else:
+                flow_color, flow_w, flow_op = _FLOW_GREEN,  2.0, 0.50
+
+            if pid not in path_id_to_osmids:
+                continue
+            path_osmid_set = set(path_id_to_osmids[pid])
+
+            # Collect matching road geometries (preserve for midpoint arrow calc)
+            path_rows = roads_wgs84[
+                roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, path_osmid_set))
+            ]
+            path_geoms = [
+                row.geometry for _, row in path_rows.iterrows()
+                if row.geometry is not None and not row.geometry.is_empty
+            ]
+            if not path_geoms:
+                continue
+
+            tip = (
+                f"{'⚠ FLAGGED' if flagged else '✓ OK'} — {bn_name} | "
+                f"ΔT {dt_min:.1f} min / {thresh:.1f} min threshold"
+            )
+            for geom in path_geoms:
+                folium.GeoJson(
+                    mapping(geom),
+                    style_function=lambda _, c=flow_color, w=flow_w, o=flow_op: {
+                        "color": c, "weight": w, "opacity": o,
+                    },
+                    tooltip=tip,
+                ).add_to(proj_group)
+
+            # Direction arrow: SVG at the geometric midpoint of all path segments
+            try:
+                merged = unary_union(path_geoms)
+                mid_pt = merged.interpolate(0.5, normalized=True)
+                # Estimate direction: compare point at 45% vs 55% of total length
+                p_before = merged.interpolate(0.44, normalized=True)
+                p_after  = merged.interpolate(0.56, normalized=True)
+                dx = p_after.x - p_before.x
+                dy = p_after.y - p_before.y
+                # Convert to bearing (degrees from north, clockwise)
+                bearing = (math.degrees(math.atan2(dx, dy)) + 360) % 360
+                arrow_html = (
+                    f'<div style="transform:rotate({bearing:.0f}deg);'
+                    f'width:16px;height:16px;line-height:16px;text-align:center;'
+                    f'font-size:14px;color:{flow_color};'
+                    f'text-shadow:0 0 3px white,0 0 3px white;">&#x25B2;</div>'
+                )
+                folium.Marker(
+                    location=[mid_pt.y, mid_pt.x],
+                    icon=folium.DivIcon(html=arrow_html, icon_size=(16, 16), icon_anchor=(8, 8)),
+                    tooltip=tip,
+                ).add_to(proj_group)
+            except Exception:
+                pass  # direction arrow is best-effort
+
+            # Exit point marker (triangle flag at city-boundary exit)
+            if exit_oid and exit_oid not in exit_osmids_drawn:
+                exit_mask = roads_wgs84["osmid"].astype(str).str.contains(exit_oid, regex=False)
+                exit_rows = roads_wgs84[exit_mask]
+                if not exit_rows.empty:
+                    exit_geom = exit_rows.iloc[0].geometry
+                    if exit_geom is not None and not exit_geom.is_empty:
+                        try:
+                            exit_pt = exit_geom.interpolate(1.0, normalized=True)
+                        except Exception:
+                            exit_pt = exit_geom.centroid
+                        exit_html = (
+                            '<div style="width:18px;height:18px;line-height:18px;'
+                            'text-align:center;font-size:13px;'
+                            'background:white;border-radius:50%;'
+                            'border:2px solid #1565c0;color:#1565c0;">⚑</div>'
+                        )
+                        folium.Marker(
+                            location=[exit_pt.y, exit_pt.x],
+                            icon=folium.DivIcon(html=exit_html, icon_size=(18, 18), icon_anchor=(9, 9)),
+                            tooltip="City exit point",
+                        ).add_to(proj_group)
+                        exit_osmids_drawn.add(exit_oid)
 
         # Serving routes (wildland — one GeoJson per segment for popup support)
         if serving_set and "osmid" in roads_wgs84.columns:

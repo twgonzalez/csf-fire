@@ -93,7 +93,8 @@ def analyze_capacity(
 
     # Step 3: Evacuation routes + catchment weights + bottleneck tracking
     roads_gdf, evacuation_paths = _identify_evacuation_routes(
-        roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf
+        roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf,
+        data_dir=data_dir,
     )
 
     # Step 4: Baseline demand
@@ -437,6 +438,7 @@ def _identify_evacuation_routes(
     config: dict,
     analysis_crs: str,
     block_groups_gdf: Optional[gpd.GeoDataFrame] = None,
+    data_dir: Optional[Path] = None,
 ) -> tuple[gpd.GeoDataFrame, list]:
     """
     Identify evacuation routes via Dijkstra network analysis.
@@ -488,6 +490,13 @@ def _identify_evacuation_routes(
 
     G_proj  = ox.project_graph(G, to_crs=analysis_crs)
     G_undir = G_proj.to_undirected()
+
+    # Persist projected graph for network-distance proximity queries (v3.3)
+    if data_dir is not None:
+        graph_path = Path(data_dir) / "graph.graphml"
+        graph_path.parent.mkdir(parents=True, exist_ok=True)
+        ox.save_graphml(G_proj, filepath=str(graph_path))
+        logger.info(f"  Saved road graph → {graph_path}")
 
     exits = _find_exit_nodes(G_proj, boundary_proj)
     logger.info(f"  Found {len(exits)} potential exit nodes.")

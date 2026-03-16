@@ -91,6 +91,7 @@ def evaluate_project(
     config: dict,
     city_config: dict,
     evacuation_paths: list = None,
+    graph_path: str | None = None,
 ) -> tuple:
     """
     Run all objective standards scenarios and produce a final determination.
@@ -99,6 +100,9 @@ def evaluate_project(
         evacuation_paths: Pre-computed EvacuationPath objects from Agent 2.
                          If None, WildlandScenario.identify_routes() will use
                          an empty list and conservative fallback behavior.
+        graph_path: Path to data/{city}/graph.graphml saved by Agent 2.
+                    If provided, WildlandScenario uses network-distance proximity
+                    (v3.3) instead of Euclidean buffer — respects road barriers.
 
     Returns:
         (updated Project, audit_trail dict)
@@ -106,6 +110,7 @@ def evaluate_project(
     context = {
         "fhsz_gdf":         fhsz_gdf,
         "evacuation_paths": evacuation_paths or [],
+        "graph_path":       str(graph_path) if graph_path else None,
     }
 
     scenarios = [
