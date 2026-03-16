@@ -270,16 +270,28 @@ def create_demo_map(
     # Per-project Standard 5 data (populated from audits if available)
     proj_ld_data: list[dict] = []
 
-    # Lookup: path_id → path_osmids (for controlling corridor visualization)
-    # Keyed by path_id so each project gets the exact EvacuationPath that was
-    # selected as its controlling path — not just any path sharing the same bottleneck.
-    path_id_to_osmids: dict[str, list[str]] = {
+    # Population-level path lookup (used as fallback for path_id_to_osmids below)
+    _population_path_osmids: dict[str, list[str]] = {
         str(getattr(_ep, "path_id", "")): list(getattr(_ep, "path_osmids", []))
         for _ep in (evacuation_paths or [])
         if getattr(_ep, "path_osmids", [])
     }
 
     for i, project in enumerate(projects):
+        # v3.4: Build path_id → path_osmids from this project's ΔT results.
+        # Project-origin Dijkstra paths carry their own path_osmids in delta_t_results,
+        # so the flow-trace visualization works without the population paths list.
+        # Falls back to population paths lookup for any path_ids not found here.
+        path_id_to_osmids: dict[str, list[str]] = {
+            r["path_id"]: r.get("path_osmids", [])
+            for r in (project.delta_t_results or [])
+            if r.get("path_osmids")
+        }
+        # Merge in population paths for any missing path_ids (backward compat)
+        for pid, osmids in _population_path_osmids.items():
+            if pid not in path_id_to_osmids:
+                path_id_to_osmids[pid] = osmids
+
         tier         = project.determination or "UNKNOWN"
         marker_color = _TIER_MARKER_COLOR.get(tier, "gray")
         route_color  = _TIER_ROUTE_COLOR.get(tier, "#7f7f7f")
