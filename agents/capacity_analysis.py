@@ -808,20 +808,25 @@ def _find_exit_nodes(
     exit_highway_types: set | None = None,
 ) -> list:
     """
-    Find OSM nodes at the city boundary that connect to regional-network roads.
+    Find OSM nodes that represent handoff points into the regional evacuation network.
 
-    v3.4 methodology: exit nodes represent capacity handoff points — where the
-    local road network delivers evacuees into the regional system (freeway, trunk
-    highway, major arterial).  A fire does not respect city boundaries; the
-    relevant destination is entry into the regional evacuation network, not
-    crossing a political line.
+    v3.4 methodology: exit nodes are capacity handoff points — where the local
+    road network delivers evacuees into the regional system (freeway, trunk
+    highway, major arterial).  A fire does not respect city limits; the relevant
+    destination is entry into the regional network, not crossing a political line.
 
     Algorithm:
       1. Find all nodes within 50 m of the city boundary line.
       2. Of those, keep only nodes connected to at least one edge whose OSM
          highway type is in exit_highway_types (motorway, trunk, primary, etc.).
-      3. If step 2 yields no nodes (city has no qualifying roads at boundary),
-         fall back to all boundary nodes and log a warning.
+      3. If step 2 yields no nodes, fall back to all boundary nodes (warning).
+      4. **Freeway on-ramp merge nodes (interior to city):** add any node where
+         at least one incident edge is motorway_link AND at least one incident
+         edge is motorway.  These are the merge points where a vehicle enters the
+         freeway mainline — a true capacity handoff regardless of city boundary
+         position.  Without this step, a freeway running through the city interior
+         (e.g. I-5 through Encinitas) has no reachable exit points, so Dijkstra
+         routes away from the freeway to distant boundary crossings instead.
 
     Args:
         G_proj:              Projected OSMnx graph for the city.
@@ -829,11 +834,10 @@ def _find_exit_nodes(
         exit_highway_types:  Set of OSM highway tag values that qualify as
                              regional network connections.  Defaults to
                              motorway/motorway_link/trunk/trunk_link/primary/
-                             primary_link — the standard regional network for
-                             California cities.
+                             primary_link.
 
     Returns:
-        List of OSM node IDs qualifying as exit nodes.
+        Deduplicated list of OSM node IDs qualifying as exit nodes.
     """
     _DEFAULT_EXIT_TYPES = {
         "motorway", "motorway_link",
@@ -877,12 +881,38 @@ def _find_exit_nodes(
         )
         return boundary_nodes
 
+    # Step 4: freeway on-ramp merge nodes (interior to city).
+    # A merge node is where at least one edge is motorway_link (the on-ramp)
+    # and at least one other edge is motorway (the mainline).  These are valid
+    # capacity handoff points even when far from the city boundary.
+    exit_set = set(regional_exits)
+    onramp_merges = []
+    for node_id in G_proj.nodes():
+        if node_id in exit_set:
+            continue  # already counted
+        incident_edges = list(G_proj.edges(node_id, data=True)) + \
+                         list(G_proj.in_edges(node_id, data=True))
+        hw_types = set()
+        for _, _, data in incident_edges:
+            hw = data.get("highway", "")
+            for h in (hw if isinstance(hw, list) else [hw]):
+                hw_types.add(str(h))
+        if "motorway_link" in hw_types and "motorway" in hw_types:
+            onramp_merges.append(node_id)
+
+    if onramp_merges:
+        logger.info(
+            f"  Freeway on-ramp merge nodes: {len(onramp_merges)} added as "
+            f"interior exit points (motorway_link → motorway handoff)."
+        )
+
+    all_exits = list(exit_set) + onramp_merges
     logger.info(
-        f"  Exit nodes: {len(regional_exits)} regional-network connections "
-        f"(of {len(boundary_nodes)} boundary nodes); "
+        f"  Exit nodes: {len(regional_exits)} boundary + {len(onramp_merges)} "
+        f"freeway on-ramp = {len(all_exits)} total; "
         f"types: {sorted(exit_highway_types)}"
     )
-    return regional_exits
+    return all_exits
 
 
 def _build_evac_osmid_map(G_proj, edge_scores: dict) -> dict:
