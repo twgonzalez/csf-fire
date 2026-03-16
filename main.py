@@ -240,6 +240,7 @@ def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
         config=config,
         city_config=city_config,
         evacuation_paths=evacuation_paths,
+        graph_path=data_dir / "graph.graphml",
     )
 
     # Save audit trail
@@ -561,12 +562,13 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
     }
 
     for i, pdef in enumerate(project_defs, 1):
-        name    = pdef.get("name", f"Project {i}")
-        lat     = float(pdef["lat"])
-        lon     = float(pdef["lon"])
-        units   = int(pdef["units"])
-        stories = int(pdef.get("stories", 0))
-        address = pdef.get("address", "")
+        name              = pdef.get("name", f"Project {i}")
+        lat               = float(pdef["lat"])
+        lon               = float(pdef["lon"])
+        units             = int(pdef["units"])
+        stories           = int(pdef.get("stories", 0))
+        address           = pdef.get("address", "")
+        additional_egress = pdef.get("additional_egress", [])
 
         console.print(
             f"  [{i}/{len(project_defs)}] [bold]{name}[/bold]  "
@@ -580,6 +582,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             dwelling_units=units,
             stories=stories,
             project_name=name,
+            additional_egress_points=additional_egress,
         )
         project, audit = evaluate_project(
             project=project,
@@ -588,6 +591,7 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
             config=config,
             city_config=city_config,
             evacuation_paths=evacuation_paths,
+            graph_path=data_dir / "graph.graphml",
         )
         evaluated.append(project)
         audits.append(audit)
