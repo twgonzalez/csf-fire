@@ -22,6 +22,7 @@ from pathlib import Path
 
 import folium
 import geopandas as gpd
+from folium.plugins import AntPath
 from shapely.geometry import Point, mapping
 from shapely.ops import unary_union
 
@@ -462,114 +463,79 @@ def create_demo_map(
                 continue
             path_osmid_set = set(path_id_to_osmids[pid])
 
-            # Collect matching road geometries (preserve for midpoint arrow calc)
+            # Build ordered coordinate chain for animated flow line.
+            # Walk path_osmids in sequence (project → exit): for each OSM segment,
+            # pick whichever endpoint is closest to the previous segment's exit end
+            # (or the project location for the first segment) to determine which
+            # direction the evacuee travels along that linestring.
+            path_osmids_ordered = path_id_to_osmids.get(pid, [])
+
             path_rows = roads_wgs84[
                 roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, path_osmid_set))
             ]
-            path_geoms = [
-                row.geometry for _, row in path_rows.iterrows()
-                if row.geometry is not None and not row.geometry.is_empty
-            ]
-            if not path_geoms:
+            if path_rows.empty:
                 continue
+
+            # osmid → geometry lookup
+            osmid_to_seg_geom: dict[str, object] = {}
+            for _, _row in path_rows.iterrows():
+                _oid = _row.get("osmid")
+                if _oid is None or _row.geometry is None:
+                    continue
+                _strs = ([str(o) for o in _oid] if isinstance(_oid, list)
+                         else [str(_oid)])
+                for _s in _strs:
+                    if _s not in osmid_to_seg_geom:
+                        osmid_to_seg_geom[_s] = _row.geometry
+
+            # Chain coordinates in travel order
+            proj_ref     = Point(project.location_lon, project.location_lat)
+            prev_exit_pt = proj_ref
+            ant_coords: list[list[float]] = []
+
+            for _oid_str in path_osmids_ordered:
+                _sg = osmid_to_seg_geom.get(_oid_str)
+                if _sg is None or _sg.is_empty:
+                    continue
+                _raw = list(_sg.coords)
+                if len(_raw) < 2:
+                    continue
+                _pt_a = Point(_raw[0])
+                _pt_b = Point(_raw[-1])
+                # Natural or reversed? — whichever start is closer to where we came from
+                _ordered = _raw if prev_exit_pt.distance(_pt_a) <= prev_exit_pt.distance(_pt_b) \
+                           else list(reversed(_raw))
+                for _i, (_lon, _lat) in enumerate(_ordered):
+                    # Skip first point if it duplicates the last appended point
+                    if _i == 0 and ant_coords:
+                        _last = ant_coords[-1]
+                        if abs(_lat - _last[0]) < 1e-7 and abs(_lon - _last[1]) < 1e-7:
+                            continue
+                    ant_coords.append([_lat, _lon])
+                if _ordered:
+                    prev_exit_pt = Point(_ordered[-1])
 
             tip = (
                 f"{'⚠ FLAGGED' if flagged else '✓ OK'} — {bn_name} | "
-                f"ΔT {dt_min:.1f} min / {thresh:.1f} min threshold"
+                f"ΔT {dt_min:.1f} min / {thresh:.1f} min threshold | "
+                f"animated dashes flow project → exit"
             )
-            for geom in path_geoms:
-                folium.GeoJson(
-                    mapping(geom),
-                    style_function=lambda _, c=flow_color, w=flow_w, o=flow_op: {
-                        "color": c, "weight": w, "opacity": o,
-                    },
+
+            # Animated flow line — dashes march from project toward exit so direction
+            # is immediately legible.  pulse_color=white creates the "ant" contrast.
+            # Flagged paths are thicker/faster to draw the eye.
+            if len(ant_coords) >= 2:
+                _ant_weight = flow_w + 2.0
+                _ant_delay  = 500 if flagged else 800   # faster pulse on flagged
+                AntPath(
+                    locations=ant_coords,
+                    color=flow_color,
+                    pulse_color="rgba(255,255,255,0.95)",
+                    weight=_ant_weight,
+                    delay=_ant_delay,
+                    dash_array=[10, 18],
                     tooltip=tip,
                 ).add_to(proj_group)
-
-            # ── Per-segment directional arrows ────────────────────────────────
-            # Walk the ordered path_osmids (project → exit) to determine the
-            # correct travel direction for each segment.  Chaining: each segment's
-            # entry end is whichever endpoint is closest to the previous segment's
-            # exit endpoint.  The project's lat/lon seeds the first segment.
-            # Minimum segment length filter (≥25 m in WGS84°≈m at this scale)
-            # suppresses arrows on short connector stubs.
-            try:
-                path_osmids_ordered = path_id_to_osmids.get(pid, [])
-
-                # Build osmid → geometry lookup from already-fetched path_rows
-                osmid_to_seg_geom: dict[str, object] = {}
-                for _, _row in path_rows.iterrows():
-                    _oid = _row.get("osmid")
-                    if _oid is None or _row.geometry is None:
-                        continue
-                    _strs = ([str(o) for o in _oid] if isinstance(_oid, list)
-                             else [str(_oid)])
-                    for _s in _strs:
-                        if _s not in osmid_to_seg_geom:
-                            osmid_to_seg_geom[_s] = _row.geometry
-
-                # Project location in WGS84 (seeds direction of first segment)
-                proj_ref = Point(project.location_lon, project.location_lat)
-                prev_exit_pt = proj_ref   # updated as we walk forward
-
-                for _oid_str in path_osmids_ordered:
-                    _sg = osmid_to_seg_geom.get(_oid_str)
-                    if _sg is None or _sg.is_empty:
-                        continue
-                    _coords = list(_sg.coords)
-                    if len(_coords) < 2:
-                        continue
-
-                    _pt_a = Point(_coords[0])
-                    _pt_b = Point(_coords[-1])
-
-                    # Which endpoint is closest to where we came from?
-                    if prev_exit_pt.distance(_pt_a) <= prev_exit_pt.distance(_pt_b):
-                        travel_start, travel_end = _pt_a, _pt_b
-                    else:
-                        travel_start, travel_end = _pt_b, _pt_a
-                    prev_exit_pt = travel_end  # advance chain
-
-                    # Rough segment length in degrees (skip short connectors)
-                    _seg_len_deg = math.hypot(
-                        travel_end.x - travel_start.x,
-                        travel_end.y - travel_start.y,
-                    )
-                    # 0.000225° ≈ 25 m at mid-latitudes — skip sub-25 m stubs
-                    if _seg_len_deg < 0.000225:
-                        continue
-
-                    _mid = _sg.interpolate(0.5, normalized=True)
-                    _dx = travel_end.x - travel_start.x
-                    _dy = travel_end.y - travel_start.y
-                    _bearing = (math.degrees(math.atan2(_dx, _dy)) + 360) % 360
-
-                    # Solid filled arrow, white halo for contrast on any basemap
-                    _arrow_html = (
-                        f'<div style="'
-                        f'transform:rotate({_bearing:.0f}deg);'
-                        f'width:14px;height:14px;'
-                        f'line-height:14px;text-align:center;'
-                        f'font-size:13px;font-weight:bold;'
-                        f'color:{flow_color};'
-                        f'text-shadow:'
-                        f'0 0 2px #fff,0 0 4px #fff,'
-                        f'-1px 0 #fff,1px 0 #fff,'
-                        f'0 -1px #fff,0 1px #fff;'
-                        f'pointer-events:none;">'
-                        f'&#x25B2;</div>'
-                    )
-                    folium.Marker(
-                        location=[_mid.y, _mid.x],
-                        icon=folium.DivIcon(
-                            html=_arrow_html,
-                            icon_size=(14, 14),
-                            icon_anchor=(7, 7),
-                        ),
-                        tooltip=tip,
-                    ).add_to(proj_group)
-            except Exception:
-                pass  # arrows are best-effort
 
             # Exit point marker (triangle flag at city-boundary exit)
             if exit_oid and exit_oid not in exit_osmids_drawn:
