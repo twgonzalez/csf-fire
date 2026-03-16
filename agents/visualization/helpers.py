@@ -89,7 +89,16 @@ def _add_zoom_weight_scaler(m: "folium.Map", ref_zoom: int) -> None:
 
     At ref_zoom the weights equal their static (Python-side) values.
     Each zoom level above ref_zoom multiplies weights by 2**0.65 ≈ 1.57×.
-    Weights are clamped to [0.3, 30] px.
+
+    Standard paths: weight clamped to [0.3, 30] px.
+
+    AntPath layers (detected by options.pulseColor):
+      - Weight clamped to [1.0, 12] px — AntPaths are direction indicators,
+        not road boundaries, so they should not dominate the visual at high zoom.
+      - dashArray scaled proportionally with weight (capped at 3× base value)
+        so the pulse pattern stays proportional to the line thickness.
+        Without this, the dash stays at e.g. 10 px while the line grows to
+        30 px, producing a thick scalloped band instead of clear pulses.
     """
     map_var = m.get_name()
     js = f"""<script>
@@ -104,14 +113,34 @@ def _add_zoom_weight_scaler(m: "folium.Map", ref_zoom: int) -> None:
     }}
   }}
 
+  function isAntPath(path) {{
+    return path.options && path.options.pulseColor !== undefined;
+  }}
+
   function applyScale(map, scale) {{
     map.eachLayer(function (layer) {{
       eachPath(layer, function (path) {{
         if (path._baseWeight === undefined) {{
           path._baseWeight = (path.options && path.options.weight) || 1;
         }}
-        var w = Math.max(0.3, Math.min(path._baseWeight * scale, 30));
-        path.setStyle({{ weight: w }});
+
+        if (isAntPath(path)) {{
+          // AntPath: tighter weight cap + proportional dashArray scaling.
+          var w = Math.max(1.0, Math.min(path._baseWeight * scale, 12));
+          if (path._baseDashArray === undefined) {{
+            var da0 = path.options.dashArray;
+            path._baseDashArray = Array.isArray(da0) ? da0.slice() : [10, 18];
+          }}
+          // Cap dash scaling at 3× so pulses don't grow wider than the screen.
+          var ds = Math.min(scale, 3);
+          var da = path._baseDashArray.map(function (v) {{
+            return Math.max(2, v * ds);
+          }});
+          path.setStyle({{ weight: w, dashArray: da.join(' ') }});
+        }} else {{
+          var w = Math.max(0.3, Math.min(path._baseWeight * scale, 30));
+          path.setStyle({{ weight: w }});
+        }}
       }});
     }});
   }}
