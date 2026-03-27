@@ -1,12 +1,12 @@
 block_groups:
-  downloaded: '2026-03-11T19:45:49.036334'
+  downloaded: '2026-03-16T07:38:33.431226'
   source: U.S. Census ACS 5-year / Census TIGER
 boundary:
-  downloaded: '2026-03-11T19:45:34.023347'
+  downloaded: '2026-03-16T07:38:17.520605'
   source: U.S. Census TIGER / OSMnx
 fhsz:
-  downloaded: '2026-03-11T19:45:34.323004'
-  source: CAL FIRE OSFM ArcGIS REST API
+  downloaded: '2026-03-16T07:38:17.527478'
+  source: 'Local file: config/cities/fhsz/berkeley_fhsz.geojson'
 roads:
-  downloaded: '2026-03-11T19:45:36.926557'
+  downloaded: '2026-03-16T07:38:19.784451'
   source: OpenStreetMap via OSMnx
