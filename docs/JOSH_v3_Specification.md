@@ -1,6 +1,6 @@
 # JOSH — Fire Evacuation Capacity Analysis System
 
-**Version:** 3.2 (ΔT Standard — Constant Mobilization, NFPA 101)
+**Version:** 3.4 (ΔT Standard — Regional-Network Exit Nodes, Travel-Time Routing)
 **Date:** March 2026
 **Authority:** California Government Code §65302(g)(4), §65302.15 (AB 747), §65589.5 (HAA), AB 1600, SB 79
 **Reference Studies:**
@@ -313,10 +313,11 @@ path_clearance_minutes   — path_demand_vehicles / bottleneck_capacity_vph × 6
 **Pipeline (in order):**
 
 1. `_apply_hcm_capacity()` — raw HCM capacity by road type and lanes
-2. `_apply_hazard_degradation()` — **NEW**: spatial join road segments to FHSZ zones; multiply capacity by degradation factor to get effective_capacity_vph
-3. `_identify_evacuation_routes()` — Dijkstra from ALL block group centroids to all exits. **MODIFIED**: during path traversal, record `bottleneck_segment_id` and `bottleneck_capacity_vph = min(effective_capacity_vph)` per path
-4. `_apply_catchment_demand()` — assign demand to segments based on which housing units route through them (Dijkstra catchment model, not quarter-mile buffer)
-5. `_compute_vc_los()` — v/c ratio and LOS assignment (informational, not used in determination)
+2. `_apply_hazard_degradation()` — spatial join road segments to FHSZ zones; multiply capacity by degradation factor to get `effective_capacity_vph`
+3. `_find_exit_nodes()` — identify regional-network handoff nodes (two-tier: boundary exits + interior freeway on-ramp merge nodes); persist to `data/{city}/exit_nodes.json`
+4. `_identify_evacuation_routes()` — Dijkstra from ALL block group centroids to all exit nodes; per path records `bottleneck_segment_id` and `bottleneck_capacity_vph = min(effective_capacity_vph)`
+5. `_apply_catchment_demand()` — assign demand to segments based on which housing units route through them (Dijkstra catchment model)
+6. `_compute_vc_los()` — v/c ratio and LOS (informational only — not used in determination)
 
 **`_apply_hazard_degradation()` detail:**
 
@@ -328,10 +329,39 @@ roads_proj['hazard_degradation'] = roads_proj['fhsz_zone'].map(hazard_factors).f
 roads_proj['effective_capacity_vph'] = roads_proj['capacity_vph'] * roads_proj['hazard_degradation']
 ```
 
-**Bottleneck tracking during Dijkstra (modification to existing route identification):**
+**`_find_exit_nodes()` detail (v3.4):**
+
+Exit nodes are **capacity handoff points** — locations where the local road network delivers evacuees into the regional evacuation system. A fire does not respect city boundaries; the destination that matters is entry into the regional network (freeway mainline, trunk highway, major arterial), not crossing a political line.
+
+Two-tier algorithm:
+
+**Tier 1 — Boundary regional exits:**
+1. Find all graph nodes within 50 m of the city boundary line
+2. Of those, keep only nodes connected to at least one edge whose OSM `highway` tag is in `exit_highway_types` (default: `motorway`, `motorway_link`, `trunk`, `trunk_link`, `primary`, `primary_link`)
+3. Fallback: if no regional-type nodes found at boundary, use all boundary nodes with a warning (appropriate for cities with no freeway or trunk access — secondary roads become de-facto regional exits)
+
+**Tier 2 — Interior freeway on-ramp merge nodes:**
+
+Add any node — regardless of distance from city boundary — where at least one incident edge is `motorway_link` (on-ramp) AND at least one incident edge is `motorway` (freeway mainline). These merge points are where a vehicle physically enters the freeway capacity system.
+
+Without this step, a freeway running through the city interior (e.g. I-5 through Encinitas) has no reachable exit points at the boundary in directions parallel to the freeway, causing Dijkstra to route away from the freeway to distant boundary crossings instead of using physically accessible on-ramps. The result is unrealistically long modeled paths and wrong bottleneck identification.
 
 ```python
-# During path traversal from origin to exit:
+# Tier 2: interior freeway on-ramp merge nodes
+for node_id in G_proj.nodes():
+    hw_types = {edge['highway'] for edge in incident_edges(node_id)}
+    if 'motorway_link' in hw_types and 'motorway' in hw_types:
+        onramp_merges.append(node_id)
+
+all_exits = regional_boundary_exits + onramp_merges
+# Persisted to data/{city}/exit_nodes.json for reuse in project-origin routing
+```
+
+Exit nodes are saved to `data/{city}/exit_nodes.json` after capacity analysis and loaded by the wildland routing engine (Agent 3) for project-origin Dijkstra — avoiding re-computation on every `evaluate` call.
+
+**Bottleneck tracking during Dijkstra:**
+
+```python
 for path in dijkstra_paths:
     segments = get_path_segments(path)
     bottleneck_idx = segments['effective_capacity_vph'].idxmin()
@@ -342,12 +372,46 @@ for path in dijkstra_paths:
     }
 ```
 
-This is computationally trivial — one `min()` reduction per path during a traversal that already occurs.
+One `min()` reduction per path during a traversal that already occurs.
 
 ### 5.3 Agent 3: Objective Standards Engine
 
 **Inputs:** project location, units, stories, roads_gdf (with capacity columns), path data, fhsz_gdf, entitled_projects_ledger, config
 **Outputs:** Project object with determination + full audit dict
+
+#### 5.3.0 Project-Origin Route Identification (WildlandScenario)
+
+Before the ΔT computation, the wildland scenario engine identifies which evacuation paths actually serve the project. This runs per-project at evaluation time using the road graph and exit nodes cached by Agent 2.
+
+**Travel-time–weighted Dijkstra:**
+
+Routing uses `travel_time_s = length_m / (speed_mph × 0.44704)` as the edge weight, not raw distance. This causes Dijkstra to find the fastest path — a 2-mile freeway segment (2 min at 65 mph) is preferred over a 2-mile residential street (8 min at 15 mph). Evacuation routing is time-critical; this matches both rational evacuee behavior and standard traffic engineering practice for evacuation modeling. Speed defaults when OSM `maxspeed` is missing are drawn from `speed_defaults` in `config/parameters.yaml`.
+
+**2× fastest-exit ratio filter (`max_path_length_ratio`):**
+
+After computing paths to all exit nodes, paths whose travel time exceeds `max_path_length_ratio × fastest_exit_travel_time` are discarded. Default ratio: **2.0**. Rational evacuees take the fastest route to safety — a path requiring more than twice the optimal travel time is a route that would never be chosen when shorter alternatives exist. This filter is legally defensible as a route-choice bound and prevents distant exits from generating spurious bottleneck findings on routes no evacuee would use.
+
+```python
+# Per egress origin:
+min_travel_time = min(path_travel_time for all exit paths)
+kept = [p for p in paths if p.travel_time <= max_path_length_ratio × min_travel_time]
+```
+
+**Multi-egress origin support:**
+
+Projects with multiple vehicle egress points (e.g. primary driveway on Street A + egress-only exit on Street B per COA) define additional origins in the project YAML via `additional_egress:`. Each origin runs a full independent Pass 1+2 (Dijkstra to all exits, ratio filter, bottleneck dedup). The ratio bound is relative to that egress origin's own fastest exit — not polluted by a faster exit reachable from a different driveway. Full `project_vehicles` is applied at each origin independently (conservative: no demand splitting assumed between egress points).
+
+**Freeway path truncation (visualization only):**
+
+For map animation, path coordinates are truncated at the first `motorway` or `motorway_link` edge encountered. Once evacuees reach the freeway mainline, direction (north/south) cannot be predicted. The truncation affects only the rendered coordinate chain in `EvacuationPath.path_wgs84_coords` — the full path (osmids, travel time, bottleneck) is computed over the complete route for ΔT calculation purposes.
+
+**Bottleneck dedup per origin:**
+
+For each egress origin, paths sharing the same bottleneck segment are deduplicated, keeping only the path with the shortest travel time to that bottleneck. This prevents the same physical constraint from appearing dozens of times (once per nearby exit node) while preserving distinct bottlenecks on genuinely different corridors.
+
+**Anti-snap guard for additional egress:**
+
+When snapping additional egress lat/lon to the graph, if the nearest node is connected only to `motorway`/`motorway_link` edges (i.e., the snap landed on a freeway), the engine falls back to the nearest non-motorway node with a warning. City engineers can override by specifying `additional_egress_node_id` in the project YAML.
 
 **Standards:**
 
@@ -699,12 +763,25 @@ los_thresholds:
 
 # Evacuation route identification
 evacuation:
-  exit_road_classes:
-    - motorway
-    - trunk
-    - primary
-    - secondary
-  serving_route_radius_miles: 0.5
+  serving_route_radius_miles: 0.5   # Standard 2 search radius
+
+  max_path_length_ratio: 2.0        # Only include paths within 2× fastest-exit travel time.
+                                    # Routing is travel-time–weighted (length / speed_limit).
+                                    # Rational evacuees take the fastest route; paths >2×
+                                    # optimal are excluded as irrational alternatives.
+
+  # Exit node filter — regional network handoff types (v3.4)
+  # Nodes at city boundary connected to these road types are exit nodes.
+  # Interior motorway_link→motorway merge nodes are ALSO added regardless of
+  # boundary distance (freeway on-ramp fix — see _find_exit_nodes()).
+  # Override per city for cities where secondary roads are primary corridors.
+  exit_highway_types:
+    - motorway        # Interstate / State freeway (I-5, I-80, SR-101, etc.)
+    - motorway_link   # On-ramp / off-ramp to freeway
+    - trunk           # State highway (CA-1, SR-78, etc.)
+    - trunk_link      # Ramp connections to trunk highways
+    - primary         # Major city arterial (El Camino Real, etc.)
+    - primary_link    # Ramp/slip connections to primary roads
 
 # Census
 census:

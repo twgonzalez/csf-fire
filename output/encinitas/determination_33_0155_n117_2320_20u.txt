@@ -1,0 +1,454 @@
+======================================================================
+FIRE EVACUATION CAPACITY ANALYSIS  -  PROJECT DETERMINATION
+JOSH v3.2 (dT Standard  -  Constant Mobilization, NFPA 101)
+======================================================================
+Date:           2026-03-15T16:47:40.014820
+Project:        Olivenhain Canyon VHFHSZ Infill
+Address:        Olivenhain Rd & Rancho Santa Fe Rd, Olivenhain
+APN:            Not provided
+Location:       33.0155, -117.232
+Dwelling Units: 20
+Stories:        2
+
+ALGORITHM
+----------------------------------------
+  Universal 5-Step Evacuation Capacity Algorithm v3.2 (dT Standard  -  constant mobilization)
+  Each scenario applies: (1) applicability check, (2) scale gate, (3) route identification (EvacuationPath objects with bottleneck tracking), (4) demand calculation (mobilization rate 0.90 x vpu x units  -  NFPA 101 design basis), (5) dT test (project_vehicles / bottleneck_effective_capacity x 60 + egress). FHSZ affects road capacity degradation only  -  not mobilization. Most restrictive tier across all applicable scenarios is the final determination.
+  Reference: See legal.md for full legal basis and defense reference.
+
+======================================================================
+SCENARIO: WILDLAND_AB747
+  Legal Basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone
+  Result: DISCRETIONARY  |  Triggered: YES
+======================================================================
+
+  STEP 1  -  APPLICABILITY CHECK (Standard 3: FHSZ Modifier)
+  --------------------------------------
+  Method: Always applicable; site FHSZ check via GIS point-in-polygon
+  Result: APPLICABLE
+  Note: FHSZ Zone 2 (high_fhsz)  -  road capacity degradation applied; mobilization unaffected. Mobilization rate 0.90 (NFPA 101 design basis, constant).
+  Standard 3 (FHSZ): Zone 2 (High) [HAZ_CLASS=2]  hazard_zone=high_fhsz  (IN FIRE ZONE)
+  Mobilization Rate: 0.90 (NFPA 101 design basis  -  constant; Census ACS B25044 zero-vehicle adjustment)
+
+  STEP 2  -  SCALE GATE (Standard 1)
+  --------------------------------------
+  20 >= 15 -> TRIGGERED
+  (20 units vs. 15 threshold)
+
+  STEP 3  -  ROUTE IDENTIFICATION (Standard 2)
+  --------------------------------------
+  Method: Buffer project location + filter EvacuationPath objects by bottleneck/exit osmid proximity
+  Radius: 0.5 miles (804.7 m)
+  Serving route segments found: 0
+  Serving EvacuationPaths identified: 55
+  [Conservative fallback: no paths matched proximity  -  all city paths used]
+
+  STEP 4  -  DEMAND CALCULATION
+  --------------------------------------
+  Formula: 20 x 2.5 x 0.90
+  Hazard Zone: high_fhsz
+  Mobilization Rate: 0.90 (NFPA 101 design basis, constant)
+  Project vehicles (peak hour): 45.0 vph
+  Source (vehicles/unit): U.S. Census ACS B25044
+  Source (mobilization): NFPA 101 (Life Safety Code) design basis  -  100% occupant evacuation; adjusted 0.90 for ~10% zero-vehicle households (Census ACS B25044).
+
+  STEP 5  -  dT TEST (Standard 4)
+  --------------------------------------
+  Method: dT = (project_vehicles / bottleneck_effective_capacity) x 60 + egress
+  Hazard Zone: high_fhsz
+  Mobilization Rate: 0.90 (NFPA 101 design basis, constant)
+  Project Vehicles: 45.0 vph
+  Egress Penalty: 0.0 min (NFPA 101/IBC; applies to buildings >= 4 stories)
+  Safe Egress Window: 90 min (high_fhsz, NIST TN 2135)
+  Max Project Share:  5%
+  dT Threshold:       4.50 min (90 min window x 5%, NIST TN 2135)
+  Paths Evaluated: 55
+  Max dT: 6.86 min
+  Triggered: YES  -  DISCRETIONARY
+
+  Per-Path Results (all evaluated paths  -  no deduplication):
+    Path 44_5960012  |  origin BG: 44  |  4 segments
+    Bottleneck: Monterey Place *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 19_239140968  |  origin BG: 19  |  21 segments
+    Bottleneck: Whitewood Place [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 32_436406706  |  origin BG: 32  |  8 segments
+    Bottleneck: Ecke Ranch Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 8_833094605  |  origin BG: 8  |  15 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 30_5960012  |  origin BG: 30  |  18 segments
+    Bottleneck: Via Ultimo *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 41_1264389309  |  origin BG: 41  |  7 segments
+    Bottleneck: Reef Break Way [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 17_639437731  |  origin BG: 17  |  15 segments
+    Bottleneck: Colony Terrace *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 56_1427306722  |  origin BG: 56  |  10 segments
+    Bottleneck: Lone Jack Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 39_1264389309  |  origin BG: 39  |  8 segments
+    Bottleneck: East Jason Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 45_436406706  |  origin BG: 45  |  7 segments
+    Bottleneck: Cypress Hills Drive *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 34_158341851  |  origin BG: 34  |  38 segments
+    Bottleneck: 2nd Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 33_436406706  |  origin BG: 33  |  13 segments
+    Bottleneck: Silver Berry Place [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 4_833094605  |  origin BG: 4  |  9 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 48_436276148  |  origin BG: 48  |  17 segments
+    Bottleneck: Capri Road *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 6_833094605  |  origin BG: 6  |  10 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 40_158341851  |  origin BG: 40  |  12 segments
+    Bottleneck: Phoebe Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 21_239140968  |  origin BG: 21  |  11 segments
+    Bottleneck: Gardendale Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 35_158341851  |  origin BG: 35  |  24 segments
+    Bottleneck: La Veta Avenue [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 3_833094605  |  origin BG: 3  |  9 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 24_32868796  |  origin BG: 24  |  11 segments
+    Bottleneck: Melba Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 12_32868796  |  origin BG: 12  |  14 segments
+    Bottleneck: Greenlake Drive [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 37_158341851  |  origin BG: 37  |  18 segments
+    Bottleneck: Union Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 22_5975161  |  origin BG: 22  |  3 segments
+    Bottleneck: Avenida la Posta [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 7_32868796  |  origin BG: 7  |  15 segments
+    Bottleneck: Westview Drive *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 16_833094605  |  origin BG: 16  |  15 segments
+    Bottleneck: Calle Ryan *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 10_833094605  |  origin BG: 10  |  13 segments
+    Bottleneck: Enclave Court *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 13_5960012  |  origin BG: 13  |  26 segments
+    Bottleneck: Via Ultimo *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 38_158341851  |  origin BG: 38  |  24 segments
+    Bottleneck: La Mesa Avenue [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 11_32868796  |  origin BG: 11  |  11 segments
+    Bottleneck: Knights Bridge Court [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 27_436406706  |  origin BG: 27  |  17 segments
+    Bottleneck: Sea Ridge Court [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 20_239140968  |  origin BG: 20  |  21 segments
+    Bottleneck: Village Green Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 36_436406706  |  origin BG: 36  |  21 segments
+    Bottleneck: Orpheus Avenue [within threshold]
+      Road: Two-lane highway  |  Speed: 20 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 900 vph  x degradation 1.00 (non_fhsz)  = eff cap 900 vph
+      dT = (45.0 vph / 900 vph) x 60 + 0.0 min egress = 3.00 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 14_32868796  |  origin BG: 14  |  13 segments
+    Bottleneck: Gardena Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 25_436278992  |  origin BG: 25  |  22 segments
+    Bottleneck: Willowspring South Drive [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 1 (moderate_fhsz)
+      HCM cap: 1125 vph  x degradation 0.75 (moderate_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 9_32868796  |  origin BG: 9  |  9 segments
+    Bottleneck: Nolbey Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 18_239140968  |  origin BG: 18  |  24 segments
+    Bottleneck: Countrywood Lane [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 46_239140968  |  origin BG: 46  |  5 segments
+    Bottleneck: Robert Lane *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 42_157272941  |  origin BG: 42  |  18 segments
+    Bottleneck: Eolus Avenue *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 29_436278992  |  origin BG: 29  |  22 segments
+    Bottleneck: Shields Avenue [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 28_158341851  |  origin BG: 28  |  24 segments
+    Bottleneck: East D Street [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 26_5960012  |  origin BG: 26  |  15 segments
+    Bottleneck: Via Ultimo *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 51_158341851  |  origin BG: 51  |  4 segments
+    Bottleneck: Bishops Gate Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 50_436276148  |  origin BG: 50  |  8 segments
+    Bottleneck: Ranch Road *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 5_32868796  |  origin BG: 5  |  14 segments
+    Bottleneck: Hurstdale Avenue *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 2  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 57_6014727  |  origin BG: 57  |  10 segments
+    Bottleneck: Lone Hill Lane *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 1_833094605  |  origin BG: 1  |  6 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 31_239140968  |  origin BG: 31  |  13 segments
+    Bottleneck: Tzena Way [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 43_157272941  |  origin BG: 43  |  18 segments
+    Bottleneck: Eolus Avenue *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 49_169543043  |  origin BG: 49  |  2 segments
+    Bottleneck: Leucadia Boulevard [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 2  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 3800 vph  x degradation 0.35 (vhfhsz)  = eff cap 1330 vph
+      dT = (45.0 vph / 1330 vph) x 60 + 0.0 min egress = 2.03 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 54_6014727  |  origin BG: 54  |  7 segments
+    Bottleneck: Bumann Road *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 0_833094605  |  origin BG: 0  |  9 segments
+    Bottleneck: Manchester Avenue [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1900 vph  x degradation 0.35 (vhfhsz)  = eff cap 665 vph
+      dT = (45.0 vph / 665 vph) x 60 + 0.0 min egress = 4.06 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 52_639437731  |  origin BG: 52  |  16 segments
+    Bottleneck: 5th Street *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 53_6014727  |  origin BG: 53  |  11 segments
+    Bottleneck: Brookside Lane *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 3 (vhfhsz)
+      HCM cap: 1125 vph  x degradation 0.35 (vhfhsz)  = eff cap 394 vph
+      dT = (45.0 vph / 394 vph) x 60 + 0.0 min egress = 6.86 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 15_833094605  |  origin BG: 15  |  6 segments
+    Bottleneck: 1188794792 *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 3  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 562 vph
+      dT = (45.0 vph / 562 vph) x 60 + 0.0 min egress = 4.80 min  (threshold: 4.50 min (90 min x 5%))
+
+    Path 23_6014727  |  origin BG: 23  |  7 segments
+    Bottleneck: Lone Jack Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 2 (high_fhsz)
+      HCM cap: 1125 vph  x degradation 0.50 (high_fhsz)  = eff cap 1125 vph
+      dT = (45.0 vph / 1125 vph) x 60 + 0.0 min egress = 2.40 min  (threshold: 4.50 min (90 min x 5%))
+
+
+  -> Scenario Tier: DISCRETIONARY
+  Reason: Project meets the 15-unit applicability threshold and 20 serving path(s) exceed the dT threshold of 4.50 min (max dT: 6.9 min). FHSZ Zone 2 (high_fhsz)  -  road capacity degradation applied. Mobilization: 0.90 (NFPA 101 design basis, constant). Discretionary review required. Legal basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone.
+
+======================================================================
+SCENARIO: SB79_TRANSIT
+  Legal Basis: SB 79 (2025)  -  objective health and safety standard carve-out for by-right projects (transit proximity context); California Public Utilities Code Sec.21155 (Tier 1/2 transit)
+  Result: NOT_APPLICABLE  |  Triggered: NO
+======================================================================
+  NOT APPLICABLE: SB 79: project is not within 0.5 miles of Tier 1/2 transit. Informational only  -  no tier impact.
+  SB 79 Transit Proximity: outside transit buffer
+
+======================================================================
+FINAL DETERMINATION
+======================================================================
+  RESULT: DISCRETIONARY REVIEW REQUIRED
+
+  Project meets the 15-unit applicability threshold and 20 serving path(s) exceed the dT threshold of 4.50 min (max dT: 6.9 min). FHSZ Zone 2 (high_fhsz)  -  road capacity degradation applied. Mobilization: 0.90 (NFPA 101 design basis, constant). Discretionary review required. Legal basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone.
+
+  PARAMETERS APPLIED
+  --------------------------------------
+  Hazard Zone:        high_fhsz
+  Mobilization Rate:  0.90 (NFPA 101 design basis  -  constant; ~10% zero-vehicle HHs per Census ACS B25044)
+  Vehicles per Unit:  2.5 (U.S. Census ACS B25044)
+  Egress Penalty:     0.0 min (NFPA 101/IBC  -  2 stories)
+  Safe Egress Window: 90 min (high_fhsz, per NIST TN 2135)
+  Max Project Share:  5%
+  dT Threshold:       4.50 min (90 x 5%)
+  Max dT (project):   6.86 min
+
+  Determination Tier:
+    DISCRETIONARY REVIEW REQUIRED
+
+  At least one scenario triggered DISCRETIONARY: the project meets the
+  dwelling unit size threshold and at least one serving path's dT exceeds
+  the applicable threshold for the project's hazard zone.
+
+  dT = (project_vehicles / bottleneck_effective_capacity) x 60 + egress_penalty
+  The baseline state of the road is irrelevant  -  projects in already-failing
+  zones are tested equally (key v3.0 correction from v2.0 marginal causation test).
+
+  NOTE: Fire zone location (Standard 3) affects mobilization rate and dT threshold;
+  it does not independently gate the determination.
+
+  Scenario Tier Summary:
+    wildland_ab747: DISCRETIONARY
+    sb79_transit: NOT_APPLICABLE
+
+  Aggregation Logic: Most restrictive tier across all applicable scenarios wins.
+  Tier Ranking: DISCRETIONARY(3) > MINISTERIAL WITH STANDARD CONDITIONS(2) > MINISTERIAL(1) > NOT_APPLICABLE(0)
+
+  This determination is based solely on objective, verifiable criteria.
+  No professional discretion was applied. All calculations are reproducible.
+  See legal.md for full legal basis and defense reference.
+======================================================================

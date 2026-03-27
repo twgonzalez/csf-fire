@@ -1,12 +1,12 @@
 data/*
 !data/berkeley/
-output/
+!data/encinitas/
+output/*
+!output/berkeley/
+!output/encinitas/
+output/encinitas/demo_map.html
 prompts/
 __pycache__/
 .venv/
 # Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
 config/cities/fhsz/*.geojson
-# City-specific configs and demo projects that are not yet public
-# Add cities here while analysis is in-progress / politically sensitive
-config/cities/encinitas.yaml
-config/projects/encinitas_demo.yaml

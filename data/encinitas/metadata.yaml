@@ -1,0 +1,12 @@
+block_groups:
+  downloaded: '2026-03-15T20:49:16.328978'
+  source: U.S. Census ACS 5-year / Census TIGER
+boundary:
+  downloaded: '2026-03-15T20:49:03.064950'
+  source: U.S. Census TIGER / OSMnx
+fhsz:
+  downloaded: '2026-03-15T20:49:03.169586'
+  source: 'Local file: config/cities/fhsz/encinitas_fhsz.geojson'
+roads:
+  downloaded: '2026-03-15T20:49:04.805321'
+  source: OpenStreetMap via OSMnx

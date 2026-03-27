@@ -1,7 +1,7 @@
 # JOSH — Technical Brief for Professional Engineer Review
 
 **System:** JOSH Fire Evacuation Capacity Analysis System v3.4
-**Version:** March 2026
+**Version:** March 2026 (updated for v3.4 — regional-network exit nodes, travel-time routing)
 **Audience:** Licensed professional engineers evaluating methodology veracity
 **Purpose:** Demonstrate that the system's outputs are derived entirely from published national standards and federal data; that the software is an automation layer, not a new methodology
 
@@ -105,9 +105,9 @@ The factors are composites of HCM visibility and incident adjustments, validated
 
 ### 4.3 Bottleneck Selection
 
-The system uses Dijkstra's shortest-path algorithm on the OpenStreetMap road network to identify evacuation paths from the project location to city boundary exits. For each path, the bottleneck is the road segment with the minimum effective capacity (argmin over all segments on the path). The ΔT calculation uses the worst-case (minimum capacity) bottleneck across all serving paths.
+The system uses travel-time–weighted Dijkstra on the OpenStreetMap road network to identify evacuation paths from the project location to regional-network exit nodes (see §8). Exit nodes include both city boundary crossings on major roads and interior freeway on-ramp merge nodes. For each path, the bottleneck is the road segment with the minimum effective capacity (argmin over all segments on the path). The ΔT calculation uses the worst-case (minimum capacity) bottleneck across all serving paths within the 2× fastest-exit travel-time bound.
 
-This is a conservative choice: a project's vehicles might distribute across multiple routes, but the standard assumes the most restrictive condition. This matches the standard practice in fire marshal occupancy analysis, where the worst-case egress path sets the compliance threshold.
+This is a conservative choice: a project's vehicles might distribute across multiple routes, but the standard assumes the most restrictive condition. This matches standard practice in fire marshal occupancy analysis, where the worst-case egress path sets the compliance threshold.
 
 ---
 
@@ -197,18 +197,40 @@ No proprietary data. No city-specific calibration required. No parameters requir
 
 ## 8. Route Identification — Standard Network Analysis
 
-The system identifies evacuation paths using Dijkstra's shortest-path algorithm on the directed OpenStreetMap road graph. This is standard computational graph theory, implemented by the OSMnx library (Boeing, 2017, *Environment and Planning B*), which is the standard Python library for OpenStreetMap network analysis and is used in academic and professional transportation research.
+The system identifies evacuation paths using Dijkstra's algorithm on the directed OpenStreetMap road graph, implemented by the OSMnx library (Boeing, 2017, *Environment and Planning B*). This is standard computational graph theory used in academic and professional transportation research.
 
-The procedure:
+### 8.1 Exit Node Definition — Regional Network Handoff Points
+
+Exit nodes represent **capacity handoff points** — locations where the local road network delivers evacuees into the regional evacuation system. The relevant destination is entry into a high-capacity regional road (freeway mainline, trunk highway, major arterial), not crossing a city political boundary. A wildfire does not respect city limits, and an evacuee who reaches I-5 has effectively escaped regardless of whether they crossed the city line.
+
+Exit nodes are identified by a two-tier algorithm:
+
+**Tier 1 — Boundary regional exits:**
+All graph nodes within 50 meters of the city boundary that are connected to at least one edge with an OSM `highway` classification of: `motorway`, `motorway_link`, `trunk`, `trunk_link`, `primary`, or `primary_link`. These represent the points where major regional corridors physically cross the city boundary.
+
+**Tier 2 — Interior freeway on-ramp merge nodes:**
+Any node — regardless of distance from the city boundary — where at least one incident edge is `motorway_link` (on-ramp) AND at least one other incident edge is `motorway` (freeway mainline). These are the merge points where a vehicle physically enters the freeway capacity system.
+
+This second tier is methodologically necessary for cities traversed by freeways that run largely parallel to the city boundary (e.g., I-5 through Encinitas). Without it, on-ramps in the city interior have no reachable exit point in the graph, causing Dijkstra to route away from the freeway to distant boundary crossings — producing unrealistically long paths and misidentified bottlenecks. Adding on-ramp merge nodes corrects this: Dijkstra routes to the on-ramp, which is exactly what an evacuee would do.
+
+**Fallback:** If no regional-type nodes are found at the city boundary, all boundary nodes are used with a warning. This handles inland cities where secondary roads are the primary evacuation corridors and no freeway or trunk highway is accessible.
+
+### 8.2 Routing Procedure
 
 1. Build directed road graph from OpenStreetMap data for the city
-2. Define origin: project location (projected to nearest network node)
-3. Define exits: road segments at the city boundary on roads classified as motorway, trunk, primary, or secondary (the four OSM classes representing inter-city exit capacity)
-4. Run Dijkstra from origin to each exit node
-5. Collect all paths; compute effective capacity per segment (HCM × degradation); identify bottleneck per path
-6. Select worst-case bottleneck across all serving paths for ΔT computation
+2. Define origin: project location (snapped to nearest non-freeway network node)
+3. Define exits: regional network handoff nodes per §8.1 (boundary regional exits + interior freeway on-ramp merge nodes), loaded from `data/{city}/exit_nodes.json`
+4. Run **travel-time–weighted Dijkstra** from origin to each exit node; edge weight = `length_m / (speed_mph × 0.44704)` — finds the fastest path, not the shortest distance path
+5. Apply **2× fastest-exit ratio filter**: discard paths whose travel time exceeds 2× the fastest-exit travel time. Rational evacuees take the fastest route to safety; paths requiring more than twice the optimal travel time represent routes that would never be chosen when faster alternatives exist. This filter is a legally defensible route-choice bound.
+6. Compute effective capacity per segment on each remaining path (HCM base capacity × FHSZ degradation factor)
+7. Identify bottleneck per path: `argmin(effective_capacity_vph)` along all segments
+8. Select worst-case bottleneck across all serving paths for ΔT computation
 
-This is identical in principle to the route identification methodology used in the KLD Engineering AB 747 study for the City of Berkeley (KLD TR-1381, March 2024), which used ArcGIS Network Analyst shortest-path routing from Census block group centroids to boundary exits. The JOSH system uses the same logical approach with open-source tools, enabling any engineer to replicate the analysis without proprietary GIS software.
+**Travel-time weighting** is standard practice in evacuation traffic modeling. A 2-mile freeway segment at 65 mph takes approximately 2 minutes; the same distance on a residential street at 15 mph takes approximately 8 minutes. Dijkstra on distance finds the geographically shorter path; Dijkstra on travel time finds the path an evacuee would actually take. The latter is the correct basis for identifying which road segments serve the project during an evacuation.
+
+**Multi-egress projects:** Projects with multiple vehicle egress points (e.g., a primary driveway and a COA-mandated emergency-only exit on a secondary street) run a fully independent Dijkstra from each origin. Full project vehicle demand is applied at each origin independently — demand is not split between egress points. This is conservative: it tests the worst-case condition where all project vehicles exit through the most constrained path.
+
+This approach is identical in principle to the KLD Engineering AB 747 study for the City of Berkeley (KLD TR-1381, March 2024), which used ArcGIS Network Analyst shortest-path routing from Census block group centroids to boundary exits. JOSH uses the same logical approach with open-source tools, enabling any engineer to replicate the analysis without proprietary GIS software.
 
 ---
 
@@ -291,7 +313,7 @@ The following limitations should be understood by any engineer reviewing JOSH ou
 
 **Degradation factors:** The FHSZ degradation factors are calibrated composites, not empirically measured for every road in every fire. They represent conservative planning-level estimates for conditions consistent with each hazard zone designation. A site-specific analysis using measured road width, sight distance, and AADT could refine these values. The default values are appropriate for planning-level and regulatory use.
 
-**Network routing:** Dijkstra's algorithm identifies shortest paths, which may not reflect actual evacuation routing behavior under emergency conditions (contra-flow, road closures, behavioral routing). The system tests all paths to all city boundary exits and selects the worst-case bottleneck — this bounds the analysis conservatively. A city with a formally adopted evacuation route network should supply that network as an override.
+**Network routing:** Dijkstra's algorithm identifies travel-time–optimal paths, which may not reflect actual evacuation routing behavior under emergency conditions (contra-flow, road closures, panic routing). The system applies a 2× fastest-exit ratio filter to restrict analysis to routes a rational evacuee would plausibly take, tests all qualifying paths to all regional-network exit nodes, and selects the worst-case bottleneck — this bounds the analysis conservatively. A city with a formally adopted evacuation route network should supply that network as an override to the OSM-derived graph.
 
 **Demand model:** The Census ACS data vintage is configurable (default: 2022 5-Year). For rapidly growing areas, ACS data may understate current housing unit counts. Proposed project density and any in-pipeline projects can be added to the analysis as additional demand inputs.
 
