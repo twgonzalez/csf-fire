@@ -886,6 +886,11 @@ def create_demo_map(
     else:
         logger.info("  Skipping what-if bundle (graph.json or parameters.json not found).")
 
+    # ── Brief modal injection ──────────────────────────────────────────────
+    # Replace external brief file links with inline srcdoc modals so the
+    # "View Determination Brief" button works when opened from file://.
+    _inject_brief_modals(output_path)
+
     return output_path
 
 
@@ -947,6 +952,125 @@ const JOSH_FHSZ   = {_json.dumps(fhsz_geojson, separators=(',',':'))};
     else:
         html += data_block
     html_path.write_text(html, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Determination brief inline modal (fixes file:// link blocking)
+# ---------------------------------------------------------------------------
+
+def _inject_brief_modals(html_path: Path) -> None:
+    """
+    Replace "View Determination Brief" external-file links with an inline
+    <iframe srcdoc> modal so the button works when the demo map is opened
+    from file:// (Safari and Chrome both block file://→file:// navigation
+    via target="_blank").
+
+    Scans the saved HTML for href="brief_v3_*.html" links, reads each brief
+    file from the same directory, and injects:
+      - A modal overlay with a full-height <iframe id="josh-brief-frame">
+      - A <script> with the brief data keyed by filename + joshBrief.show()
+      - A DOM-ready click interceptor that overrides the <a href> clicks
+
+    The brief HTML is set via frame.srcdoc (JS property, not HTML attribute)
+    so no escaping is needed.  srcdoc renders the complete document inline —
+    no external file access, works from file:// on all browsers.
+    """
+    import re as _re
+
+    html = html_path.read_text(encoding="utf-8")
+    output_dir = html_path.parent
+
+    # Find all brief filenames referenced in the HTML
+    filenames = _re.findall(r'href="(brief_v3_[^"]+\.html)"', html)
+    if not filenames:
+        return  # no briefs in this map
+
+    # Read each brief file; skip missing ones silently
+    brief_data: dict[str, str] = {}
+    for fname in dict.fromkeys(filenames):  # deduplicate, preserve order
+        path = output_dir / fname
+        if path.exists():
+            brief_data[fname] = path.read_text(encoding="utf-8")
+
+    if not brief_data:
+        logger.warning("_inject_brief_modals: brief files not found in %s", output_dir)
+        return
+
+    # Build JS object literal: { "filename": <brief HTML string>, ... }
+    # Use json.dumps for each value so special chars / newlines are escaped.
+    entries = ",\n".join(
+        f"  {json.dumps(fname)}: {json.dumps(content)}"
+        for fname, content in brief_data.items()
+    )
+    brief_data_js = "{\n" + entries + "\n}"
+
+    injection = f"""
+<div id="josh-brief-modal" style="
+    display:none; position:fixed; inset:0; z-index:30000;
+    background:rgba(0,0,0,0.55); overflow:hidden;">
+  <div style="
+      position:absolute; inset:40px 60px;
+      background:#fff; border-radius:8px;
+      display:flex; flex-direction:column;
+      box-shadow:0 8px 40px rgba(0,0,0,0.4);
+      overflow:hidden;">
+    <div style="
+        display:flex; align-items:center; justify-content:space-between;
+        padding:11px 16px; border-bottom:1px solid #dee2e6;
+        background:#1c4a6e; flex-shrink:0;">
+      <span style="
+          font-family:system-ui,sans-serif; font-weight:600;
+          font-size:13px; color:#fff; letter-spacing:0.02em;">
+        Determination Brief
+      </span>
+      <button onclick="document.getElementById('josh-brief-modal').style.display='none'"
+              style="background:none;border:none;font-size:20px;cursor:pointer;
+                     color:rgba(255,255,255,0.75);line-height:1;padding:0;">&#10005;</button>
+    </div>
+    <iframe id="josh-brief-frame"
+            style="flex:1;border:none;width:100%;background:#fff;"
+            src="about:blank"></iframe>
+  </div>
+</div>
+
+<script id="josh-brief-modals">
+(function () {{
+  var _BRIEFS = {brief_data_js};
+
+  window.joshBrief = {{
+    show: function (filename) {{
+      var html = _BRIEFS[filename];
+      if (!html) {{ console.warn('joshBrief: no data for', filename); return; }}
+      var frame = document.getElementById('josh-brief-frame');
+      frame.srcdoc = html;
+      document.getElementById('josh-brief-modal').style.display = 'block';
+    }}
+  }};
+
+  // Intercept brief link clicks — override href navigation with inline modal.
+  // Runs on DOMContentLoaded (brief links are pre-rendered in the HTML body).
+  document.addEventListener('DOMContentLoaded', function () {{
+    document.querySelectorAll('a[href^="brief_v3_"]').forEach(function (link) {{
+      link.addEventListener('click', function (e) {{
+        e.preventDefault();
+        window.joshBrief.show(link.getAttribute('href'));
+      }});
+    }});
+    // Close on backdrop click
+    document.getElementById('josh-brief-modal').addEventListener('click', function (e) {{
+      if (e.target === this) this.style.display = 'none';
+    }});
+  }});
+}})();
+</script>
+"""
+
+    if "</body>" in html:
+        html = html.replace("</body>", injection + "\n</body>", 1)
+    else:
+        html += injection
+    html_path.write_text(html, encoding="utf-8")
+    logger.info("  Brief modals injected (%d briefs).", len(brief_data))
 
 
 def _build_whatif_ui_html() -> str:
