@@ -2549,6 +2549,15 @@ def _inject_what_happened_layer(
     _layers.forEach(function(l) {{ if (!map.hasLayer(l)) l.addTo(map); }});
     document.getElementById('josh-wh-panel').classList.remove('josh-wh-hidden');
     document.getElementById('josh-wh-btn').classList.add('active');
+    // Hide project panel and what-if panel so the historical narrative has full focus
+    var dp = document.getElementById('demo-panel');
+    if (dp) {{ dp.dataset.whHidden = dp.style.display || ''; dp.style.display = 'none'; }}
+    var wi = document.getElementById('josh-whatif-panel');
+    if (wi) {{ wi.dataset.whHidden = wi.style.display || ''; wi.style.display = 'none'; }}
+    var wib = document.getElementById('josh-whatif-open-btn');
+    if (wib) {{ wib.dataset.whHidden = wib.style.display || ''; wib.style.display = 'none'; }}
+    // Close any open marker popups
+    if (map) map.closePopup();
     _visible = true;
   }}
 
@@ -2557,6 +2566,13 @@ def _inject_what_happened_layer(
     if (map) _layers.forEach(function(l) {{ if (map.hasLayer(l)) map.removeLayer(l); }});
     document.getElementById('josh-wh-panel').classList.add('josh-wh-hidden');
     document.getElementById('josh-wh-btn').classList.remove('active');
+    // Restore project panel and what-if button
+    var dp = document.getElementById('demo-panel');
+    if (dp) {{ dp.style.display = dp.dataset.whHidden || ''; }}
+    var wi = document.getElementById('josh-whatif-panel');
+    if (wi) {{ wi.style.display = wi.dataset.whHidden || ''; }}
+    var wib = document.getElementById('josh-whatif-open-btn');
+    if (wib) {{ wib.style.display = wib.dataset.whHidden || ''; }}
     _visible = false;
   }}
 
