@@ -2350,7 +2350,7 @@ def _inject_what_happened_layer(
   color: #f0ece4;
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.55);
-  z-index: 9500;
+  z-index: 10002;
   overflow: hidden;
   display: flex;
   flex-direction: column;
