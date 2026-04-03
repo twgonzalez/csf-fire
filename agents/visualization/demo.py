@@ -2422,7 +2422,7 @@ def _inject_what_happened_layer(
 }
 #josh-wh-btn {
   position: fixed;
-  top: 80px; right: 10px;
+  top: 80px; right: 328px;
   z-index: 9400;
   background: #8B1A1A;
   color: #fff;
