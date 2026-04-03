@@ -2420,6 +2420,9 @@ def _inject_what_happened_layer(
   line-height: 1.5; border-top: 1px solid rgba(255,255,255,.08);
   padding-top: 10px;
 }
+@keyframes josh-rd-march {
+  to { stroke-dashoffset: -22; }
+}
 #josh-wh-btn {
   position: fixed;
   top: 80px; right: 328px;
@@ -2483,10 +2486,19 @@ def _inject_what_happened_layer(
     // 2. Road diet annotation on Skyway
     if (RD_COORDS && RD_COORDS.length > 1) {{
       var rdLayer = L.polyline(RD_COORDS, {{
-        color: '#E85D04', weight: 7, opacity: 0.9,
-        dashArray: '12 6',
-        lineCap: 'round',
-      }}).bindPopup(
+        color: '#E85D04', weight: 7, opacity: 0.95,
+        dashArray: '14 8',
+        lineCap: 'butt',
+      }});
+      rdLayer.addTo(map);
+      // Marching-ants animation: animate stroke-dashoffset on the SVG path
+      setTimeout(function() {{
+        var path = rdLayer._path;
+        if (path) {{
+          path.style.animation = 'josh-rd-march 0.7s linear infinite';
+        }}
+      }}, 80);
+      rdLayer.bindPopup(
         '<div style="font-family:system-ui;font-size:12px;line-height:1.6;max-width:280px">'
         + '<b style="color:#E85D04">Skyway Road Diet (~2014)</b><br>'
         + 'Narrowed from <b>4 travel lanes → 2 lanes</b><br>'

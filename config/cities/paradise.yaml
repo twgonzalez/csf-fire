@@ -173,14 +173,23 @@ what_happened:
       (one each direction plus a center turn lane) as part of a 'complete streets'
       revitalization project — despite a 2008 Butte County Grand Jury report
       explicitly recommending Skyway be widened for emergency evacuation.
-    # Approximate polyline tracing the downtown Paradise Skyway segment
+    # Polyline derived from 4-lane OSM edges on Skyway (EPSG:26910 → WGS84)
+    # Covers the downtown commercial corridor where lanes=4 in 2018-11-07 snapshot
     polyline:
-      - [39.7518, -121.6272]
-      - [39.7532, -121.6218]
-      - [39.7545, -121.6162]
-      - [39.7556, -121.6105]
-      - [39.7566, -121.6050]
-      - [39.7574, -121.5998]
+      - [39.74662, -121.64555]
+      - [39.74651, -121.64425]
+      - [39.74642, -121.64384]
+      - [39.74613, -121.64245]
+      - [39.74616, -121.63812]
+      - [39.74628, -121.63764]
+      - [39.74715, -121.63611]
+      - [39.74976, -121.63258]
+      - [39.75025, -121.63205]
+      - [39.75160, -121.63073]
+      - [39.75173, -121.63060]
+      - [39.75302, -121.62940]
+      - [39.75321, -121.62923]
+      - [39.75383, -121.62866]
     before_lanes: 4
     before_type: "multilane"
     before_speed_mph: 40
