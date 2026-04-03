@@ -1,0 +1,115 @@
+# Paradise, CA — City Configuration
+# Camp Fire (November 8, 2018) canonical validation case.
+#
+# HISTORICAL DATA SNAPSHOT: All data sources pinned to day-before-fire.
+#   OSM road network : 2018-11-07 (Overpass API date filter)
+#   Census ACS       : 2017 5-year (most recent pre-fire release)
+#   Census TIGER     : 2018 vintage (CDP boundary + roads)
+#
+# PURPOSE: Validate the ΔT standard retroactively against the deadliest
+# California wildfire on record. Any project ≥ 15 units in Paradise's
+# VHFHSZ should have been DISCRETIONARY under JOSH. This run proves it.
+
+city_name: "Paradise"
+state: "CA"
+state_fips: "06"
+county_fips: "007"   # Butte County
+place_fips: "55520"  # Paradise CDP
+
+# OSMnx place query — use county qualifier to avoid Nominatim ambiguity
+osmnx_place: "Paradise, Butte County, California, USA"
+
+# ============================================================
+# HISTORICAL OSM SNAPSHOT
+# Overpass API date filter: returns road network as of 2018-11-07.
+# OSMnx 2.x: inserted into overpass_settings between timeout and maxsize.
+# ============================================================
+osm_historical_date: "2018-11-07T00:00:00Z"
+
+# ============================================================
+# CENSUS VINTAGE OVERRIDES
+# ACS 2017 5-year (released Dec 2018) is the most recent pre-fire
+# annual release. TIGER 2018 CDP boundary reflects pre-fire extent.
+# ============================================================
+acs_vintage: 2017
+tiger_url: "https://www2.census.gov/geo/tiger/TIGER2018/PLACE/tl_2018_06_place.zip"
+
+# ============================================================
+# TIGER ROAD SUPPLEMENT
+# Butte County 2018 road centerlines fill any OSM coverage gaps.
+# Rural Butte County had lower OSM contributor density in 2018 than
+# Berkeley or Encinitas — local residential streets may be sparse.
+# Primary evacuation routes (Skyway, Clark, Pentz, Pearson) are
+# reliably mapped; supplement targets local connectors only.
+# ============================================================
+tiger_roads_supplement: true
+tiger_roads_url: "https://www2.census.gov/geo/tiger/TIGER2018/ROADS/tl_2018_06007_roads.zip"
+
+# ============================================================
+# FHSZ — Paradise is SRA (State Responsibility Area).
+# The CAL FIRE HHZ_ref_FHSZ API returns SRA zones and fetches correctly
+# (211 features returned on first run). Road segment degradation is
+# applied correctly: 2,257 of 4,013 segments flagged VHFHSZ.
+#
+# KNOWN DATA QUALITY ISSUE (2026-04-02):
+# The FHSZ polygon features have small gaps at parcel/road boundaries.
+# Project point-in-polygon lookups occasionally land in these gaps,
+# returning non_fhsz instead of vhfhsz. This affects the ΔT threshold
+# applied to the project (6.0 min non_fhsz vs 2.25 min vhfhsz) but
+# does NOT affect road capacity degradation (which is correct).
+# Impact: large projects (≥ 80 units) are DISCRETIONARY under either
+# threshold. Small projects near the boundary are potentially mis-tiered.
+# Fix: obtain the CAL FIRE FRAP statewide FHSZ shapefile and clip to
+# Paradise boundary for gapless coverage, then set fhsz_local_file below.
+# See config/cities/fhsz/README.md for acquisition instructions.
+# ============================================================
+# fhsz_local_file: "config/cities/fhsz/paradise_fhsz.geojson"  # uncomment after clipping
+
+# Coordinate Reference System
+crs: "EPSG:4326"
+analysis_crs: "EPSG:26910"  # UTM Zone 10N for distance calculations (meters)
+
+# ============================================================
+# PARAMETER OVERRIDES
+# v3.4: Mobilization is constant 0.90 (NFPA 101). FHSZ affects road
+# capacity only. No overrides needed — global VHFHSZ parameters apply:
+#   safe_egress_window.vhfhsz = 45 min
+#   hazard_degradation.vhfhsz = 0.35
+#   ΔT threshold (VHFHSZ)    = 45 × 0.05 = 2.25 min
+# Any project ≥ 15 units on Skyway (2-lane, 35 mph, degraded to
+# ~551 vph effective) exceeds 2.25-min threshold → DISCRETIONARY.
+# ============================================================
+overrides: {}
+
+# No universities (Butte College is in Oroville, outside Paradise)
+# No commute_in_fraction override needed
+
+# ============================================================
+# KNOWN EVACUATION ROUTES (for output validation)
+# Camp Fire actual evacuation order: Skyway, Clark Road, Pentz Road,
+# Pearson Road, Neal Road. Skyway was the catastrophic bottleneck:
+# two lanes westbound serving ~26,000 residents toward Chico/Hwy 99.
+# ============================================================
+known_evacuation_routes:
+  - "Skyway"
+  - "Clark Road"
+  - "Pentz Road"
+  - "Pearson Road"
+  - "Neal Road"
+  - "Bille Road"
+
+notes: >
+  Paradise, CA — Camp Fire (November 8, 2018) canonical validation case.
+  Historical snapshot: OSM 2018-11-07, ACS 2017 5-year, TIGER 2018.
+  Population: ~26,682 (2017 ACS). Housing units: ~11,820.
+  Primary egress: Skyway — 2-lane two-way, only major westbound route to
+  Hwy 99 at Chico (~13 miles). On November 8, 2018, Skyway backed up for
+  miles within minutes of the evacuation order; 85 people died.
+  Secondary: Clark Road (east to Hwy 32), Pentz Road (south to Hwy 70),
+  Pearson Road (south to Hwy 70 via Magalia). All VHFHSZ.
+  ΔT threshold (VHFHSZ): 45 min × 5% = 2.25 min.
+  Skyway effective capacity: ~1,575 vph (2-lane 35 mph) × 0.35 = ~551 vph.
+  A 15-unit project: 15 × 2.5 × 0.90 = 33.75 vph → ΔT = 3.67 min > 2.25 min.
+  JOSH finding: NO project ≥ 15 units served by Skyway qualifies as
+  MINISTERIAL under the ΔT standard. All would require DISCRETIONARY review.
+  v3.4: Mobilization constant 0.90 (NFPA 101). FHSZ affects capacity only.

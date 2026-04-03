@@ -93,9 +93,23 @@ def acquire_data(
     # Road network
     roads_path = data_dir / "roads.gpkg"
     if force_refresh or _is_stale(metadata, "roads", ttl_days):
-        logger.info("Fetching road network from OpenStreetMap...")
-        roads_gdf = fetch_road_network(place_name, roads_path, config)
-        metadata["roads"] = _meta_entry("OpenStreetMap via OSMnx")
+        historical_date = city_config.get("osm_historical_date")
+        if historical_date:
+            logger.info(f"Fetching road network from OpenStreetMap (historical: {historical_date})...")
+            source_label = f"OpenStreetMap via OSMnx (date: {historical_date})"
+        else:
+            logger.info("Fetching road network from OpenStreetMap...")
+            source_label = "OpenStreetMap via OSMnx"
+        roads_gdf = fetch_road_network(place_name, roads_path, config, historical_date=historical_date)
+        # Supplement with TIGER roads if configured (fills OSM gaps in rural areas)
+        if city_config.get("tiger_roads_supplement"):
+            tiger_url = city_config.get("tiger_roads_url")
+            if tiger_url:
+                roads_gdf = _supplement_with_tiger_roads(
+                    roads_gdf, tiger_url, data_dir, city_config, config
+                )
+                source_label += " + Census TIGER roads supplement"
+        metadata["roads"] = _meta_entry(source_label)
     else:
         logger.info("Using cached road network.")
         roads_gdf = gpd.read_file(roads_path, layer="roads")
@@ -451,6 +465,7 @@ def fetch_road_network(
     place_name: str,
     output_path: Path,
     config: dict,
+    historical_date: Optional[str] = None,
 ) -> gpd.GeoDataFrame:
     """
     Download road network from OpenStreetMap via OSMnx.
@@ -459,8 +474,21 @@ def fetch_road_network(
     - lane_count (measured or estimated)
     - speed_limit (measured or estimated)
     - road_type (freeway | multilane | two_lane)
+
+    If historical_date is set (ISO 8601, e.g. "2018-11-07T00:00:00Z"), the
+    Overpass API date filter is applied so the query returns the road network
+    as it existed at that timestamp. Used for Camp Fire retroactive validation.
     """
-    G = ox.graph_from_place(place_name, network_type="drive", simplify=True)
+    if historical_date:
+        original_settings = ox.settings.overpass_settings
+        ox.settings.overpass_settings = (
+            f'[out:json][timeout:{{timeout}}][date:"{historical_date}"]{{maxsize}}'
+        )
+    try:
+        G = ox.graph_from_place(place_name, network_type="drive", simplify=True)
+    finally:
+        if historical_date:
+            ox.settings.overpass_settings = original_settings
     _, edges = ox.graph_to_gdfs(G)
 
     gdf = edges.reset_index()
@@ -518,6 +546,147 @@ def fetch_road_network(
     gdf.to_file(output_path, layer="roads", driver="GPKG")
     logger.info(f"  Road network saved: {output_path} ({len(gdf)} segments)")
     return gdf
+
+
+# ---------------------------------------------------------------------------
+# TIGER Roads Supplement
+# ---------------------------------------------------------------------------
+
+# MTFCC → (road_type, speed_mph, lane_count) defaults for TIGER roads
+_TIGER_MTFCC_ATTRS: dict[str, tuple[str, int, int]] = {
+    "S1100": ("multilane", 55, 2),   # Primary Road (state/US hwy)
+    "S1200": ("two_lane",  40, 2),   # Secondary Road (county/state route)
+    "S1400": ("two_lane",  25, 1),   # Local Neighborhood Road
+    "S1500": ("two_lane",  15, 1),   # Vehicular Trail (4WD)
+    "S1630": ("two_lane",  25, 1),   # Ramp
+    "S1640": ("multilane", 40, 2),   # Service Drive
+    "S1710": ("two_lane",  25, 1),   # Walkway / Pedestrian Trail (skip below)
+    "S1720": ("two_lane",  15, 1),   # Stairway (skip below)
+    "S1730": ("two_lane",  15, 1),   # Alley
+    "S1740": ("two_lane",  15, 1),   # Private Road for Service Vehicles
+    "S1750": ("two_lane",  15, 1),   # Internal US Census Bureau Use
+    "S1780": ("two_lane",  25, 1),   # Parking Lot Road
+    "S1820": ("two_lane",  15, 1),   # Bike Path or Trail
+    "S1830": ("two_lane",  15, 1),   # Bridle Path
+}
+
+# MTFCC codes to skip entirely (non-drivable)
+_TIGER_SKIP_MTFCC = {"S1710", "S1720", "S1820", "S1830"}
+
+
+def _supplement_with_tiger_roads(
+    osm_gdf: gpd.GeoDataFrame,
+    tiger_roads_url: str,
+    data_dir: Path,
+    city_config: dict,
+    config: dict,
+) -> gpd.GeoDataFrame:
+    """
+    Download Census TIGER road centerlines and merge any missing segments
+    into the OSM road network.
+
+    Strategy:
+      1. Download TIGER county roads shapefile (cached as tiger_roads.gpkg).
+      2. Clip to city boundary.
+      3. Buffer OSM segments by 25 m; TIGER segments whose midpoint falls
+         inside an OSM buffer are considered duplicates and skipped.
+      4. Remaining TIGER segments get road attributes from MTFCC lookup and
+         are appended to the OSM GeoDataFrame with lane_count_estimated=True.
+    """
+    analysis_crs = city_config.get("analysis_crs", "EPSG:26910")
+    tiger_cache = data_dir / "tiger_roads.gpkg"
+
+    # --- Download and cache ---
+    if not tiger_cache.exists():
+        logger.info(f"  Downloading TIGER roads: {tiger_roads_url}")
+        try:
+            resp = requests.get(tiger_roads_url, timeout=120, stream=True)
+            resp.raise_for_status()
+            with zipfile.ZipFile(BytesIO(resp.content)) as z:
+                tmp_dir = data_dir / "_tiger_roads_tmp"
+                tmp_dir.mkdir(exist_ok=True)
+                z.extractall(tmp_dir)
+            shp_files = list(tmp_dir.glob("*.shp"))
+            if not shp_files:
+                logger.warning("  TIGER roads ZIP contained no shapefile — skipping supplement.")
+                return osm_gdf
+            tiger_raw = gpd.read_file(shp_files[0]).to_crs("EPSG:4326")
+            tiger_raw.to_file(tiger_cache, driver="GPKG")
+            logger.info(f"  TIGER roads cached: {tiger_cache} ({len(tiger_raw)} segments)")
+        except Exception as e:
+            logger.warning(f"  TIGER roads download failed ({e}) — skipping supplement.")
+            return osm_gdf
+    else:
+        tiger_raw = gpd.read_file(tiger_cache)
+        logger.info(f"  Using cached TIGER roads ({len(tiger_raw)} segments)")
+
+    # --- Filter to drivable roads ---
+    if "MTFCC" in tiger_raw.columns:
+        tiger_raw = tiger_raw[~tiger_raw["MTFCC"].isin(_TIGER_SKIP_MTFCC)].copy()
+
+    # --- Clip to OSM bounding box (fast pre-filter) ---
+    osm_bounds = osm_gdf.total_bounds  # (minx, miny, maxx, maxy)
+    tiger_raw = tiger_raw.cx[osm_bounds[0]:osm_bounds[2], osm_bounds[1]:osm_bounds[3]]
+    if tiger_raw.empty:
+        logger.info("  No TIGER roads in OSM bounding box — supplement not needed.")
+        return osm_gdf
+
+    # --- Project to analysis CRS for distance operations ---
+    osm_proj  = osm_gdf.to_crs(analysis_crs)
+    tiger_proj = tiger_raw.to_crs(analysis_crs)
+
+    # --- Build 25 m buffer around all OSM segments ---
+    osm_union = osm_proj.geometry.buffer(25).unary_union
+
+    # --- Find TIGER segments whose midpoint is NOT covered by OSM buffer ---
+    tiger_proj = tiger_proj.copy()
+    tiger_proj["_mid"] = tiger_proj.geometry.interpolate(0.5, normalized=True)
+    missing_mask = ~tiger_proj["_mid"].within(osm_union)
+    tiger_missing = tiger_proj[missing_mask].copy()
+
+    if tiger_missing.empty:
+        logger.info("  TIGER supplement: all TIGER roads already covered by OSM — no gaps.")
+        return osm_gdf
+
+    logger.info(
+        f"  TIGER supplement: {len(tiger_missing)} road segments not in OSM "
+        f"(of {len(tiger_proj)} total TIGER segments in bbox)"
+    )
+
+    # --- Assign road attributes from MTFCC ---
+    def _tiger_attrs(row):
+        mtfcc = row.get("MTFCC", "S1400")
+        road_type, speed, lanes = _TIGER_MTFCC_ATTRS.get(mtfcc, ("two_lane", 25, 1))
+        name = row.get("FULLNAME", "") or ""
+        return road_type, speed, lanes, name
+
+    attr_results = tiger_missing.apply(_tiger_attrs, axis=1, result_type="expand")
+    attr_results.columns = ["road_type", "speed_limit", "lane_count", "name"]
+    tiger_missing = tiger_missing.join(attr_results)
+    tiger_missing["lane_count_estimated"] = True
+    tiger_missing["speed_estimated"] = True
+    tiger_missing["highway"] = tiger_missing.get("MTFCC", "S1400").map(
+        lambda m: "residential" if m == "S1400" else ("primary" if m == "S1100" else "secondary")
+    ) if "MTFCC" in tiger_missing.columns else "residential"
+    tiger_missing["osmid"] = None
+    tiger_missing["length_meters"] = tiger_missing.geometry.length
+    tiger_missing["width_meters"] = None
+    tiger_missing["speed_inferred_from_width"] = False
+
+    # Project back to WGS84 for storage consistency
+    tiger_missing = tiger_missing.to_crs("EPSG:4326")
+
+    # Keep only columns present in OSM GeoDataFrame
+    keep = [c for c in osm_gdf.columns if c in tiger_missing.columns]
+    tiger_append = tiger_missing[keep].copy()
+
+    combined = pd.concat([osm_gdf, tiger_append], ignore_index=True)
+    combined = gpd.GeoDataFrame(combined, crs="EPSG:4326")
+    logger.info(
+        f"  Road network after TIGER supplement: {len(combined)} segments "
+        f"({len(osm_gdf)} OSM + {len(tiger_append)} TIGER gap fills)"
+    )
+    return combined
 
 
 def _resolve_lanes(hw: str, osm_lanes_value, lane_defaults: dict) -> tuple[int, bool]:
@@ -690,7 +859,8 @@ def fetch_census_housing_units(
     county_fips = str(city_config.get("county_fips", "001")).zfill(3)
     state_lower = city_config.get("state", "CA").lower()
     census_cfg  = config.get("census", {})
-    acs_year    = int(census_cfg.get("acs_year", 2022))
+    # city_config acs_vintage overrides the global acs_year (used for historical snapshots)
+    acs_year    = int(city_config.get("acs_vintage", census_cfg.get("acs_year", 2022)))
     hu_table    = census_cfg.get("housing_units_table", "B25001_001E")
 
     _EMPTY = gpd.GeoDataFrame(
