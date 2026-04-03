@@ -113,3 +113,89 @@ notes: >
   JOSH finding: NO project ≥ 15 units served by Skyway qualifies as
   MINISTERIAL under the ΔT standard. All would require DISCRETIONARY review.
   v3.4: Mobilization constant 0.90 (NFPA 101). FHSZ affects capacity only.
+
+# ============================================================
+# "WHAT HAPPENED" LAYER — Camp Fire retroactive annotation
+# Injected into the demo map as a toggle overlay showing the fire
+# perimeter, road diet annotation, Grand Jury timeline, and JOSH verdict.
+# ============================================================
+what_happened:
+  enabled: true
+  fire_name: "Camp Fire"
+  fire_date: "November 8, 2018"
+  fatalities: 85
+  # Camp Fire Final Perimeter — ArcGIS FeatureServer (Paradise_Camp_Fire_Perimeter, layer 4)
+  # Source: ESRI/NIFC open data — 5 features, ~153 km² burn extent
+  # URL verified 2026-04-02; use where=1=1 to fetch all 5 features in one call.
+  fire_perimeter_api: "https://services2.arcgis.com/cFEFS0EWrhfDeVw9/arcgis/rest/services/Paradise_Camp_Fire_Perimeter/FeatureServer/4/query"
+  fire_perimeter_name: "Camp"   # label only — not used as a filter (layer already scoped to Camp Fire)
+  fire_perimeter_year: 2018     # label only
+  # Fire ignition point: Camp Creek Rd / Poe Dam area, Pulga CA
+  ignition_point:
+    lat: 39.8228
+    lon: -121.4194
+    label: "Ignition — Camp Creek Rd, Pulga (6:15 AM)"
+
+  # Grand Jury → dismissal → road diet → fire timeline
+  timeline:
+    - year: "2008"
+      event: "Butte County Grand Jury recommends widening Skyway — Humboldt Fire revealed evacuation gridlock risk"
+      type: "warning"
+    - year: "2009"
+      event: "County Board of Supervisors dismisses Grand Jury recommendations as 'not reasonable'"
+      type: "dismissal"
+    - year: "~2014"
+      event: "Town of Paradise narrows Skyway from 4 travel lanes to 2 — 'road diet' for downtown revitalization"
+      type: "action"
+    - year: "Nov 8, 2018 · 6:15 AM"
+      event: "Camp Fire ignites at Camp Creek Road near Pulga — driven by 35 mph winds"
+      type: "fire"
+    - year: "~8:00 AM"
+      event: "Traffic deteriorating throughout Paradise — evacuation order issued"
+      type: "fire"
+    - year: "~8:30 AM"
+      event: "Complete gridlock on Skyway — fire overtaking vehicles on Pentz Road"
+      type: "fire"
+    - year: "~9:00 AM"
+      event: "Pentz Road closed by fire — first of five egress arteries lost"
+      type: "fire"
+    - year: "Nov 8, 2018"
+      event: "85 people killed — most in vehicles or at residences unable to evacuate"
+      type: "outcome"
+
+  # Skyway road diet annotation
+  # Approximate route of the downtown segment narrowed ~2014
+  # 4 travel lanes → 2 lanes (one each direction) + center turn lane
+  road_diet:
+    label: "Skyway Road Diet (c. 2014)"
+    description: >
+      The Town of Paradise narrowed downtown Skyway from 4 travel lanes to 2
+      (one each direction plus a center turn lane) as part of a 'complete streets'
+      revitalization project — despite a 2008 Butte County Grand Jury report
+      explicitly recommending Skyway be widened for emergency evacuation.
+    # Approximate polyline tracing the downtown Paradise Skyway segment
+    polyline:
+      - [39.7518, -121.6272]
+      - [39.7532, -121.6218]
+      - [39.7545, -121.6162]
+      - [39.7556, -121.6105]
+      - [39.7566, -121.6050]
+      - [39.7574, -121.5998]
+    before_lanes: 4
+    before_type: "multilane"
+    before_speed_mph: 40
+    before_effective_capacity_vph: 665    # 1,900 vph × 0.35 VHFHSZ degradation
+    after_lanes: 2
+    after_type: "two_lane"
+    after_speed_mph: 35
+    after_effective_capacity_vph: 551     # 1,575 vph × 0.35 VHFHSZ degradation
+    capacity_removed_vph: 114
+    delta_t_min: 12.4                     # (114 / 551) × 60
+    threshold_min: 2.25                   # VHFHSZ safe_egress_window × max_project_share
+    josh_result: "DISCRETIONARY"
+    josh_note: >
+      The road diet removed 114 vph of effective evacuation capacity from Paradise's
+      primary egress. Modeled as a capacity-reducing infrastructure change, its ΔT
+      impact (12.4 min) exceeds the VHFHSZ threshold (2.25 min) by 5.5×.
+      Under JOSH, this change would have required discretionary review with a
+      documented evacuation capacity analysis — which was never conducted.

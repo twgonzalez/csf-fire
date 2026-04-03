@@ -672,6 +672,8 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
         evacuation_paths=evacuation_paths,
         graph_json_path=graph_json_path if graph_json_path.exists() else None,
         params_json_path=params_json_path if params_json_path.exists() else None,
+        city_config=city_config,
+        data_dir=data_dir,
     )
     console.print(f"  Map saved: [cyan]{map_path}[/cyan]")
     console.print(f"  Open with: [dim]open {map_path}[/dim]")

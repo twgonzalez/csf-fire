@@ -22,6 +22,7 @@ from pathlib import Path
 
 import folium
 import geopandas as gpd
+import requests
 from folium.plugins import AntPath
 from shapely.geometry import Point, mapping
 from shapely.ops import unary_union
@@ -225,6 +226,8 @@ def create_demo_map(
     evacuation_paths: list | None = None,
     graph_json_path: Path | None = None,
     params_json_path: Path | None = None,
+    city_config: dict | None = None,
+    data_dir: Path | None = None,
 ) -> Path:
     """
     Generate a multi-project comparison map — v3.0 ΔT Standard.
@@ -890,6 +893,13 @@ def create_demo_map(
     # Replace external brief file links with inline srcdoc modals so the
     # "View Determination Brief" button works when opened from file://.
     _inject_brief_modals(output_path)
+
+    # ── "What Happened" layer ──────────────────────────────────────────────
+    # City-specific historical overlay: fire perimeter, road diet annotation,
+    # Grand Jury timeline, and JOSH infrastructure verdict. Opt-in via
+    # city_config.what_happened.enabled. Currently used for Paradise, CA.
+    if city_config and data_dir:
+        _inject_what_happened_layer(output_path, city_config, data_dir)
 
     return output_path
 
@@ -2143,3 +2153,419 @@ def _build_demo_legend_html(
 }})();
 </script>
 """
+
+
+# ---------------------------------------------------------------------------
+# "What Happened" historical overlay — Camp Fire retroactive annotation
+# ---------------------------------------------------------------------------
+
+def _fetch_fire_perimeter(what_happened: dict, data_dir: Path) -> dict:
+    """
+    Fetch and cache the Camp Fire burn perimeter GeoJSON from CAL FIRE FRAP.
+
+    Downloads the full California fire perimeters dataset from the CNRA Open
+    Data portal, filters to the target fire by FIRE_NAME + YEAR_, converts to
+    EPSG:4326, and caches the result as data/{city}/fire_perimeter.geojson.
+    The cache has no expiry — historical fire perimeters never change.
+
+    First run downloads the full statewide dataset (~30–60 s). Subsequent runs
+    load from cache instantly.
+
+    Returns a GeoJSON FeatureCollection dict, or {} on failure.
+    """
+    cache_path = data_dir / "fire_perimeter.geojson"
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text())
+        except Exception:
+            pass
+
+    api_url   = what_happened.get("fire_perimeter_api", "")
+    fire_name = what_happened.get("fire_perimeter_name", "")
+    fire_year = int(what_happened.get("fire_perimeter_year", 2018))
+
+    if not api_url:
+        logger.warning("  fire_perimeter_api not set in city config — skipping perimeter.")
+        return {}
+
+    try:
+        logger.info(
+            f"  Fetching fire perimeter from ArcGIS FeatureServer "
+            f"({fire_name} {fire_year}) — first run only, will be cached..."
+        )
+        resp = requests.get(
+            api_url,
+            params={
+                "where": "1=1",
+                "outFields": "*",
+                "f": "geojson",
+                "outSR": "4326",
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        features = result.get("features", [])
+        if not features:
+            logger.warning(f"  No features returned from {api_url}")
+            return {}
+        cache_path.write_text(json.dumps(result))
+        logger.info(
+            f"  Fire perimeter cached: {len(features)} feature(s) "
+            f"({fire_name} {fire_year}) → {cache_path.name}"
+        )
+        return result
+    except Exception as exc:
+        logger.warning(f"  Fire perimeter fetch failed: {exc}")
+    return {}
+
+
+def _inject_what_happened_layer(
+    html_path: Path,
+    city_config: dict,
+    data_dir: Path,
+) -> None:
+    """
+    Inject the "What Happened" toggle layer into the saved demo map HTML.
+
+    Adds:
+      • A 🔥 "What Happened" button (top-right of map)
+      • A slide-in dark panel (left) with timeline + JOSH road-diet verdict
+      • Fire burn perimeter polygon (semi-transparent red)
+      • Road diet Polyline annotation on Skyway (orange dashed)
+      • Fire ignition point marker
+
+    Activated by city_config.what_happened.enabled = true.
+    """
+    wh = city_config.get("what_happened", {})
+    if not wh.get("enabled"):
+        return
+
+    perimeter  = _fetch_fire_perimeter(wh, data_dir)
+    road_diet  = wh.get("road_diet", {})
+    timeline   = wh.get("timeline", [])
+    fire_name  = wh.get("fire_name", "Fire")
+    fire_date  = wh.get("fire_date", "")
+    fatalities = wh.get("fatalities", 0)
+    ignition   = wh.get("ignition_point", {})
+
+    rd_polyline      = road_diet.get("polyline", [])
+    rd_label         = road_diet.get("label", "Road Diet")
+    rd_before_lanes  = road_diet.get("before_lanes", 4)
+    rd_after_lanes   = road_diet.get("after_lanes", 2)
+    rd_before_cap    = road_diet.get("before_effective_capacity_vph", 0)
+    rd_after_cap     = road_diet.get("after_effective_capacity_vph", 0)
+    rd_removed       = road_diet.get("capacity_removed_vph", 0)
+    rd_dt            = road_diet.get("delta_t_min", 0)
+    rd_threshold     = road_diet.get("threshold_min", 0)
+    rd_result        = road_diet.get("josh_result", "DISCRETIONARY")
+    rd_note          = road_diet.get("josh_note", "")
+    rd_desc          = road_diet.get("description", "")
+
+    # Build timeline HTML rows
+    type_icons = {
+        "warning":   ("⚠", "#e67e22"),
+        "dismissal": ("✗", "#c0392b"),
+        "action":    ("→", "#8e44ad"),
+        "fire":      ("🔥", "#e74c3c"),
+        "outcome":   ("✦", "#7f8c8d"),
+    }
+    timeline_rows = ""
+    for item in timeline:
+        icon, color = type_icons.get(item.get("type", ""), ("•", "#aaa"))
+        timeline_rows += f"""
+        <div class="josh-wh-tl-row">
+          <div class="josh-wh-tl-icon" style="color:{color}">{icon}</div>
+          <div class="josh-wh-tl-body">
+            <div class="josh-wh-tl-year">{item.get('year','')}</div>
+            <div class="josh-wh-tl-event">{item.get('event','')}</div>
+          </div>
+        </div>"""
+
+    html_panel = f"""
+<div id="josh-wh-panel">
+  <div class="josh-wh-hdr">
+    <div>
+      <div class="josh-wh-fire-name">{fire_name.upper()}</div>
+      <div class="josh-wh-fire-date">{fire_date}</div>
+    </div>
+    <div class="josh-wh-fatalities">{fatalities}<span class="josh-wh-killed">killed</span></div>
+    <button class="josh-wh-close" onclick="joshWH.hide()">✕</button>
+  </div>
+  <div class="josh-wh-body">
+
+    <div class="josh-wh-section-label">HOW WE GOT HERE</div>
+    <div class="josh-wh-timeline">{timeline_rows}</div>
+
+    <div class="josh-wh-section-label" style="margin-top:18px">WHAT JOSH WOULD HAVE SAID</div>
+    <div class="josh-wh-verdict">
+      <div class="josh-wh-vd-title">{rd_label}</div>
+      <div class="josh-wh-vd-desc">{rd_desc}</div>
+      <table class="josh-wh-vd-table">
+        <tr>
+          <td>Before ({rd_before_lanes} lanes)</td>
+          <td class="josh-wh-vd-val">{rd_before_cap:,} vph effective</td>
+        </tr>
+        <tr>
+          <td>After ({rd_after_lanes} lanes)</td>
+          <td class="josh-wh-vd-val">{rd_after_cap:,} vph effective</td>
+        </tr>
+        <tr class="josh-wh-vd-sep">
+          <td>Capacity removed</td>
+          <td class="josh-wh-vd-val">{rd_removed:,} vph</td>
+        </tr>
+        <tr class="josh-wh-vd-highlight">
+          <td>ΔT impact</td>
+          <td class="josh-wh-vd-val">{rd_dt} min</td>
+        </tr>
+        <tr>
+          <td>VHFHSZ threshold</td>
+          <td class="josh-wh-vd-val">{rd_threshold} min</td>
+        </tr>
+      </table>
+      <div class="josh-wh-vd-badge">▶ {rd_result}</div>
+      <div class="josh-wh-vd-note">{rd_note}</div>
+    </div>
+
+    <div class="josh-wh-attribution">
+      Sources: NIST TN 2252 (NETTRA) · Butte County Grand Jury 2008–2009
+      · CAL FIRE FRAP · Cal OES After Action Report
+    </div>
+  </div>
+</div>
+
+<button id="josh-wh-btn" onclick="joshWH.toggle()" title="Show Camp Fire context">
+  🔥 What Happened
+</button>
+"""
+
+    css = """
+<style id="josh-wh-css">
+#josh-wh-panel {
+  display: none;
+  position: fixed;
+  top: 60px; left: 10px; bottom: 10px;
+  width: 340px;
+  background: rgba(18,18,20,0.96);
+  color: #f0ece4;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  z-index: 9500;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  font-size: 12px;
+}
+#josh-wh-panel.josh-wh-hidden { display: none !important; }
+.josh-wh-hdr {
+  background: #8B1A1A;
+  padding: 14px 16px 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.josh-wh-fire-name {
+  font-size: 15px; font-weight: 700; letter-spacing: .08em;
+  color: #fff;
+}
+.josh-wh-fire-date { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 2px; }
+.josh-wh-fatalities {
+  font-size: 26px; font-weight: 700; color: #fff; line-height: 1;
+  text-align: right;
+}
+.josh-wh-killed { display: block; font-size: 10px; font-weight: 400; color: rgba(255,255,255,.65); letter-spacing: .05em; }
+.josh-wh-close {
+  background: none; border: none; color: rgba(255,255,255,.6);
+  font-size: 16px; cursor: pointer; padding: 0 0 0 10px; line-height: 1;
+  flex-shrink: 0; align-self: flex-start;
+}
+.josh-wh-close:hover { color: #fff; }
+.josh-wh-body {
+  overflow-y: auto; padding: 14px 16px 16px; flex: 1;
+}
+.josh-wh-section-label {
+  font-size: 9px; letter-spacing: .18em; color: #E85D04;
+  font-weight: 700; margin-bottom: 10px;
+}
+.josh-wh-timeline { display: flex; flex-direction: column; gap: 8px; }
+.josh-wh-tl-row { display: flex; gap: 9px; align-items: flex-start; }
+.josh-wh-tl-icon { font-size: 13px; flex-shrink: 0; width: 16px; text-align: center; margin-top: 1px; }
+.josh-wh-tl-body { flex: 1; }
+.josh-wh-tl-year { font-size: 10px; color: #E85D04; font-weight: 600; margin-bottom: 1px; }
+.josh-wh-tl-event { font-size: 11px; color: #d8d2c8; line-height: 1.4; }
+.josh-wh-verdict {
+  background: rgba(255,255,255,.05);
+  border-left: 3px solid #E85D04;
+  border-radius: 4px;
+  padding: 12px 12px 10px;
+}
+.josh-wh-vd-title { font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.josh-wh-vd-desc { font-size: 11px; color: #a09890; line-height: 1.4; margin-bottom: 10px; }
+.josh-wh-vd-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+.josh-wh-vd-table td { padding: 3px 0; font-size: 11px; color: #c8c0b4; }
+.josh-wh-vd-table td.josh-wh-vd-val { text-align: right; color: #f0ece4; }
+.josh-wh-vd-sep td { border-top: 1px solid rgba(255,255,255,.1); padding-top: 6px; }
+.josh-wh-vd-highlight td { color: #E85D04 !important; font-weight: 700; font-size: 12px; }
+.josh-wh-vd-badge {
+  background: #8B1A1A; color: #fff;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  padding: 5px 10px; border-radius: 4px;
+  display: inline-block; margin-bottom: 8px;
+}
+.josh-wh-vd-note { font-size: 10px; color: #888; line-height: 1.5; }
+.josh-wh-attribution {
+  margin-top: 16px; font-size: 9px; color: #555;
+  line-height: 1.5; border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 10px;
+}
+#josh-wh-btn {
+  position: fixed;
+  top: 80px; right: 10px;
+  z-index: 9400;
+  background: #8B1A1A;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  letter-spacing: .03em;
+  transition: background .15s;
+}
+#josh-wh-btn:hover { background: #a52020; }
+#josh-wh-btn.active { background: #5a0f0f; }
+</style>
+"""
+
+    js = f"""
+<script id="josh-wh-script">
+(function() {{
+  var PERIMETER   = {json.dumps(perimeter,       separators=(',',':'))};
+  var RD_COORDS   = {json.dumps(rd_polyline,     separators=(',',':'))};
+  var IGNITION    = {json.dumps(ignition,         separators=(',',':'))};
+  var _visible    = false;
+  var _layers     = [];
+
+  function _getMap() {{
+    for (var k in window) {{
+      try {{
+        if (window[k] && window[k]._leaflet_id && window[k].getCenter) return window[k];
+      }} catch(e) {{}}
+    }}
+    return null;
+  }}
+
+  function _buildLayers(map) {{
+    // 1. Burn perimeter
+    if (PERIMETER && PERIMETER.features && PERIMETER.features.length) {{
+      var perimLayer = L.geoJSON(PERIMETER, {{
+        style: function() {{
+          return {{
+            color: '#8B1A1A', weight: 2, opacity: 0.85,
+            fillColor: '#c0392b', fillOpacity: 0.18,
+          }};
+        }},
+      }}).bindPopup(
+        '<div style="font-family:system-ui;font-size:12px;line-height:1.5">'
+        + '<b style="color:#8B1A1A">Camp Fire Burn Perimeter</b><br>'
+        + 'November 8, 2018 · 153,336 acres<br>'
+        + '<span style="color:#888">Source: CAL FIRE FRAP</span>'
+        + '</div>'
+      );
+      _layers.push(perimLayer);
+    }}
+
+    // 2. Road diet annotation on Skyway
+    if (RD_COORDS && RD_COORDS.length > 1) {{
+      var rdLayer = L.polyline(RD_COORDS, {{
+        color: '#E85D04', weight: 7, opacity: 0.9,
+        dashArray: '12 6',
+        lineCap: 'round',
+      }}).bindPopup(
+        '<div style="font-family:system-ui;font-size:12px;line-height:1.6;max-width:280px">'
+        + '<b style="color:#E85D04">Skyway Road Diet (~2014)</b><br>'
+        + 'Narrowed from <b>4 travel lanes → 2 lanes</b><br>'
+        + '<br>'
+        + '<b style="color:#8B1A1A">2008:</b> Grand Jury recommended <em>widening</em> Skyway<br>'
+        + '<b style="color:#8B1A1A">2009:</b> County dismissed recommendations<br>'
+        + '<b style="color:#8B1A1A">~2014:</b> Town narrowed it anyway<br>'
+        + '<br>'
+        + '<table style="width:100%;font-size:11px;border-collapse:collapse">'
+        + '<tr><td>Before (4 lanes)</td><td style="text-align:right"><b>665 vph</b> effective</td></tr>'
+        + '<tr><td>After (2 lanes)</td><td style="text-align:right"><b>551 vph</b> effective</td></tr>'
+        + '<tr style="border-top:1px solid #eee"><td>ΔT impact</td>'
+        + '<td style="text-align:right;color:#E85D04"><b>12.4 min</b> vs 2.25 min threshold</td></tr>'
+        + '</table>'
+        + '<div style="margin-top:8px;background:#8B1A1A;color:#fff;padding:4px 8px;'
+        + 'border-radius:3px;font-size:11px;font-weight:700;display:inline-block">'
+        + '▶ DISCRETIONARY under JOSH</div>'
+        + '</div>',
+        {{ maxWidth: 300 }}
+      );
+      _layers.push(rdLayer);
+    }}
+
+    // 3. Ignition point
+    if (IGNITION && IGNITION.lat && IGNITION.lon) {{
+      var igIcon = L.divIcon({{
+        html: '<div style="font-size:22px;line-height:1;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5))">🔥</div>',
+        className: '',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      }});
+      var igLayer = L.marker([IGNITION.lat, IGNITION.lon], {{ icon: igIcon }})
+        .bindPopup(
+          '<div style="font-family:system-ui;font-size:12px;line-height:1.5">'
+          + '<b>🔥 Camp Fire Ignition Point</b><br>'
+          + (IGNITION.label || '') + '<br>'
+          + '<span style="color:#888;font-size:11px">Camp Creek Rd / Poe Dam, Pulga CA</span>'
+          + '</div>'
+        );
+      _layers.push(igLayer);
+    }}
+  }}
+
+  function _show() {{
+    var map = _getMap();
+    if (!map) return;
+    if (_layers.length === 0) _buildLayers(map);
+    _layers.forEach(function(l) {{ if (!map.hasLayer(l)) l.addTo(map); }});
+    document.getElementById('josh-wh-panel').classList.remove('josh-wh-hidden');
+    document.getElementById('josh-wh-btn').classList.add('active');
+    _visible = true;
+  }}
+
+  function _hide() {{
+    var map = _getMap();
+    if (map) _layers.forEach(function(l) {{ if (map.hasLayer(l)) map.removeLayer(l); }});
+    document.getElementById('josh-wh-panel').classList.add('josh-wh-hidden');
+    document.getElementById('josh-wh-btn').classList.remove('active');
+    _visible = false;
+  }}
+
+  window.joshWH = {{
+    toggle: function() {{ _visible ? _hide() : _show(); }},
+    hide:   _hide,
+    show:   _show,
+  }};
+
+  // Start hidden — panel has display:flex by default in CSS so we need to
+  // immediately add the hidden class once DOM is ready.
+  document.addEventListener('DOMContentLoaded', function() {{
+    var panel = document.getElementById('josh-wh-panel');
+    if (panel) panel.classList.add('josh-wh-hidden');
+  }});
+}})();
+</script>
+"""
+
+    injection = css + "\n" + html_panel + "\n" + js
+    html = html_path.read_text(encoding="utf-8")
+    html = html.replace("</body>", injection + "\n</body>", 1)
+    html_path.write_text(html, encoding="utf-8")
+    logger.info("  'What Happened' layer injected into demo map.")
