@@ -33,6 +33,7 @@ jobs:
         run: |
           cp pages/index.html output/index.html
           cp pages/viewer.html output/viewer.html
+          cp pages/mayors_presentation.html output/mayors_presentation.html
           cp -r docs output/docs
 
       - name: Setup Pages
