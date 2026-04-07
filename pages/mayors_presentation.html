@@ -335,6 +335,29 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
   color:#fff; margin-bottom:3px; }
 .s8-contact-sub { font-family:'Source Sans 3',sans-serif; font-size:8px;
   color:rgba(255,255,255,.4); line-height:1.5; }
+
+/* ══════════════════════════════════════
+   S2-FP — FIRST PRINCIPLES (big-title vertical bands)
+══════════════════════════════════════ */
+.s2fp-stack { position:absolute; top:101px; left:0; right:0; bottom:28px;
+  display:flex; flex-direction:column; }
+.s2fp-band { flex:1; display:flex; flex-direction:column; justify-content:center;
+  padding:10px 56px 10px 56px; border-bottom:1px solid var(--parch-dk); }
+.s2fp-band:last-child { border-bottom:none; }
+.s2fp-band:nth-child(odd)  { background:var(--linen); }
+.s2fp-band:nth-child(even) { background:var(--parch); }
+.s2fp-num { font-family:'Cormorant SC',serif; font-size:8px; letter-spacing:.32em;
+  color:var(--ember); margin-bottom:6px;
+  display:flex; align-items:center; gap:9px; }
+.s2fp-num::after { content:''; display:block; width:22px; height:1px;
+  background:var(--ember); opacity:.55; }
+.s2fp-title { font-family:'Playfair Display',serif; font-size:28px; font-weight:700;
+  color:var(--hearth); line-height:1.15; margin-bottom:6px; }
+.s2fp-title em { color:var(--ember); font-style:italic; }
+.s2fp-body { font-family:'Source Sans 3',sans-serif; font-size:11px; line-height:1.65;
+  color:var(--walnut-md); }
+.s2fp-body strong { color:var(--hearth); font-weight:700; }
+.s2fp-header-title { font-size:26px; }
 </style>
 </head>
 <body>
@@ -361,7 +384,41 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 </section>
 
-<!-- ══ S2 · THE DOOR — fire marshal analogy ══ -->
+<!-- ══ S2 · FIRST PRINCIPLES — three design goals ══ -->
+<section class="slide s5p">
+<div class="topbar"></div>
+<div class="hdr">
+  <span class="ey">Why This Approach</span>
+  <span class="ey">Start with First Principles</span>
+</div>
+<div class="ftr">
+  <span class="ftr-l">California Stewardship Alliance · JOSH</span>
+  <span class="ftr-r">2 / 10</span>
+</div>
+<div class="s5p-header">
+  <span class="s5p-header-label">Design Goals</span>
+  <span class="s5p-header-title s2fp-header-title"><em>Start with First Principles</em></span>
+</div>
+<div class="s2fp-stack">
+  <div class="s2fp-band">
+    <div class="s2fp-num">01</div>
+    <div class="s2fp-title">Survive Appellate Review</div>
+    <div class="s2fp-body">Written in advance, uniformly applied, traceable to authoritative public sources. <strong>Designed to win in court — not just in council chambers.</strong></div>
+  </div>
+  <div class="s2fp-band">
+    <div class="s2fp-num">02</div>
+    <div class="s2fp-title">Physical Capacity</div>
+    <div class="s2fp-body">Grounded in the <strong>physical reality</strong> of how many vehicles a road can move before fire overtakes it. Roads have carrying capacity. That capacity is measurable.</div>
+  </div>
+  <div class="s2fp-band">
+    <div class="s2fp-num">03</div>
+    <div class="s2fp-title">An Objective Standard <em>That Can't Be Argued</em></div>
+    <div class="s2fp-body">Simple arithmetic. Every input is public. Every step traceable by hand. <strong>No discretion. No black box. No room for argument.</strong></div>
+  </div>
+</div>
+</section>
+
+<!-- ══ S3 · THE DOOR — fire marshal analogy ══ -->
 <section class="slide s2">
 <div class="topbar"></div>
 <div class="hdr">
@@ -370,7 +427,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr">
   <span class="ftr-l">California Stewardship Alliance · JOSH</span>
-  <span class="ftr-r">2 / 9</span>
+  <span class="ftr-r">3 / 10</span>
 </div>
 <div class="s2-layout">
   <div class="s2-half">
@@ -403,7 +460,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr" style="background:rgba(255,255,255,.04); border-top-color:rgba(196,154,40,.15);">
   <span class="ftr-l" style="color:rgba(255,255,255,.3);">California Stewardship Alliance · JOSH</span>
-  <span class="ftr-r">3 / 9</span>
+  <span class="ftr-r">4 / 10</span>
 </div>
 <div class="s3-layout">
   <div class="s3-left">
@@ -437,7 +494,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr">
   <span class="ftr-l">California Stewardship Alliance · JOSH</span>
-  <span class="ftr-r">4 / 9</span>
+  <span class="ftr-r">5 / 10</span>
 </div>
 <div class="s4-layout">
   <div class="s4-left">
@@ -471,7 +528,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr">
   <span class="ftr-l">California Stewardship Alliance · JOSH</span>
-  <span class="ftr-r">5 / 9</span>
+  <span class="ftr-r">6 / 10</span>
 </div>
 <div class="s5p-header">
   <span class="s5p-header-label">First Principles</span>
@@ -513,7 +570,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr-dark">
   <span class="ftr-l">This is the tool. Open source. Auditable. Ready.</span>
-  <span class="ftr-r">6 / 9</span>
+  <span class="ftr-r">7 / 10</span>
 </div>
 </section>
 
@@ -529,7 +586,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr-dark">
   <span class="ftr-l">Every step auditable. Every number sourced. Every finding defensible in court.</span>
-  <span class="ftr-r">7 / 9</span>
+  <span class="ftr-r">8 / 10</span>
 </div>
 </section>
 
@@ -542,7 +599,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr">
   <span class="ftr-l">California Stewardship Alliance · JOSH</span>
-  <span class="ftr-r">8 / 9</span>
+  <span class="ftr-r">9 / 10</span>
 </div>
 <div class="s7-layout">
   <div class="s7-left">
@@ -584,7 +641,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 </div>
 <div class="ftr">
   <span class="ftr-l">Objective standards. Defensible methodology. Cities as stewards.</span>
-  <span class="ftr-r">9 / 9</span>
+  <span class="ftr-r">10 / 10</span>
 </div>
 <div class="s8-layout">
   <div class="s8-left">
@@ -627,7 +684,7 @@ html,body { width:100%; height:100%; background:#0d0d0d; overflow:hidden; font-f
 
 <div id="nav">
   <button class="nav-btn" id="prev-btn">‹</button>
-  <div id="counter">1 / 9</div>
+  <div id="counter">1 / 10</div>
   <button class="nav-btn" id="next-btn">›</button>
   <button id="fs-btn">⛶</button>
 </div>
