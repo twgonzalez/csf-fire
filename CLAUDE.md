@@ -236,11 +236,8 @@ All downloaded data is cached with a 90-day TTL. Use `--refresh` to force re-dow
 audit trail).
 
 - **Public cities** → cached in `data/{city}/` (git-ignored in public repo)
-- **Private cities** → cached in `config/private/data/{city}/` (gitignored inside josh-private;
-  Dropbox provides local backup; data is regeneratable via `--refresh`)
-- **Exception:** `config/private/data/{city}/fhsz.geojson` is tracked in josh-private for
-  cities with locally-adopted FHSZ maps (e.g. Encinitas 2025 adoption) — these are hard
-  to regenerate from public APIs.
+- **Private cities** → cached in `config/private/data/{city}/` (fully tracked in josh-private
+  for complete backup — all data files committed including roads.gpkg, graph.graphml, etc.)
 
 ## Current MVP Phase
 
@@ -331,8 +328,7 @@ no code changes.
 | `cities/*.yaml` | ✅ Yes | City config — irreplaceable business logic |
 | `projects/*_demo.yaml` | ✅ Yes | Project definitions — irreplaceable |
 | `output/{city}/**` | ✅ Yes | Legal deliverables (briefs, maps, determinations) |
-| `data/{city}/fhsz.geojson` | ✅ Yes | Locally-adopted FHSZ — hard to regenerate |
-| `data/{city}/*` (all other) | ❌ Gitignored | Large binary, regeneratable via `--refresh` |
+| `data/{city}/**` | ✅ Yes | Full data backup — all files tracked |
 
 ### Setup on a New Machine
 
