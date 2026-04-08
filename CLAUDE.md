@@ -31,8 +31,15 @@ uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --uni
 # Force refresh cached data
 uv run python main.py analyze --city "Berkeley" --state "CA" --refresh
 
-# Regenerate the primary demo map (REQUIRED after any visualization code change)
+# Regenerate the primary demo map
+# REQUIRED after any change to:
+#   agents/visualization/   — map rendering, popups, AntPath styling
+#   agents/scenarios/       — Dijkstra routing, path_wgs84_coords, ΔT engine
+#   agents/export.py        — JOSH_DATA schema
+#   config/projects/        — project YAML edits
+# ALL CITIES must be regenerated; stale maps have straight-line AntPaths (pre-geometry fix)
 uv run python main.py demo --city "Berkeley"
+uv run python main.py demo --city "Encinitas"
 # → output/berkeley/demo_map.html  (window.JOSH_DATA inlined; loads app.js from CDN)
 # → static/v1/app.js               (GENERATED — shared CDN bundle; also regenerated here)
 
@@ -119,13 +126,21 @@ block in `_inject_josh_data_bundle()` with `<script src="{_APP_JS_CDN_URL}" defe
 - Project markers, AntPath flow traces, demo panel detail cards
 - Brief HTML content, city-specific `what_happened` overlay
 - City data changes (new project, re-analysis)
+- Any change to `agents/scenarios/wildland.py` — Dijkstra routing, path coordinate
+  generation, or ΔT calculation. AntPath coordinates (`path_wgs84_coords`) are baked
+  into the HTML at `demo` time from the scenario evaluation run.
+
+**AntPath coordinate quality:** `path_wgs84_coords` is built from OSMnx edge geometry
+(the full original OSM way coordinate chain, 10–100+ points per segment). Do NOT
+revert to node-endpoint-only construction — that produces straight lines cutting
+through terrain and rivers instead of following the road.
 
 **What does NOT require rebuild (CDN update only, once switched to CDN delivery):**
 - What-if panel UX (layout, labels, buttons, results display)
 - Brief modal chrome / overlay styling
 - WhatIfEngine algorithm fixes (schema-compatible)
 
-**After ANY change to `agents/visualization/`**, regenerate it:
+**After ANY change to `agents/visualization/` or `agents/scenarios/`**, regenerate ALL cities:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 uv run python main.py demo --city "Berkeley"
