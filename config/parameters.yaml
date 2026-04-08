@@ -3,6 +3,8 @@
 # All thresholds trace to published sources. No parameter requires city-level adoption.
 # Override city-specific values in config/cities/{city}.yaml
 
+parameters_version: "3.4"
+
 # ============================================================
 # Project Size Threshold
 # Basis: 15 units × 2.5 vpu × 0.90 mob = 33.75 vph — measurable on any road type.

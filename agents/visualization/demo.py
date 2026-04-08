@@ -1115,7 +1115,7 @@ def _inject_josh_data_bundle(
     window.JOSH_DATA is set BEFORE the app.js block so the engine can read it
     synchronously on parse regardless of which strategy is used.
     """
-    from agents.export import _APP_JS_VERSION
+    from agents.export import _APP_JS_VERSION, JOSH_VERSION, _PARAMETERS_VERSION
 
     graph_data   = json.loads(graph_json_path.read_text(encoding="utf-8"))
     params_data  = json.loads(params_json_path.read_text(encoding="utf-8"))
@@ -1155,7 +1155,14 @@ def _inject_josh_data_bundle(
         app_block = f'<script src="{_APP_JS_CDN_URL}" defer></script>\n'
         app_note  = f"CDN → {_APP_JS_CDN_URL}"
 
-    injection = data_block + app_block
+    footer_block = (
+        f'\n<div style="position:fixed;bottom:4px;right:8px;font-size:10px;'
+        f'color:#888;z-index:9999;pointer-events:none;">'
+        f'JOSH v{JOSH_VERSION} · Methodology v{_PARAMETERS_VERSION} · '
+        f'© 2026 Thomas Gonzalez · AGPL-3.0'
+        f'</div>\n'
+    )
+    injection = data_block + app_block + footer_block
     if "</body>" in html:
         html = html.replace("</body>", injection + "</body>", 1)
     else:
