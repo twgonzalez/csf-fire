@@ -43,6 +43,25 @@ def _resolve_config(subpath: str, base_dir: Path) -> Path:
     return base_dir / "config" / subpath
 
 
+def _is_private_city(city_slug: str, base_dir: Path) -> bool:
+    """Return True if this city's config lives in config/private/."""
+    return (base_dir / "config" / "private" / "cities" / f"{city_slug}.yaml").exists()
+
+
+def _resolve_data_dir(city_slug: str, base_dir: Path) -> Path:
+    """Return config/private/data/{city} for private cities, else data/{city}."""
+    if _is_private_city(city_slug, base_dir):
+        return base_dir / "config" / "private" / "data" / city_slug
+    return base_dir / "data" / city_slug
+
+
+def _resolve_output_dir(city_slug: str, base_dir: Path) -> Path:
+    """Return config/private/output/{city} for private cities, else output/{city}."""
+    if _is_private_city(city_slug, base_dir):
+        return base_dir / "config" / "private" / "output" / city_slug
+    return base_dir / "output" / city_slug
+
+
 # ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
@@ -110,8 +129,8 @@ def analyze(city: str, state: str, refresh: bool):
 
     base_dir = Path(__file__).parent
     city_slug = city.lower().replace(" ", "_")
-    data_dir = base_dir / "data" / city_slug
-    output_dir = base_dir / "output" / city_slug
+    data_dir = _resolve_data_dir(city_slug, base_dir)
+    output_dir = _resolve_output_dir(city_slug, base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     console.rule(f"[bold cyan]Analyzing {city}, {state}[/bold cyan]")
@@ -217,8 +236,8 @@ def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
 
     base_dir = Path(__file__).parent
     city_slug = city.lower().replace(" ", "_")
-    data_dir = base_dir / "data" / city_slug
-    output_dir = base_dir / "output" / city_slug
+    data_dir = _resolve_data_dir(city_slug, base_dir)
+    output_dir = _resolve_output_dir(city_slug, base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     roads_path    = data_dir / "roads.gpkg"
@@ -522,8 +541,8 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
     config, city_config = load_config(city)
     base_dir = Path(__file__).parent
     city_slug = city.lower().replace(" ", "_")
-    data_dir = base_dir / "data" / city_slug
-    output_dir = base_dir / "output" / city_slug
+    data_dir = _resolve_data_dir(city_slug, base_dir)
+    output_dir = _resolve_output_dir(city_slug, base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve projects file (checks config/private/ first, then config/)
@@ -925,8 +944,8 @@ def report(city: str, state: str, output_name: str):
 
     base_dir = Path(__file__).parent
     city_slug = city.lower().replace(" ", "_")
-    data_dir   = base_dir / "data" / city_slug
-    output_dir = base_dir / "output" / city_slug
+    data_dir = _resolve_data_dir(city_slug, base_dir)
+    output_dir = _resolve_output_dir(city_slug, base_dir)
 
     console.rule(f"[bold cyan]AB 747 Report — {city}[/bold cyan]")
 
