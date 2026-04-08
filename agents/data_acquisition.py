@@ -115,9 +115,34 @@ def acquire_data(
                 )
                 source_label += " + Census TIGER roads supplement"
         metadata["roads"] = _meta_entry(source_label)
+        _roads_fresh = True
     else:
         logger.info("Using cached road network.")
         roads_gdf = gpd.read_file(roads_path, layer="roads")
+        _roads_fresh = False
+
+    # Apply road overrides (highway reclassification, lane/speed corrections,
+    # Standard 6 width/access annotations).  Overrides are resolved via the
+    # same private/public config overlay as the city YAML.
+    base_dir = Path(__file__).parent.parent
+    city_slug = city.lower().replace(" ", "_")
+    _overrides_subpath = f"cities/{city_slug}_road_overrides.yaml"
+    # Try private overlay first, then public config
+    _overrides_path = base_dir / "config" / "private" / _overrides_subpath
+    if not _overrides_path.exists():
+        _overrides_path = base_dir / "config" / _overrides_subpath
+
+    if _overrides_path.exists():
+        roads_gdf, n_overridden = _apply_road_overrides(roads_gdf, _overrides_path, config)
+        if n_overridden > 0:
+            # Re-save gpkg so demo and other commands always see corrected values
+            roads_gdf.to_file(roads_path, layer="roads", driver="GPKG")
+            logger.info(
+                f"  Road overrides applied: {n_overridden} segment(s) corrected "
+                f"→ roads.gpkg updated"
+            )
+            if _roads_fresh:
+                metadata["roads_overrides"] = _meta_entry(str(_overrides_path.name))
     results["roads"] = roads_gdf
 
     # Census ACS block groups (housing units for evacuation demand baseline)
@@ -582,6 +607,140 @@ def fetch_road_network(
     gdf.to_file(output_path, layer="roads", driver="GPKG")
     logger.info(f"  Road network saved: {output_path} ({len(gdf)} segments)")
     return gdf
+
+
+# ---------------------------------------------------------------------------
+# Road Overrides
+# ---------------------------------------------------------------------------
+
+def _apply_road_overrides(
+    roads_gdf: gpd.GeoDataFrame,
+    overrides_path: Path,
+    config: dict,
+) -> tuple[gpd.GeoDataFrame, int]:
+    """
+    Apply city-specific road corrections from {city}_road_overrides.yaml.
+
+    Each entry in road_overrides[] specifies a match (by name or osmid) and
+    one or more field corrections.  Supported correction fields:
+
+      highway    — reclassify OSM highway tag; automatically re-derives
+                   road_type and lane_count (when lane_count was estimated)
+      lanes      — override lane count (sets lane_count, clears lane_count_estimated)
+      speed      — override speed limit in mph
+      width_ft   — physical road width in feet (stored for Standard 6 / IFC §503)
+      access_type — dead_end | single_access | one_way | two_way (Standard 6)
+
+    Match priority: osmid (exact scalar match) > name (case-insensitive full match).
+    osmid list-values (e.g. "[123, 456]") are matched by substring against the
+    string representation of the osmid column.
+
+    Returns (corrected_gdf, n_rows_modified).
+    """
+    with open(overrides_path) as f:
+        raw = yaml.safe_load(f)
+
+    entries = raw.get("road_overrides", [])
+    if not entries:
+        return roads_gdf, 0
+
+    gdf = roads_gdf.copy()
+    road_type_mapping = config.get("road_type_mapping", {})
+    lane_defaults      = config.get("lane_defaults", {})
+    speed_defaults     = config.get("speed_defaults", {})
+    width_inference    = config.get("width_speed_inference", [])
+
+    # Ensure audit columns exist
+    if "highway_original" not in gdf.columns:
+        gdf["highway_original"] = None
+    if "override_reason" not in gdf.columns:
+        gdf["override_reason"] = None
+    if "width_ft" not in gdf.columns:
+        gdf["width_ft"] = None
+    if "access_type" not in gdf.columns:
+        gdf["access_type"] = None
+
+    total_changed = 0
+
+    for entry in entries:
+        # --- Build boolean mask for matching rows ---
+        mask = pd.Series(False, index=gdf.index)
+
+        raw_osmid = entry.get("osmid")
+        name_val  = entry.get("name")
+
+        if raw_osmid is not None:
+            osmid_str = str(raw_osmid)
+            # Exact match against string repr of osmid column (handles both scalar
+            # and list-valued osmids stored as strings)
+            mask = gdf["osmid"].astype(str).str.contains(osmid_str, regex=False)
+
+        elif name_val is not None:
+            mask = gdf["name"].str.lower() == name_val.lower()
+
+        else:
+            logger.warning(f"  Road override entry has no 'osmid' or 'name' — skipped: {entry}")
+            continue
+
+        n_match = mask.sum()
+        if n_match == 0:
+            logger.warning(
+                f"  Road override: no segments matched "
+                f"({'osmid=' + str(raw_osmid) if raw_osmid else 'name=' + str(name_val)})"
+            )
+            continue
+
+        reason = entry.get("reason", "")
+
+        # --- Apply highway reclassification ---
+        if "highway" in entry:
+            new_hw = entry["highway"]
+            # Preserve original before first override
+            gdf.loc[mask & gdf["highway_original"].isna(), "highway_original"] = \
+                gdf.loc[mask & gdf["highway_original"].isna(), "highway"]
+            gdf.loc[mask, "highway"] = new_hw
+
+            # Re-derive road_type from corrected highway tag
+            gdf.loc[mask, "road_type"] = gdf.loc[mask, "highway"].apply(
+                lambda hw: _classify_road_type(hw, road_type_mapping)
+            )
+
+            # Re-derive lane_count only where it was estimated (not OSM-sourced)
+            re_estimate_mask = mask & (gdf["lane_count_estimated"] == True)
+            if re_estimate_mask.any():
+                gdf.loc[re_estimate_mask, "lane_count"] = gdf.loc[re_estimate_mask, "highway"].apply(
+                    lambda hw: _resolve_lanes(
+                        _normalize_highway_tag(hw), None, lane_defaults
+                    )[0]
+                )
+
+        # --- Apply lanes override ---
+        if "lanes" in entry:
+            gdf.loc[mask, "lane_count"] = int(entry["lanes"])
+            gdf.loc[mask, "lane_count_estimated"] = False
+
+        # --- Apply speed override ---
+        if "speed" in entry:
+            gdf.loc[mask, "speed_limit"] = int(entry["speed"])
+            gdf.loc[mask, "speed_estimated"] = False
+
+        # --- Apply Standard 6 width / access fields (stored for future use) ---
+        if "width_ft" in entry:
+            gdf.loc[mask, "width_ft"] = float(entry["width_ft"])
+        if "access_type" in entry:
+            gdf.loc[mask, "access_type"] = entry["access_type"]
+
+        # --- Audit reason ---
+        gdf.loc[mask, "override_reason"] = reason
+
+        logger.info(
+            f"  Override applied: {n_match} segment(s) "
+            f"({'osmid=' + str(raw_osmid) if raw_osmid else 'name=' + str(name_val)}) "
+            f"— {', '.join(k for k in entry if k not in ('osmid','name','reason','osm_correction_pending','source'))}"
+        )
+        total_changed += n_match
+
+    return gdf, total_changed
 
 
 # ---------------------------------------------------------------------------

@@ -162,10 +162,14 @@ config/
   parameters.yaml       # All thresholds and HCM factors (never hardcode these)
   cities/
     berkeley.yaml       # City-specific config and overrides (public cities only)
+    {city}_road_overrides.yaml  # OSM corrections + Standard 6 annotations (public cities)
+    boundaries/         # Pre-built boundary GeoJSON for non-municipal jurisdictions
   projects/
     berkeley_demo.yaml  # Demo project definitions (public cities only)
   private/              # ← gitignored; separate git repo (josh-private)
     cities/             # City configs for private/client cities
+    cities/boundaries/  # Pre-built boundary GeoJSONs for private fire districts, etc.
+    {city}_road_overrides.yaml  # OSM corrections for private cities (in private/cities/)
     projects/           # Demo project YAMLs for private/client cities
     data/{city}/        # Cached source data for private cities (gitignored in josh-private)
     output/{city}/      # Results for private cities (tracked in josh-private)
@@ -297,6 +301,81 @@ Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 ✅ Audit trail v3.4: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
 ✅ `data/{city}/evacuation_paths.json` persisted by Agent 2 after routing.
 
+## Road Network Overrides
+
+OSM highway tags are often wrong for non-standard jurisdictions (e.g. internal covenant
+roads in Rancho Santa Fe tagged as `primary` when they are local collectors). These errors
+inflate HCM capacity, distort the evacuation route heatmap, and produce incorrect routing.
+
+### Override file location and naming
+
+| City type | Override file path |
+|-----------|-------------------|
+| Public city | `config/cities/{city_slug}_road_overrides.yaml` |
+| Private city | `config/private/cities/{city_slug}_road_overrides.yaml` |
+
+The file is auto-detected by `acquire_data()` — no config key needed. Overrides are
+applied after `fetch_road_network()` returns OSM data, before `roads.gpkg` is saved.
+The corrected values are baked into `roads.gpkg`; a `--refresh` run is required when
+overrides change.
+
+### Schema
+
+```yaml
+road_overrides:
+  - name: "La Granada"          # match by road name (case-insensitive, full match)
+    highway: "secondary"         # reclassify OSM highway tag
+    reason: "Internal covenant road; primary tag is an OSM error"
+    osm_correction_pending: true # flag for upstream OSM fix
+
+  - osmid: "6024716"             # match by OSM way ID (scalar only; not list osmids)
+    width_ft: 18                 # physical road width for Standard 6 / IFC §503
+    access_type: "dead_end"      # dead_end | single_access | one_way | two_way
+    reason: "Clark Ave — below IFC §503 20-ft minimum"
+    source: "City Engineering Survey 2024-03"
+
+  - name: "Linea del Cielo"
+    highway: "tertiary"
+    lanes: 2                     # explicit lane count override
+    speed: 25                    # speed limit override (mph)
+    reason: "Hilltop residential dead-end; secondary tag overstates capacity"
+```
+
+### Supported correction fields
+
+| Field | Effect |
+|-------|--------|
+| `highway` | Re-classifies OSM tag; automatically re-derives `road_type` and `lane_count` (when estimated) |
+| `lanes` | Overrides lane count; clears `lane_count_estimated` flag |
+| `speed` | Overrides speed limit (mph); clears `speed_estimated` flag |
+| `width_ft` | Stores physical width (feet) for Standard 6 / IFC §503 (future use) |
+| `access_type` | Stores access classification for Standard 6 (future use) |
+
+### Audit trail
+
+Every overridden segment gains two new columns in `roads.gpkg`:
+- `highway_original` — original OSM highway tag before correction
+- `override_reason` — reason string from the YAML entry
+
+The number of corrected segments is logged at `analyze` time and recorded in
+`data/{city}/metadata.yaml` under `roads_overrides`.
+
+### When to use vs. when to fix OSM
+
+- **Fix in OSM first** when the tag is clearly wrong (e.g. a residential cul-de-sac
+  tagged as `primary`). Mark with `osm_correction_pending: true` in the YAML.
+- **Use overrides** for corrections that require local knowledge not in OSM (physical
+  widths, gated access, COA-mandated restrictions), or where OSM edits may be reverted.
+- **Never use overrides to tune ΔT results** — only use them to correct factual OSM
+  errors or add physically-verified data. All overrides must have a `reason` and `source`.
+
+### After adding or changing overrides
+
+```bash
+uv run python main.py analyze --city "CityName" --refresh
+uv run python main.py demo --city "CityName"
+```
+
 ## Pending Methodology Work
 
 1. **Demo map hand-placement of project pins** — no file yet
@@ -339,6 +418,9 @@ Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
    - Single access point: flag for large projects (city-adopted N)
    This should be a new scenario subclass (`agents/scenarios/site_access.py`) using OSM
    `width` tags and road geometry as inputs.
+   **Infrastructure ready**: `{city}_road_overrides.yaml` now supports `width_ft` and
+   `access_type` fields (stored in `roads.gpkg` as pass-through columns). Standard 6
+   can read these columns without additional data pipeline work.
 
 ## Private City Infrastructure
 
