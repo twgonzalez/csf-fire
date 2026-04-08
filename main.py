@@ -771,6 +771,10 @@ def geocode(city: str, state: str, projects_file: str, apply: bool, threshold: f
     demo_cfg = yaml.safe_load(raw_text)
     project_defs = demo_cfg.get("projects", [])
 
+    # For non-municipal jurisdictions (fire districts, etc.) the CLI city slug is
+    # not a valid geocoder city name.  Allow the demo YAML to override it.
+    city = demo_cfg.get("geocode_city", city)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -867,7 +871,9 @@ def geocode(city: str, state: str, projects_file: str, apply: bool, threshold: f
             table.add_row(name, stored_str, "—", "—", "—", "[dim]no address[/dim]")
             continue
 
-        geo_lat, geo_lon, matched_addr = census_geocode(address, city, state)
+        # Per-project geocode_city overrides the YAML-header geocode_city (e.g. cross-ZIP addresses)
+        geo_city = pdef.get("geocode_city", city)
+        geo_lat, geo_lon, matched_addr = census_geocode(address, geo_city, state)
 
         stored_str = (
             f"{stored_lat:.6f}, {stored_lon:.6f}" if stored_lat is not None else "MISSING"

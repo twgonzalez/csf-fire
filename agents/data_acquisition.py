@@ -100,7 +100,12 @@ def acquire_data(
         else:
             logger.info("Fetching road network from OpenStreetMap...")
             source_label = "OpenStreetMap via OSMnx"
-        roads_gdf = fetch_road_network(place_name, roads_path, config, historical_date=historical_date)
+        bp = results["boundary"] if city_config.get("boundary_file") else None
+        roads_gdf = fetch_road_network(
+            place_name, roads_path, config,
+            historical_date=historical_date,
+            boundary_polygon=bp,
+        )
         # Supplement with TIGER roads if configured (fills OSM gaps in rural areas)
         if city_config.get("tiger_roads_supplement"):
             tiger_url = city_config.get("tiger_roads_url")
@@ -149,7 +154,28 @@ def fetch_city_boundary(
     """
     Fetch city boundary polygon from OSMnx (uses Nominatim geocoding).
     Falls back to Census TIGER if OSMnx fails.
+
+    If city_config contains 'boundary_file', loads that GeoJSON directly
+    (path relative to project root) instead of fetching from OSMnx or TIGER.
+    Required for non-municipal jurisdictions (e.g. fire protection districts)
+    whose boundaries do not exist in Census TIGER PLACE files.
     """
+    boundary_file = city_config.get("boundary_file")
+    if boundary_file:
+        local_path = Path(boundary_file)
+        if not local_path.is_absolute():
+            local_path = Path.cwd() / local_path
+        if not local_path.exists():
+            raise FileNotFoundError(
+                f"boundary_file not found: {local_path}\n"
+                f"Download the district boundary GeoJSON and save it at that path."
+            )
+        logger.info(f"Loading boundary from local file: {local_path}")
+        gdf = gpd.read_file(local_path).to_crs("EPSG:4326")[["geometry"]].copy()
+        gdf.to_file(output_path, driver="GeoJSON")
+        logger.info(f"  City boundary saved: {output_path}")
+        return gdf
+
     try:
         gdf = ox.geocode_to_gdf(place_name)
         gdf = gdf.to_crs("EPSG:4326")
@@ -466,6 +492,7 @@ def fetch_road_network(
     output_path: Path,
     config: dict,
     historical_date: Optional[str] = None,
+    boundary_polygon: Optional[gpd.GeoDataFrame] = None,
 ) -> gpd.GeoDataFrame:
     """
     Download road network from OpenStreetMap via OSMnx.
@@ -478,6 +505,11 @@ def fetch_road_network(
     If historical_date is set (ISO 8601, e.g. "2018-11-07T00:00:00Z"), the
     Overpass API date filter is applied so the query returns the road network
     as it existed at that timestamp. Used for Camp Fire retroactive validation.
+
+    If boundary_polygon is provided (a GeoDataFrame), ox.graph_from_polygon is
+    used instead of ox.graph_from_place. Required for non-municipal jurisdictions
+    (e.g. fire protection districts) where the place_name does not resolve to
+    a reliable Nominatim boundary.
     """
     if historical_date:
         original_settings = ox.settings.overpass_settings
@@ -485,7 +517,11 @@ def fetch_road_network(
             f'[out:json][timeout:{{timeout}}][date:"{historical_date}"]{{maxsize}}'
         )
     try:
-        G = ox.graph_from_place(place_name, network_type="drive", simplify=True)
+        if boundary_polygon is not None:
+            poly = boundary_polygon.to_crs("EPSG:4326").union_all()
+            G = ox.graph_from_polygon(poly, network_type="drive", simplify=True)
+        else:
+            G = ox.graph_from_place(place_name, network_type="drive", simplify=True)
     finally:
         if historical_date:
             ox.settings.overpass_settings = original_settings
