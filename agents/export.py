@@ -27,6 +27,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _PARAMETERS_VERSION = "3.4"
+_APP_JS_VERSION = "v1"   # bump only on backward-incompatible JOSH_DATA schema changes
 _MPH_TO_MPS = 0.44704  # exact, same constant used in wildland.py
 
 # ---------------------------------------------------------------------------
@@ -122,12 +123,14 @@ _JS_INIT = """\
 
   function _ensureReady() {
     if (!_ready) {
-      if (typeof JOSH_GRAPH !== "undefined" &&
-          typeof JOSH_PARAMS !== "undefined" &&
-          typeof JOSH_FHSZ   !== "undefined") {
-        init(JOSH_GRAPH, JOSH_PARAMS, JOSH_FHSZ);
+      var d = window.JOSH_DATA;
+      if (d && d.graph && d.parameters && d.fhsz) {
+        init(d.graph, d.parameters, d.fhsz);
       } else {
-        throw new Error("WhatIfEngine: JOSH_GRAPH / JOSH_PARAMS / JOSH_FHSZ not loaded");
+        throw new Error(
+          "WhatIfEngine: window.JOSH_DATA not loaded. " +
+          "Ensure JOSH_DATA is inlined before app.js."
+        );
       }
     }
   }
@@ -801,3 +804,188 @@ def _indent_js(source: str, prefix: str) -> str:
         else:
             lines.append(line)
     return "".join(lines)
+
+
+def _build_brief_modal_overlay_js() -> str:
+    """
+    Return a JS snippet that injects the brief modal overlay <div> into the DOM
+    on DOMContentLoaded.  The overlay is static chrome (no city-specific data).
+    The brief HTML strings are read at runtime from window.JOSH_DATA.briefs.
+    """
+    modal_html = """<div id="josh-brief-modal" style="
+    display:none; position:fixed; inset:0; z-index:30000;
+    background:rgba(0,0,0,0.55); overflow:hidden;">
+  <div style="
+      position:absolute; inset:40px 60px;
+      background:#fff; border-radius:8px;
+      display:flex; flex-direction:column;
+      box-shadow:0 8px 40px rgba(0,0,0,0.4);
+      overflow:hidden;">
+    <div style="
+        display:flex; align-items:center; justify-content:space-between;
+        padding:11px 16px; border-bottom:1px solid #dee2e6;
+        background:#1c4a6e; flex-shrink:0;">
+      <span style="
+          font-family:system-ui,sans-serif; font-weight:600;
+          font-size:13px; color:#fff; letter-spacing:0.02em;">
+        Determination Brief
+      </span>
+      <button onclick="document.getElementById('josh-brief-modal').style.display='none'"
+              style="background:none;border:none;font-size:20px;cursor:pointer;
+                     color:rgba(255,255,255,0.75);line-height:1;padding:0;">&#10005;</button>
+    </div>
+    <iframe id="josh-brief-frame"
+            style="flex:1;border:none;width:100%;background:#fff;"
+            src="about:blank"></iframe>
+  </div>
+</div>"""
+
+    # Escape backticks for JS template literal
+    modal_html_escaped = modal_html.replace("`", "\\`").replace("${", "\\${")
+    return f"""\
+(function () {{
+  document.addEventListener('DOMContentLoaded', function () {{
+    var _tmp = document.createElement('div');
+    _tmp.innerHTML = `{modal_html_escaped}`;
+    document.body.appendChild(_tmp.firstElementChild);
+  }});
+}})();
+"""
+
+
+def _build_brief_modal_controller_js() -> str:
+    """
+    Return the joshBrief IIFE that reads brief HTML from window.JOSH_DATA.briefs.
+    Registers click interceptors and backdrop-close handler on DOMContentLoaded.
+    """
+    return """\
+(function () {
+  window.joshBrief = {
+    show: function (filename) {
+      var briefs = window.JOSH_DATA && window.JOSH_DATA.briefs;
+      var html = briefs && briefs[filename];
+      if (!html) { console.warn('joshBrief: no data for', filename); return; }
+      var frame = document.getElementById('josh-brief-frame');
+      frame.srcdoc = html;
+      document.getElementById('josh-brief-modal').style.display = 'block';
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('a[href^="brief_v3_"]').forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        window.joshBrief.show(link.getAttribute('href'));
+      });
+    });
+    var modal = document.getElementById('josh-brief-modal');
+    if (modal) {
+      modal.addEventListener('click', function (e) {
+        if (e.target === this) this.style.display = 'none';
+      });
+    }
+  });
+})();
+"""
+
+
+def export_app_js() -> Path:
+    """
+    Generate static/v1/app.js — the CDN-hosted shared rendering bundle.
+
+    The generated file embeds (in order):
+      1. WhatIfEngine IIFE  — verbatim from static/whatif_engine.js (generated first)
+      2. What-if UI panel   — DOMContentLoaded DOM injector + controller IIFE
+      3. Brief modal overlay — DOMContentLoaded DOM injector + controller IIFE
+         (reads window.JOSH_DATA.briefs; no per-city data baked in)
+
+    All city-specific data (graph, parameters, fhsz, briefs) is read at runtime
+    from window.JOSH_DATA, which is inlined into demo_map.html by
+    _inject_josh_data_bundle() before the <script src="...app.js"> tag.
+
+    Called by demo command before _inject_josh_data_bundle().
+    Internally calls export_whatif_engine_js() to ensure the engine is fresh.
+
+    Returns: Path to generated static/v1/app.js
+    """
+    # Lazy import to avoid circular dependency (demo.py → export.py already exists;
+    # avoid export.py → demo.py at module load time).
+    from agents.visualization.demo import _build_whatif_ui_html, _build_whatif_ui_js
+
+    # Refresh the engine first (keeps whatif_engine.js and app.js in sync).
+    export_whatif_engine_js()
+
+    static_dir = Path(__file__).parent.parent / "static"
+    engine_path = static_dir / "whatif_engine.js"
+    engine_js = engine_path.read_text(encoding="utf-8")
+
+    # ── What-if UI panel DOM injector (HTML → DOMContentLoaded append) ───────
+    panel_html = _build_whatif_ui_html()
+    panel_html_escaped = panel_html.replace("`", "\\`").replace("${", "\\${")
+    whatif_ui_injector = f"""\
+(function () {{
+  document.addEventListener('DOMContentLoaded', function () {{
+    var _tmp = document.createElement('div');
+    _tmp.innerHTML = `{panel_html_escaped}`;
+    while (_tmp.firstChild) document.body.appendChild(_tmp.firstChild);
+  }});
+}})();
+"""
+
+    # ── Assemble app.js ───────────────────────────────────────────────────────
+    header = """\
+// Copyright (C) 2026 Thomas Gonzalez
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// This file is part of JOSH (Jurisdictional Objective Standards for Housing).
+// See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
+
+// ============================================================================
+// GENERATED FILE — DO NOT EDIT
+// Source:   agents/export.py  (export_app_js)
+//           agents/visualization/demo.py  (_build_whatif_ui_html, _build_whatif_ui_js)
+//           static/whatif_engine.js  (embedded verbatim)
+// Regenerate:  uv run python main.py demo --city "Berkeley"
+// ============================================================================
+
+// ── Schema compatibility check ────────────────────────────────────────────────
+// Emits console.warn if window.JOSH_DATA.schema_version does not match v1.
+(function () {
+  var d = window.JOSH_DATA;
+  if (!d) { console.warn('JOSH app.js: window.JOSH_DATA not found'); return; }
+  if (d.schema_version !== 1) {
+    console.warn(
+      'JOSH app.js v1: schema_version mismatch (got ' + d.schema_version + '). ' +
+      'Regenerate demo_map.html with a matching version of app.js.'
+    );
+  }
+})();
+
+"""
+
+    section_sep = "\n// " + "─" * 76 + "\n\n"
+
+    parts = [
+        header,
+        "// ── WhatIfEngine IIFE (from static/whatif_engine.js) " + "─" * 26 + "\n\n",
+        engine_js,
+        section_sep,
+        "// ── What-If UI panel injector " + "─" * 48 + "\n\n",
+        whatif_ui_injector,
+        section_sep,
+        "// ── What-If UI controller " + "─" * 52 + "\n\n",
+        _build_whatif_ui_js(),
+        section_sep,
+        "// ── Brief modal overlay injector " + "─" * 45 + "\n\n",
+        _build_brief_modal_overlay_js(),
+        section_sep,
+        "// ── Brief modal controller " + "─" * 51 + "\n\n",
+        _build_brief_modal_controller_js(),
+    ]
+
+    out_dir = static_dir / _APP_JS_VERSION
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "app.js"
+    out_path.write_text("".join(parts), encoding="utf-8")
+    size_kb = out_path.stat().st_size // 1024
+    logger.info(f"  app.js → {out_path} ({size_kb} KB, generated)")
+    return out_path

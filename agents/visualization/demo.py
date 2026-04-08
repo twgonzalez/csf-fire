@@ -17,6 +17,7 @@ Standard 5 (local density) support:
 import json
 import logging
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -880,19 +881,20 @@ def create_demo_map(
     m.save(str(output_path))
     logger.info(f"Demo map saved: {output_path}")
 
-    # ── What-if bundle injection (feat/whatif-browser) ────────────────────
-    # Inline graph.json, parameters.json, fhsz GeoJSON, and the JS engine into
-    # the saved HTML so the file is fully self-contained (works from file://).
+    # ── JOSH data bundle + CDN app.js injection ───────────────────────────
+    # Inline window.JOSH_DATA (graph, parameters, fhsz, briefs) and add a
+    # <script src> tag for the CDN-hosted shared rendering bundle (app.js).
+    # app.js contains: WhatIfEngine, what-if UI panel, brief modal overlay.
+    # Requires internet to load app.js; city data is fully inlined (no CORS).
     if graph_json_path and graph_json_path.exists() and params_json_path and params_json_path.exists():
-        _inject_whatif_bundle(output_path, graph_json_path, params_json_path, fhsz_gdf)
-        logger.info("  What-if bundle injected into demo map.")
+        from agents.export import export_app_js
+        export_app_js()   # regenerate static/v1/app.js (embeds fresh engine)
+        _inject_josh_data_bundle(output_path, graph_json_path, params_json_path, fhsz_gdf)
     else:
+        # graph.json not yet generated (analyze not run). Fall back to the
+        # self-contained brief modal injection so "View Brief" links still work.
         logger.info("  Skipping what-if bundle (graph.json or parameters.json not found).")
-
-    # ── Brief modal injection ──────────────────────────────────────────────
-    # Replace external brief file links with inline srcdoc modals so the
-    # "View Determination Brief" button works when opened from file://.
-    _inject_brief_modals(output_path)
+        _inject_brief_modals(output_path)
 
     # ── "What Happened" layer ──────────────────────────────────────────────
     # City-specific historical overlay: fire perimeter, road diet annotation,
@@ -1081,6 +1083,87 @@ def _inject_brief_modals(html_path: Path) -> None:
         html += injection
     html_path.write_text(html, encoding="utf-8")
     logger.info("  Brief modals injected (%d briefs).", len(brief_data))
+
+
+# ---------------------------------------------------------------------------
+# CDN-hosted app.js data bundle injection
+# ---------------------------------------------------------------------------
+
+# CDN URL for the shared rendering bundle. Versioned by major path segment.
+# Bump _APP_JS_VERSION in agents/export.py when the JOSH_DATA schema changes
+# in a backward-incompatible way; update this URL to match.
+# NOTE: currently unused — app.js is inlined for offline delivery. Kept for
+# future use when switching to CDN-only distribution.
+_APP_JS_CDN_URL = "https://twgonzalez.github.io/josh/static/v1/app.js"
+
+
+def _inject_josh_data_bundle(
+    html_path: Path,
+    graph_json_path: Path,
+    params_json_path: Path,
+    fhsz_gdf: gpd.GeoDataFrame,
+) -> None:
+    """
+    Inject window.JOSH_DATA (graph, parameters, fhsz, briefs) into demo_map.html,
+    then load app.js using whichever strategy is available:
+
+      • If static/v1/app.js exists on disk (normal local build) → inline it.
+        The HTML is fully self-contained; works from file:// with no internet.
+      • Otherwise → emit <script src="{CDN_URL}" defer> pointing at GitHub Pages.
+        Requires internet but needs no local files beyond the HTML itself.
+
+    window.JOSH_DATA is set BEFORE the app.js block so the engine can read it
+    synchronously on parse regardless of which strategy is used.
+    """
+    from agents.export import _APP_JS_VERSION
+
+    graph_data   = json.loads(graph_json_path.read_text(encoding="utf-8"))
+    params_data  = json.loads(params_json_path.read_text(encoding="utf-8"))
+    fhsz_geojson = json.loads(fhsz_gdf.to_crs("EPSG:4326").to_json())
+
+    html = html_path.read_text(encoding="utf-8")
+
+    # Collect brief HTML strings (same regex as _inject_brief_modals)
+    brief_data: dict[str, str] = {}
+    for fname in dict.fromkeys(re.findall(r'href="(brief_v3_[^"]+\.html)"', html)):
+        path = html_path.parent / fname
+        if path.exists():
+            brief_data[fname] = path.read_text(encoding="utf-8")
+
+    josh_data = {
+        "schema_version": 1,
+        "app_js_version": _APP_JS_VERSION,
+        "graph":          graph_data,
+        "parameters":     params_data,
+        "fhsz":           fhsz_geojson,
+        "briefs":         brief_data,
+    }
+
+    data_block = (
+        '\n<script id="josh-data">\n'
+        f'window.JOSH_DATA = {json.dumps(josh_data, separators=(",",":"))};'
+        '\n</script>\n'
+    )
+
+    # ── app.js: inline if available, CDN fallback otherwise ──────────────────
+    app_js_path = Path(__file__).parent.parent.parent / "static" / "v1" / "app.js"
+    if app_js_path.exists():
+        app_js = app_js_path.read_text(encoding="utf-8")
+        app_block = f'<script id="josh-app">\n{app_js}\n</script>\n'
+        app_note  = f"inlined ({len(app_js) // 1024} KB, offline)"
+    else:
+        app_block = f'<script src="{_APP_JS_CDN_URL}" defer></script>\n'
+        app_note  = f"CDN → {_APP_JS_CDN_URL}"
+
+    injection = data_block + app_block
+    if "</body>" in html:
+        html = html.replace("</body>", injection + "</body>", 1)
+    else:
+        html += injection
+    html_path.write_text(html, encoding="utf-8")
+    logger.info(
+        "  JOSH data bundle injected (%d briefs); app.js %s.", len(brief_data), app_note
+    )
 
 
 def _build_whatif_ui_html() -> str:
