@@ -1408,10 +1408,24 @@ def _build_whatif_ui_js() -> str:
     _placePin(e.latlng.lat, e.latlng.lng);
   }
 
+  /** Hide the currently-selected demo project's FeatureGroup layer.
+   *  Called when a what-if pin is placed so the project's roads/markers
+   *  don't overlap the what-if route visualisation. */
+  function _hideSelectedProjectLayer() {
+    var layers = window._joshProjLayers;
+    var mapObj = window[window._joshMapName];
+    var dd     = document.getElementById('proj-dropdown');
+    if (!layers || !mapObj || !dd) return;
+    var varName = layers[dd.selectedIndex];
+    var layer   = varName && window[varName];
+    if (layer && mapObj.hasLayer(layer)) mapObj.removeLayer(layer);
+  }
+
   /** Place (or replace) the draggable marker and evaluate. */
   function _placePin(lat, lng) {
     // Remove existing pin + routes; keep nothing from prior evaluation
     _clearAll();
+    _hideSelectedProjectLayer();
     const map = _getMap();
     _lat = lat;
     _lng = lng;
@@ -1538,15 +1552,6 @@ def _build_whatif_ui_js() -> str:
     document.getElementById('josh-whatif-instructions').textContent =
       'Drag pin or adjust inputs to update.';
 
-    // Restore the selected project layer. Adding what-if polylines to the
-    // Leaflet map can disturb the layer control state, causing the active
-    // project FeatureGroup to visually disappear. Re-applying selectProject()
-    // with the current index is idempotent (hasLayer guard inside) and brings
-    // the project layer back without flickering.
-    var _projDd = document.getElementById('proj-dropdown');
-    if (_projDd && typeof window.selectProject === 'function') {
-      window.selectProject(_projDd.selectedIndex);
-    }
   }
 
   // ── Result renderer ─────────────────────────────────────────────────────────
@@ -1631,8 +1636,7 @@ def _build_whatif_ui_js() -> str:
     document.getElementById('josh-whatif-instructions').textContent =
       'Set units & stories, then drop a pin.';
     _restoreIdleOrPinnedButton();
-    // Restore the selected project layer after clearing what-if state,
-    // for the same reason as the guard in _evaluateAt().
+    // Restore the selected project layer that was hidden when the pin was placed.
     var _projDd = document.getElementById('proj-dropdown');
     if (_projDd && typeof window.selectProject === 'function') {
       window.selectProject(_projDd.selectedIndex);
@@ -1882,6 +1886,10 @@ def _build_demo_panel_html(
 
   var PROJECT_LAYERS = {proj_js_array};
   var MAP_NAME = '{map_js_name}';
+
+  // Expose to what-if controller so it can hide/restore the selected project layer.
+  window._joshProjLayers = PROJECT_LAYERS;
+  window._joshMapName    = MAP_NAME;
 
   window.selectProject = function (idx) {{
     var mapObj = window[MAP_NAME];
