@@ -21,25 +21,25 @@ This is a legally-focused system. All standards must be objective (no engineerin
 
 ## Run Commands
 
+### Public repo (`josh`) — graph builder + map renderer
+
 ```bash
-# Analyze a city (downloads data + calculates capacity)
-uv run python main.py analyze --city "Berkeley" --state "CA"
+# Build graph from pre-acquired data (requires josh-pipeline acquire to have run first)
+uv run python build.py analyze --city "Berkeley" --data-dir /path/to/josh-pipeline/data/berkeley
 
 # Evaluate a specific project
-uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75
-
-# Force refresh cached data
-uv run python main.py analyze --city "Berkeley" --state "CA" --refresh
+uv run python build.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75 \
+  --data-dir /path/to/josh-pipeline/data/berkeley
 
 # Regenerate the primary demo map
 # REQUIRED after any change to:
 #   agents/visualization/   — map rendering, popups, AntPath styling
 #   agents/scenarios/       — Dijkstra routing, path_wgs84_coords, ΔT engine
 #   agents/export.py        — JOSH_DATA schema
-#   config/projects/        — project YAML edits
 # ALL CITIES must be regenerated; stale maps have straight-line AntPaths (pre-geometry fix)
-uv run python main.py demo --city "Berkeley"
-uv run python main.py demo --city "Encinitas"
+uv run python build.py demo --city "Berkeley" \
+  --data-dir /path/to/josh-pipeline/data/berkeley \
+  --projects /path/to/josh-pipeline/projects/berkeley_demo.yaml
 # → output/berkeley/demo_map.html  (window.JOSH_DATA inlined; loads app.js from CDN)
 # → static/v1/app.js               (GENERATED — shared CDN bundle; also regenerated here)
 
@@ -51,10 +51,22 @@ uv run python main.py demo --city "Encinitas"
 #       demo regenerates static/v1/app.js (which embeds whatif_engine.js).
 node --test tests/test_whatif_engine.js
 # Prerequisites: analyze + demo must have run first (generates graph.json + test_vectors.json)
+```
+
+### Private repo (`josh-pipeline`) — data acquisition + city configs
+
+```bash
+# Download city data (OSM, FHSZ, Census)
+cd /path/to/josh-pipeline
+uv run python acquire.py --city "Berkeley"
+uv run python acquire.py --city "Berkeley" --refresh   # force re-download
 
 # Validate project coordinates against the Census geocoder (REQUIRED after adding projects)
-uv run python main.py geocode --city "Berkeley"
-uv run python main.py geocode --city "Berkeley" --apply   # write corrections to YAML in place
+uv run python acquire.py geocode --city "Berkeley"
+uv run python acquire.py geocode --city "Berkeley" --apply   # write corrections to YAML in place
+
+# Full pipeline: acquire → analyze → demo (requires JOSH_DIR set)
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
 ```
 
 ## Adding Projects to a Demo YAML — Coordinate Protocol
@@ -64,11 +76,10 @@ wrong road segments and produce incorrect FHSZ lookups, ΔT calculations, and ro
 assignments — invalidating the legal analysis.
 
 **Project YAML location:**
-- Public cities → `config/projects/{city}_demo.yaml`
-- Private cities → `config/private/projects/{city}_demo.yaml`
+- All cities → `projects/{city}_demo.yaml` in `josh-pipeline`
 
-The pipeline resolves both automatically via `_resolve_config()` in `main.py` —
-no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
+Pass the path explicitly to `build.py demo --projects /path/to/{city}_demo.yaml`
+or use `acquire.py run` which chains everything automatically.
 
 **Required workflow when adding a new project:**
 
@@ -82,7 +93,7 @@ no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
    ```
 3. Set `lat`/`lon` from the Census geocoder result — run:
    ```bash
-   uv run python main.py geocode --city "CityName" --apply
+   cd josh-pipeline && uv run python acquire.py geocode --city "CityName" --apply
    ```
    This calls the U.S. Census Bureau Geocoder (no API key required) and patches the
    YAML in place while preserving all comments.
@@ -92,7 +103,7 @@ no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
    within 0.5 km.
 5. Regenerate the demo map:
    ```bash
-   uv run python main.py demo --city "CityName"
+   JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
    ```
 
 ## Primary UX Artifact
@@ -140,19 +151,17 @@ through terrain and rivers instead of following the road.
 - Brief modal chrome / overlay styling
 - WhatIfEngine algorithm fixes (schema-compatible)
 
-**After ANY change to `agents/visualization/` or `agents/scenarios/`**, regenerate ALL cities:
+**After ANY change to `agents/visualization/` or `agents/scenarios/`**, regenerate ALL cities
+via josh-pipeline (which has the data and project YAMLs):
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-uv run python main.py demo --city "Berkeley"
-# → output/berkeley/demo_map.html          (public city)
-uv run python main.py demo --city "Encinitas"
-# → config/private/output/encinitas/demo_map.html  (private city)
+cd /path/to/josh-pipeline
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Encinitas"
+# → /path/to/josh/output/berkeley/demo_map.html
+# → /path/to/josh-pipeline/output/encinitas/demo_map.html
 ```
 
-Output paths depend on whether the city is public or private (see Private City
-Infrastructure below). Public city output is git-ignored in the public repo.
-Private city output is tracked in `josh-private`. Do NOT leave a stale demo map
-— always regenerate before sharing.
+Do NOT leave a stale demo map — always regenerate before sharing.
 
 **Brief / popup labeling convention (user-facing):** Criteria are labeled **A** (Applicability
 Threshold — size gate), **B** (Site Parameters — FHSZ zone + degradation + threshold), and
@@ -163,47 +172,63 @@ in all user-facing outputs (determination letter, popup, briefs).
 
 ## Directory Structure
 
+### `josh` (this repo — public)
+
 ```
 agents/
-  data_acquisition.py   # Agent 1: fetch FHSZ, roads, boundary, traffic
   capacity_analysis.py  # Agent 2: HCM calculations, evacuation route ID
   objective_standards.py # Agent 3: ministerial/discretionary determination
+  export.py             # graph.json + whatif_engine.js serializer
+  scenarios/            # ΔT + SB79 logic
+  visualization/        # Folium map renderer
+  analysis/             # clearance time, SB99
 
 models/
   road_network.py       # RoadSegment dataclass
   project.py            # Project dataclass
 
 config/
-  parameters.yaml       # All thresholds and HCM factors (never hardcode these)
+  parameters.yaml       # CANONICAL — legal methodology spec (parameters_version: "3.4")
   cities/
-    berkeley.yaml       # City-specific config and overrides (public cities only)
-    {city}_road_overrides.yaml  # OSM corrections + Standard 6 annotations (public cities)
-    boundaries/         # Pre-built boundary GeoJSON for non-municipal jurisdictions
-  projects/
-    berkeley_demo.yaml  # Demo project definitions (public cities only)
-  private/              # ← gitignored; separate git repo (josh-private)
-    cities/             # City configs for private/client cities
-    cities/boundaries/  # Pre-built boundary GeoJSONs for private fire districts, etc.
-    {city}_road_overrides.yaml  # OSM corrections for private cities (in private/cities/)
-    projects/           # Demo project YAMLs for private/client cities
-    data/{city}/        # Cached source data for private cities (gitignored in josh-private)
-    output/{city}/      # Results for private cities (tracked in josh-private)
+    berkeley.yaml       # Schema example — canonical source is in josh-pipeline
 
-data/{city}/            # Cached source data — PUBLIC cities only (git-ignored, 90-day TTL)
-  fhsz.geojson
-  roads.gpkg
-  boundary.geojson
-  metadata.yaml
-
-output/{city}/          # Results — PUBLIC cities only (git-ignored except Berkeley demo)
-  routes.csv
-  determination_{id}.txt
-
+build.py                # CLI: analyze, demo, evaluate, report
 static/
   whatif_utils.js       # Hand-written drift-free JS utilities (MinHeap, haversine, etc.)
   whatif_engine.js      # GENERATED — never edit; regenerated by analyze
   v1/
     app.js              # GENERATED — CDN-hosted shared rendering bundle; regenerated by demo
+
+output/berkeley/        # Live Berkeley demo output (tracked)
+tests/                  # Anti-divergence + unit tests
+docs/                   # Specs, methodology docs
+```
+
+### `josh-pipeline` (private repo — all city data + client deliverables)
+
+```
+agents/
+  data_acquisition.py   # Agent 1: fetch FHSZ, roads, boundary, traffic; road overrides
+
+acquire.py              # CLI: acquire, geocode, run
+
+cities/                 # ALL city configs (Berkeley, Encinitas, RSF FPD, etc.)
+  berkeley.yaml
+  {city}_road_overrides.yaml  # OSM corrections + Standard 6 annotations
+  fhsz/                 # Pre-downloaded FHSZ GeoJSONs for LRA cities
+  boundaries/           # Pre-built boundary GeoJSONs for fire districts
+
+projects/               # ALL demo project YAMLs
+  berkeley_demo.yaml
+  encinitas_demo.yaml
+  rsf_fire_demo.yaml
+
+data/{city}/            # Cached downloads — gitignored (90-day TTL)
+output/{city}/          # Client deliverables — tracked
+  demo_map.html
+  routes.csv
+  brief_v3_*.html
+  determination_*.txt
 ```
 
 ## Key Parameters (from config/parameters.yaml) — v3.0 ΔT Standard
@@ -293,9 +318,8 @@ All downloaded data is cached with a 90-day TTL. Use `--refresh` to force re-dow
 `metadata.yaml` records source URLs and download dates for every file (required for legal
 audit trail).
 
-- **Public cities** → cached in `data/{city}/` (git-ignored in public repo)
-- **Private cities** → cached in `config/private/data/{city}/` (fully tracked in josh-private
-  for complete backup — all data files committed including roads.gpkg, graph.graphml, etc.)
+- All cities → cached in `josh-pipeline/data/{city}/` (gitignored in josh-pipeline).
+  Run `uv run python acquire.py --city "CityName" --refresh` to force re-download.
 
 ## Current MVP Phase
 
@@ -324,10 +348,7 @@ inflate HCM capacity, distort the evacuation route heatmap, and produce incorrec
 
 ### Override file location and naming
 
-| City type | Override file path |
-|-----------|-------------------|
-| Public city | `config/cities/{city_slug}_road_overrides.yaml` |
-| Private city | `config/private/cities/{city_slug}_road_overrides.yaml` |
+All cities: `josh-pipeline/cities/{city_slug}_road_overrides.yaml`
 
 The file is auto-detected by `acquire_data()` — no config key needed. Overrides are
 applied after `fetch_road_network()` returns OSM data, before `roads.gpkg` is saved.
@@ -387,8 +408,8 @@ The number of corrected segments is logged at `analyze` time and recorded in
 ### After adding or changing overrides
 
 ```bash
-uv run python main.py analyze --city "CityName" --refresh
-uv run python main.py demo --city "CityName"
+cd josh-pipeline && uv run python acquire.py --city "CityName" --refresh
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
 ```
 
 ## Non-Municipal Jurisdiction Configuration
@@ -403,7 +424,7 @@ pre-built GeoJSON and the pipeline uses `ox.graph_from_polygon()` instead
 of `ox.graph_from_place()`.
 
 ```yaml
-boundary_file: "config/private/cities/boundaries/rsf_fire_boundary.geojson"
+boundary_file: "cities/boundaries/rsf_fire_boundary.geojson"
 ```
 
 **SD County FPD boundary source:** SD County LAFCO MapServer
@@ -418,7 +439,7 @@ Use `fhsz_local_file` for a pre-downloaded GeoJSON or `fhsz_fallback_api` for a
 FeatureServer URL (SD County OES works for San Diego County LRA cities).
 
 ```yaml
-fhsz_local_file: "config/private/cities/fhsz/rsf_fire_fhsz.geojson"
+fhsz_local_file: "cities/fhsz/rsf_fire_fhsz.geojson"
 fhsz_fallback_api: "https://gis-public.sandiegocounty.gov/arcgis/rest/services/hosted/OES_KnowYourHazards_Wildfire_1/FeatureServer/0"
 ```
 
@@ -500,58 +521,50 @@ so the Dijkstra routing has complete coverage.
    `access_type` fields (stored in `roads.gpkg` as pass-through columns). Standard 6
    can read these columns without additional data pipeline work.
 
-## Private City Infrastructure
+## Two-Repo Setup
 
-Client cities (Encinitas, Solana Beach, etc.) are kept out of the public repo using a
-two-repo pattern. The private repo (`josh-private`) lives at `config/private/` inside the
-public repo and is gitignored by `csf-josh`.
+JOSH uses two repos. Client city data lives in `josh-pipeline` (private). The public
+methodology engine lives in `josh` (this repo).
 
-### Detection and Path Routing
+### Setup on a New Machine
 
-`main.py` contains three helpers that route paths automatically — no CLI flags needed:
-
-```python
-_is_private_city(city_slug, base_dir)   # True if config/private/cities/{slug}.yaml exists
-_resolve_data_dir(city_slug, base_dir)  # config/private/data/{city} or data/{city}
-_resolve_output_dir(city_slug, base_dir)# config/private/output/{city} or output/{city}
+```bash
+git clone https://github.com/twgonzalez/josh.git csf-josh
+git clone https://github.com/twgonzalez/josh-pipeline.git josh-pipeline
+cd josh-pipeline && echo "JOSH_DIR=/path/to/csf-josh" > .env
 ```
 
-All four CLI commands (`analyze`, `evaluate`, `demo`, `report`) use these helpers.
-Adding a new private city requires only a city YAML in `config/private/cities/` —
-no code changes.
+### Adding a New City
 
-### What josh-private Tracks
+1. Create `josh-pipeline/cities/{city_slug}.yaml` (copy from encinitas.yaml as template)
+2. Create `josh-pipeline/projects/{city_slug}_demo.yaml` (copy from encinitas_demo.yaml)
+3. Run geocode to set coordinates:
+   ```bash
+   cd josh-pipeline && uv run python acquire.py geocode --city "CityName" --apply
+   ```
+4. Run full pipeline:
+   ```bash
+   JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
+   ```
+5. Commit to josh-pipeline: city YAML, project YAML, fhsz.geojson if applicable, output/
+
+### What josh-pipeline Tracks
 
 | Path | Tracked? | Reason |
 |------|----------|--------|
 | `cities/*.yaml` | ✅ Yes | City config — irreplaceable business logic |
 | `projects/*_demo.yaml` | ✅ Yes | Project definitions — irreplaceable |
 | `output/{city}/**` | ✅ Yes | Legal deliverables (briefs, maps, determinations) |
-| `data/{city}/**` | ✅ Yes | Full data backup — all files tracked |
+| `data/{city}/**` | ❌ Gitignored | Regeneratable — run `acquire.py --refresh` |
 
-### Setup on a New Machine
-
-```bash
-git clone https://github.com/twgonzalez/josh.git csf-josh
-cd csf-josh
-git clone https://github.com/twgonzalez/josh-private.git config/private
-```
-
-### Adding a New Private City
-
-1. Create `config/private/cities/{city_slug}.yaml` (copy from encinitas.yaml as template)
-2. Create `config/private/projects/{city_slug}_demo.yaml` (copy from encinitas_demo.yaml)
-3. Run `uv run python main.py geocode --city "CityName" --apply` to set coordinates
-4. Run `uv run python main.py analyze --city "CityName"` to download data
-5. Run `uv run python main.py demo --city "CityName"` to generate the map
-6. Commit and push inside `config/private/`: city YAML, project YAML, fhsz.geojson, output/
-
-### Private Cities Currently in josh-private
+### Active Cities in josh-pipeline
 
 | City | Status |
 |------|--------|
+| Berkeley, CA | ✅ Active — schema example + live demo |
 | Encinitas, CA | ✅ Active — full analysis, demo map, AB 747 report |
-| Solana Beach, CA | 🔄 In progress — configs and demo projects created; `analyze` not yet run |
+| Del Mar, CA | ✅ Active — full analysis, demo map |
+| Solana Beach, CA | ✅ Active — full analysis, demo map |
 | Rancho Santa Fe FPD (rsf_fire) | ✅ Active — fire district; boundary_file + known_exit_nodes; Silvergate project (148 units, VHFHSZ, ΔT=15.0 min DISCRETIONARY) |
 
 ## IP & Copyright Protocol

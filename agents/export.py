@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 
 _PARAMETERS_VERSION = "3.4"
 _APP_JS_VERSION = "v1"   # bump only on backward-incompatible JOSH_DATA schema changes
+
+try:
+    from importlib.metadata import version as _pkg_version
+    JOSH_VERSION = _pkg_version("csf-fire")
+except Exception:
+    JOSH_VERSION = "1.0.0"
 _MPH_TO_MPS = 0.44704  # exact, same constant used in wildland.py
 
 # ---------------------------------------------------------------------------
@@ -570,6 +576,7 @@ def export_graph_json(
 
     output = {
         "built_at": datetime.now(timezone.utc).isoformat(),
+        "josh_version": JOSH_VERSION,
         "parameters_version": _PARAMETERS_VERSION,
         "nodes": nodes,
         "edges": edges,
