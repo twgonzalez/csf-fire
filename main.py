@@ -27,6 +27,23 @@ console = Console()
 
 
 # ---------------------------------------------------------------------------
+# Private config overlay
+# ---------------------------------------------------------------------------
+
+def _resolve_config(subpath: str, base_dir: Path) -> Path:
+    """Return config/private/{subpath} if it exists, else config/{subpath}.
+
+    This allows city configs and project YAMLs to live in config/private/
+    (a gitignored, separately versioned directory) without any changes to
+    how the rest of the pipeline consumes them.
+    """
+    private = base_dir / "config" / "private" / subpath
+    if private.exists():
+        return private
+    return base_dir / "config" / subpath
+
+
+# ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
 
@@ -42,7 +59,7 @@ def load_config(city: str) -> tuple[dict, dict]:
         config = yaml.safe_load(f)
 
     city_slug = city.lower().replace(" ", "_")
-    city_path = base_dir / "config" / "cities" / f"{city_slug}.yaml"
+    city_path = _resolve_config(f"cities/{city_slug}.yaml", base_dir)
     if not city_path.exists():
         console.print(f"[yellow]Warning: No city config found at {city_path}. Using defaults.[/yellow]")
         city_config = {"city_name": city, "osmnx_place": f"{city}, USA"}
@@ -509,9 +526,9 @@ def demo(city: str, state: str, projects_file: str, output_name: str):
     output_dir = base_dir / "output" / city_slug
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve projects file
+    # Resolve projects file (checks config/private/ first, then config/)
     if projects_file is None:
-        projects_file = base_dir / "config" / "projects" / f"{city_slug}_demo.yaml"
+        projects_file = _resolve_config(f"projects/{city_slug}_demo.yaml", base_dir)
     else:
         projects_file = Path(projects_file)
 
@@ -723,7 +740,7 @@ def geocode(city: str, state: str, projects_file: str, apply: bool, threshold: f
     city_slug = city.lower().replace(" ", "_")
 
     if projects_file is None:
-        projects_file = base_dir / "config" / "projects" / f"{city_slug}_demo.yaml"
+        projects_file = _resolve_config(f"projects/{city_slug}_demo.yaml", base_dir)
     else:
         projects_file = Path(projects_file)
 

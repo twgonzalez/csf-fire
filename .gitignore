@@ -1,10 +1,8 @@
 data/*
 !data/berkeley/
-!data/encinitas/
 output/*
 !output/berkeley/
-!output/encinitas/
-output/encinitas/demo_map.html
+config/private/
 prompts/
 __pycache__/
 .venv/
