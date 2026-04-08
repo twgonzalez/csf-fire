@@ -376,6 +376,69 @@ uv run python main.py analyze --city "CityName" --refresh
 uv run python main.py demo --city "CityName"
 ```
 
+## Non-Municipal Jurisdiction Configuration
+
+Fire protection districts and other non-municipal jurisdictions require three
+extra config keys that standard (Census PLACE) cities do not need.
+
+### `boundary_file` — pre-built district boundary GeoJSON
+
+Census TIGER has no entries for fire districts. Set `boundary_file` to a
+pre-built GeoJSON and the pipeline uses `ox.graph_from_polygon()` instead
+of `ox.graph_from_place()`.
+
+```yaml
+boundary_file: "config/private/cities/boundaries/rsf_fire_boundary.geojson"
+```
+
+**SD County FPD boundary source:** SD County LAFCO MapServer
+`https://gis-public.sandiegocounty.gov/arcgis/rest/services/LAFCO/lafco_water_and_fire_districts/MapServer`
+Layer IDs: RSF FPD=34, Alpine=7, Borrego=13, Deer Springs=16, Julian-Cuyamaca=19,
+Lakeside=22, North County=27, Pine Valley=30, San Miguel=39, Valley Center=42, Vista=45.
+
+### `fhsz_local_file` / `fhsz_fallback_api` — LRA FHSZ data
+
+CAL FIRE's `HHZ_ref_FHSZ` API returns only SRA zones; LRA jurisdictions get 0 features.
+Use `fhsz_local_file` for a pre-downloaded GeoJSON or `fhsz_fallback_api` for a
+FeatureServer URL (SD County OES works for San Diego County LRA cities).
+
+```yaml
+fhsz_local_file: "config/private/cities/fhsz/rsf_fire_fhsz.geojson"
+fhsz_fallback_api: "https://gis-public.sandiegocounty.gov/arcgis/rest/services/hosted/OES_KnowYourHazards_Wildfire_1/FeatureServer/0"
+```
+
+### `known_exit_nodes` — explicit evacuation exit node IDs
+
+**Why this is needed:** `ox.graph_from_polygon()` clips the OSM network to the district
+polygon. Primary road endpoints end up 100–500 m inside the boundary — outside the
+default 50 m proximity threshold used by `_find_exit_nodes()`. Without explicit nodes,
+the algorithm detects only the tiny subset of nodes that happen to be clipped right at
+the boundary edge, producing incorrect routing (e.g. all paths routing to one corner
+instead of using the main western exit).
+
+```yaml
+known_exit_nodes:
+  # Via de la Valle — primary western exit toward I-5
+  # lat=32.98715, lon=-117.21711 (179 m inside western boundary)
+  - 49171047
+  # South Rancho Santa Fe Road — southern exit toward SR-56 / I-15
+  # lat=33.03373, lon=-117.23512 (98 m inside boundary)
+  - 3522701601
+```
+
+**How to find node IDs:**
+1. Open the district boundary in [geojson.io](https://geojson.io) to visualize it.
+2. In OSM iD editor (or JOSM), zoom to where the primary exit road leaves the district.
+3. Click the last node inside the district on that road — the node ID appears in the URL
+   or sidebar (e.g. `node/49171047`).
+4. Add lat/lon comments to the YAML entry for future verification.
+5. Re-run `analyze --refresh` — the log line `Using N explicit exit nodes from city config`
+   confirms they were found in the graph.
+
+**When `known_exit_nodes` is set**, `_find_exit_nodes()` is skipped entirely. Include
+**all** legitimate exits (western, southern, and any auto-detectable NE/boundary nodes)
+so the Dijkstra routing has complete coverage.
+
 ## Pending Methodology Work
 
 1. **Demo map hand-placement of project pins** — no file yet
@@ -474,6 +537,7 @@ git clone https://github.com/twgonzalez/josh-private.git config/private
 |------|--------|
 | Encinitas, CA | ✅ Active — full analysis, demo map, AB 747 report |
 | Solana Beach, CA | 🔄 In progress — configs and demo projects created; `analyze` not yet run |
+| Rancho Santa Fe FPD (rsf_fire) | ✅ Active — fire district; boundary_file + known_exit_nodes; Silvergate project (148 units, VHFHSZ, ΔT=15.0 min DISCRETIONARY) |
 
 ## IP & Copyright Protocol
 
