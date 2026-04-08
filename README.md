@@ -67,23 +67,31 @@ MINISTERIAL             — below size threshold (Std 1 not met)
 
 **Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
 
+JOSH uses a two-repo architecture. This repo (`josh`) contains the analysis engine.
+City data acquisition lives in a companion private repo (`josh-pipeline`).
+
 ```bash
+# Clone the public engine
 git clone https://github.com/twgonzalez/josh.git
 cd josh
 uv sync
 
-# Analyze a city (downloads data + computes evacuation route capacity)
-uv run python main.py analyze --city "Berkeley" --state "CA"
+# Build graph from pre-acquired data (requires josh-pipeline to have run first)
+uv run python build.py analyze --city "Berkeley" --data-dir /path/to/josh-pipeline/data/berkeley
 
 # Evaluate a specific project
-uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75
+uv run python build.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75 \
+  --data-dir /path/to/josh-pipeline/data/berkeley
 
 # Generate the multi-project interactive demo map
-uv run python main.py demo --city "Berkeley"
+uv run python build.py demo --city "Berkeley" \
+  --data-dir /path/to/josh-pipeline/data/berkeley \
+  --projects /path/to/josh-pipeline/projects/berkeley_demo.yaml
 # → output/berkeley/demo_map.html
 ```
 
-Data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-download.
+The live Berkeley demo output is included in this repo at `output/berkeley/` — you can open
+`output/berkeley/demo_map.html` directly without running any commands.
 
 ---
 
@@ -98,31 +106,56 @@ Data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-
 
 ---
 
-## Project Structure
+## Repository Structure
+
+This repo (`josh`, public) contains the methodology engine only:
 
 ```
 agents/
-  data_acquisition.py    # Stage 1: download CAL FIRE FHSZ, OSM roads, Census data
   capacity_analysis.py   # Stage 2: HCM capacity, hazard degradation, route ID
   objective_standards.py # Stage 3: ΔT determination, audit trail generation
+  export.py              # graph.json + whatif_engine.js serializer
   scenarios/             # WildlandScenario (Standards 1–4), Sb79TransitScenario (Std 5)
   visualization/         # Folium demo map, determination briefs, popups
+  analysis/              # City-wide clearance time, SB 99 single-access scan
 models/                  # Project, EvacuationPath, RoadSegment dataclasses
 config/
-  parameters.yaml        # All thresholds (HCM tables, ΔT limits, egress penalties)
-  cities/berkeley.yaml   # City-specific config and overrides
-  projects/              # Demo project batches for testing
+  parameters.yaml        # CANONICAL — all thresholds (HCM tables, ΔT limits, egress penalties)
+  cities/berkeley.yaml   # Schema example — city config format
+build.py                 # CLI: analyze, demo, evaluate, report
+static/                  # JS what-if engine (whatif_engine.js, app.js)
+output/berkeley/         # Live Berkeley demo output (tracked)
+tests/                   # Anti-divergence + unit tests
 ```
+
+City data acquisition, OSM downloads, and all client city configs live in the companion
+private repo (`josh-pipeline`). See [Two-Repo Setup](#two-repo-setup) below.
 
 ---
 
+## Two-Repo Setup
+
+```bash
+# Clone both repos side by side
+git clone https://github.com/twgonzalez/josh.git
+git clone https://github.com/twgonzalez/josh-pipeline.git   # private — request access
+cd josh-pipeline && echo "JOSH_DIR=$(pwd)/../josh" > .env
+
+# Acquire city data (runs in josh-pipeline)
+cd josh-pipeline
+uv run python acquire.py --city "Berkeley"
+
+# Full pipeline: acquire → analyze → demo (runs both repos)
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
+```
+
 ## Adding a New City
 
-1. Create `config/cities/{city}.yaml` modeled on `config/cities/berkeley.yaml`
-2. Create `config/projects/{city}_demo.yaml` with representative test projects
-3. Run `uv run python main.py analyze --city "{City}" --state "CA"`
+New city configs, project YAMLs, and FHSZ data all live in `josh-pipeline`.
+See `CLAUDE.md § Two-Repo Setup` for the full workflow.
 
-JOSH will download all required data automatically. The only required fields in the city config are `osmnx_place`, `tiger_url`, `state_fips`, `county_fips`, and `place_fips`.
+The `config/cities/berkeley.yaml` in this repo is a **schema reference only** — the
+canonical city configs for all deployed cities are in `josh-pipeline/cities/`.
 
 ---
 
