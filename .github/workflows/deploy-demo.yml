@@ -35,6 +35,7 @@ jobs:
           cp pages/viewer.html output/viewer.html
           cp pages/mayors_presentation.html output/mayors_presentation.html
           cp -r docs output/docs
+          cp -r static output/static
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

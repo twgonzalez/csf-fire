@@ -61,12 +61,14 @@ const WhatIfEngine = (() => {
 
   function _ensureReady() {
     if (!_ready) {
-      if (typeof JOSH_GRAPH !== "undefined" &&
-          typeof JOSH_PARAMS !== "undefined" &&
-          typeof JOSH_FHSZ   !== "undefined") {
-        init(JOSH_GRAPH, JOSH_PARAMS, JOSH_FHSZ);
+      var d = window.JOSH_DATA;
+      if (d && d.graph && d.parameters && d.fhsz) {
+        init(d.graph, d.parameters, d.fhsz);
       } else {
-        throw new Error("WhatIfEngine: JOSH_GRAPH / JOSH_PARAMS / JOSH_FHSZ not loaded");
+        throw new Error(
+          "WhatIfEngine: window.JOSH_DATA not loaded. " +
+          "Ensure JOSH_DATA is inlined before app.js."
+        );
       }
     }
   }
