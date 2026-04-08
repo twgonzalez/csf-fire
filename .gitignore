@@ -6,5 +6,7 @@ config/private/
 prompts/
 __pycache__/
 .venv/
+.claude/
+cache/
 # Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
 config/cities/fhsz/*.geojson
