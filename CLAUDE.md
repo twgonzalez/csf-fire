@@ -54,7 +54,14 @@ uv run python main.py geocode --city "Berkeley" --apply   # write corrections to
 wrong road segments and produce incorrect FHSZ lookups, ΔT calculations, and route
 assignments — invalidating the legal analysis.
 
-**Required workflow when adding a new project to any `config/projects/{city}_demo.yaml`:**
+**Project YAML location:**
+- Public cities → `config/projects/{city}_demo.yaml`
+- Private cities → `config/private/projects/{city}_demo.yaml`
+
+The pipeline resolves both automatically via `_resolve_config()` in `main.py` —
+no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
+
+**Required workflow when adding a new project:**
 
 1. Set the `address` field to the human-readable project address.
 2. If `address` is not a clean geocodable street address (e.g. it's an intersection
@@ -89,11 +96,15 @@ This is the ONLY output file external users need to open.
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 uv run python main.py demo --city "Berkeley"
-# → output/berkeley/demo_map.html
+# → output/berkeley/demo_map.html          (public city)
+uv run python main.py demo --city "Encinitas"
+# → config/private/output/encinitas/demo_map.html  (private city)
 ```
 
-The `output/` directory is git-ignored. Share `output/{city}/demo_map.html` directly with
-stakeholders. Do NOT leave a stale demo map — always regenerate before sharing.
+Output paths depend on whether the city is public or private (see Private City
+Infrastructure below). Public city output is git-ignored in the public repo.
+Private city output is tracked in `josh-private`. Do NOT leave a stale demo map
+— always regenerate before sharing.
 
 **Brief / popup labeling convention (user-facing):** Criteria are labeled **A** (Applicability
 Threshold — size gate), **B** (Site Parameters — FHSZ zone + degradation + threshold), and
@@ -117,15 +128,22 @@ models/
 config/
   parameters.yaml       # All thresholds and HCM factors (never hardcode these)
   cities/
-    berkeley.yaml       # City-specific config and overrides
+    berkeley.yaml       # City-specific config and overrides (public cities only)
+  projects/
+    berkeley_demo.yaml  # Demo project definitions (public cities only)
+  private/              # ← gitignored; separate git repo (josh-private)
+    cities/             # City configs for private/client cities
+    projects/           # Demo project YAMLs for private/client cities
+    data/{city}/        # Cached source data for private cities (gitignored in josh-private)
+    output/{city}/      # Results for private cities (tracked in josh-private)
 
-data/{city}/            # Cached source data (git-ignored, 90-day TTL)
+data/{city}/            # Cached source data — PUBLIC cities only (git-ignored, 90-day TTL)
   fhsz.geojson
   roads.gpkg
   boundary.geojson
   metadata.yaml
 
-output/{city}/          # Results (git-ignored)
+output/{city}/          # Results — PUBLIC cities only (git-ignored except Berkeley demo)
   routes.csv
   determination_{id}.txt
 ```
@@ -213,7 +231,16 @@ MINISTERIAL             — below size threshold (Std 1 not met)
 
 ## Caching Policy
 
-All downloaded data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-download. `metadata.yaml` records source URLs and download dates for every file (required for legal audit trail).
+All downloaded data is cached with a 90-day TTL. Use `--refresh` to force re-download.
+`metadata.yaml` records source URLs and download dates for every file (required for legal
+audit trail).
+
+- **Public cities** → cached in `data/{city}/` (git-ignored in public repo)
+- **Private cities** → cached in `config/private/data/{city}/` (gitignored inside josh-private;
+  Dropbox provides local backup; data is regeneratable via `--refresh`)
+- **Exception:** `config/private/data/{city}/fhsz.geojson` is tracked in josh-private for
+  cities with locally-adopted FHSZ maps (e.g. Encinitas 2025 adoption) — these are hard
+  to regenerate from public APIs.
 
 ## Current MVP Phase
 
@@ -276,6 +303,60 @@ Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
    - Single access point: flag for large projects (city-adopted N)
    This should be a new scenario subclass (`agents/scenarios/site_access.py`) using OSM
    `width` tags and road geometry as inputs.
+
+## Private City Infrastructure
+
+Client cities (Encinitas, Solana Beach, etc.) are kept out of the public repo using a
+two-repo pattern. The private repo (`josh-private`) lives at `config/private/` inside the
+public repo and is gitignored by `csf-josh`.
+
+### Detection and Path Routing
+
+`main.py` contains three helpers that route paths automatically — no CLI flags needed:
+
+```python
+_is_private_city(city_slug, base_dir)   # True if config/private/cities/{slug}.yaml exists
+_resolve_data_dir(city_slug, base_dir)  # config/private/data/{city} or data/{city}
+_resolve_output_dir(city_slug, base_dir)# config/private/output/{city} or output/{city}
+```
+
+All four CLI commands (`analyze`, `evaluate`, `demo`, `report`) use these helpers.
+Adding a new private city requires only a city YAML in `config/private/cities/` —
+no code changes.
+
+### What josh-private Tracks
+
+| Path | Tracked? | Reason |
+|------|----------|--------|
+| `cities/*.yaml` | ✅ Yes | City config — irreplaceable business logic |
+| `projects/*_demo.yaml` | ✅ Yes | Project definitions — irreplaceable |
+| `output/{city}/**` | ✅ Yes | Legal deliverables (briefs, maps, determinations) |
+| `data/{city}/fhsz.geojson` | ✅ Yes | Locally-adopted FHSZ — hard to regenerate |
+| `data/{city}/*` (all other) | ❌ Gitignored | Large binary, regeneratable via `--refresh` |
+
+### Setup on a New Machine
+
+```bash
+git clone https://github.com/twgonzalez/josh.git csf-josh
+cd csf-josh
+git clone https://github.com/twgonzalez/josh-private.git config/private
+```
+
+### Adding a New Private City
+
+1. Create `config/private/cities/{city_slug}.yaml` (copy from encinitas.yaml as template)
+2. Create `config/private/projects/{city_slug}_demo.yaml` (copy from encinitas_demo.yaml)
+3. Run `uv run python main.py geocode --city "CityName" --apply` to set coordinates
+4. Run `uv run python main.py analyze --city "CityName"` to download data
+5. Run `uv run python main.py demo --city "CityName"` to generate the map
+6. Commit and push inside `config/private/`: city YAML, project YAML, fhsz.geojson, output/
+
+### Private Cities Currently in josh-private
+
+| City | Status |
+|------|--------|
+| Encinitas, CA | ✅ Active — full analysis, demo map, AB 747 report |
+| Solana Beach, CA | 🔄 In progress — configs and demo projects created; `analyze` not yet run |
 
 ## IP & Copyright Protocol
 
