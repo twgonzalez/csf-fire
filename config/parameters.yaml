@@ -1,9 +1,9 @@
-# JOSH v3.4 — Global Parameters
+# JOSH v4.0 — Global Parameters
 # Fire Evacuation Capacity Analysis System
 # All thresholds trace to published sources. No parameter requires city-level adoption.
 # Override city-specific values in config/cities/{city}.yaml
 
-parameters_version: "3.4"
+parameters_version: "4.0"
 
 # ============================================================
 # Project Size Threshold
@@ -254,7 +254,7 @@ width_speed_inference:
 
 evacuation:
   serving_route_radius_miles: 0.5   # Standard 2 search radius
-  max_path_length_ratio: 2.0        # v3.4: only include exit paths within 2× the fastest-exit travel time.
+  max_path_length_ratio: 2.0        # v4.0: only include exit paths within 2× the fastest-exit travel time.
                                     # Dijkstra is weighted by travel time (length / speed_limit) — faster
                                     # roads are preferred over shorter-but-slower roads. Rational evacuees
                                     # take the fastest route to safety; paths more than 2× the fastest
@@ -262,7 +262,7 @@ evacuation:
                                     # alternatives exist (legally defensible route-choice bound).
                                     # Edge weight formula: travel_time_s = length_m / (speed_mph × 0.44704)
 
-  # Regional network exit node filter (v3.4)
+  # Regional network exit node filter (v4.0)
   # Exit nodes are boundary nodes connected to roads of these OSM highway types.
   # These represent capacity handoff points: where the local road network delivers
   # evacuees into the regional system (freeway, trunk highway, major arterial).

@@ -188,7 +188,7 @@ models/
   project.py            # Project dataclass
 
 config/
-  parameters.yaml       # CANONICAL — legal methodology spec (parameters_version: "3.4")
+  parameters.yaml       # CANONICAL — legal methodology spec (parameters_version: "4.0")
   cities/
     berkeley.yaml       # Schema example — canonical source is in josh-pipeline
 
@@ -246,14 +246,14 @@ output/{city}/          # Client deliverables — tracked
 | `safe_egress_window.moderate_fhsz` | 120 min | Standard emergency planning |
 | `safe_egress_window.non_fhsz` | 120 min | FEMA standard |
 | `max_project_share` | 0.05 | Standard 5% engineering significance threshold |
-| Derived ΔT thresholds (v3.4) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
+| Derived ΔT thresholds (v4.0) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
 | `egress_penalty.threshold_stories` | 4 | NFPA 101 / IBC |
 | `egress_penalty.minutes_per_story` | 1.5 | NFPA 101 |
 | `egress_penalty.max_minutes` | 12 | NFPA 101 cap |
 | Evacuation route radius | 0.5 miles | per Standard 2 |
 | `vc_threshold` | 0.95 | Informational only — HCM LOS E/F boundary |
 
-**v3.4 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
+**v4.0 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
 
 ## HCM 2022 Capacity Table
 
@@ -328,16 +328,16 @@ Phase 1 (MVP): Agents 1–3 only. CLI output to CSV + text. No web UI, no fee ca
 Phase 2 (next): Agent 4 (impact fee calculator) + Agent 6 (Folium maps).
 Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 
-## v3.4 Migration Status (branch: feat/v3-delta-t)
+## v4.0 Migration Status (branch: feat/v3-delta-t)
 
 ✅ Replaced v/c marginal causation test with ΔT (marginal evacuation clearance time).
-✅ **v3.4: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
-✅ **v3.4: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
+✅ **v4.0: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
+✅ **v4.0: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
 ✅ Hazard-aware capacity degradation applied by Agent 2 (HCM composite + NIST Camp Fire validation).
 ✅ Building egress penalty (NFPA 101/IBC) for buildings ≥ 4 stories.
 ✅ `EvacuationPath` dataclass with per-path bottleneck tracking (argmin effective_capacity_vph).
 ✅ `Sb79TransitScenario` replaces `LocalDensityScenario` (informational flag, no tier impact).
-✅ Audit trail v3.4: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
+✅ Audit trail v4.0: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
 ✅ `data/{city}/evacuation_paths.json` persisted by Agent 2 after routing.
 
 ## Road Network Overrides

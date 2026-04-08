@@ -352,7 +352,7 @@ def create_demo_map(
     }
 
     for i, project in enumerate(projects):
-        # v3.4: Build path_id → path_osmids from this project's ΔT results.
+        # v4.0: Build path_id → path_osmids from this project's ΔT results.
         # Project-origin Dijkstra paths carry their own path_osmids in delta_t_results,
         # so the flow-trace visualization works without the population paths list.
         # Falls back to population paths lookup for any path_ids not found here.
@@ -543,7 +543,7 @@ def create_demo_map(
             _direct_coords = dt_result.get("path_wgs84_coords", [])
 
             if len(_direct_coords) >= 2:
-                # v3.4+: use exact node coordinates — one AntPath, no gaps,
+                # v4.0+: use exact node coordinates — one AntPath, no gaps,
                 # no osmid-ambiguity (a single way ID can match many road segments).
                 ant_chains: list[list[list[float]]] = [_direct_coords]
             else:
@@ -1158,8 +1158,7 @@ def _inject_josh_data_bundle(
     footer_block = (
         f'\n<div style="position:fixed;bottom:4px;right:8px;font-size:10px;'
         f'color:#888;z-index:9999;pointer-events:none;">'
-        f'JOSH v{JOSH_VERSION} · Methodology v{_PARAMETERS_VERSION} · '
-        f'© 2026 Thomas Gonzalez · AGPL-3.0'
+        f'JOSH v{_PARAMETERS_VERSION} · © 2026 Thomas Gonzalez · AGPL-3.0'
         f'</div>\n'
     )
     injection = data_block + app_block + footer_block
@@ -2171,7 +2170,7 @@ def _build_demo_legend_html(
     heatmap_js_name: str = "",
 ) -> str:
     """
-    Minimal legend for the demo map — v3.4 ΔT Standard.
+    Minimal legend for the demo map — v4.0 ΔT Standard.
 
     Shows only:
       1. Project determination tier dot-key (3 items)
@@ -2241,7 +2240,7 @@ def _build_demo_legend_html(
   </div>
 
   <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
-              font-size:9px; color:#adb5bd;">CSF v3.4 &middot; California Stewardship Alliance</div>
+              font-size:9px; color:#adb5bd;">JOSH v4.0 &middot; California Stewardship Alliance</div>
 </div>
 
 <script>
