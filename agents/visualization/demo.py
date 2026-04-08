@@ -1537,6 +1537,16 @@ def _build_whatif_ui_js() -> str:
     document.getElementById('josh-wi-btn-clear').style.display = '';
     document.getElementById('josh-whatif-instructions').textContent =
       'Drag pin or adjust inputs to update.';
+
+    // Restore the selected project layer. Adding what-if polylines to the
+    // Leaflet map can disturb the layer control state, causing the active
+    // project FeatureGroup to visually disappear. Re-applying selectProject()
+    // with the current index is idempotent (hasLayer guard inside) and brings
+    // the project layer back without flickering.
+    var _projDd = document.getElementById('proj-dropdown');
+    if (_projDd && typeof window.selectProject === 'function') {
+      window.selectProject(_projDd.selectedIndex);
+    }
   }
 
   // ── Result renderer ─────────────────────────────────────────────────────────
@@ -1621,6 +1631,12 @@ def _build_whatif_ui_js() -> str:
     document.getElementById('josh-whatif-instructions').textContent =
       'Set units & stories, then drop a pin.';
     _restoreIdleOrPinnedButton();
+    // Restore the selected project layer after clearing what-if state,
+    // for the same reason as the guard in _evaluateAt().
+    var _projDd = document.getElementById('proj-dropdown');
+    if (_projDd && typeof window.selectProject === 'function') {
+      window.selectProject(_projDd.selectedIndex);
+    }
   }
 
   // ── Input auto-re-evaluate ──────────────────────────────────────────────────
