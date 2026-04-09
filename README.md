@@ -67,31 +67,31 @@ MINISTERIAL             — below size threshold (Std 1 not met)
 
 **Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
 
-JOSH uses a two-repo architecture. This repo (`josh`) contains the analysis engine.
-City data acquisition lives in a companion private repo (`josh-pipeline`).
-
 ```bash
-# Clone the public engine
 git clone https://github.com/twgonzalez/josh.git
 cd josh
 uv sync
-
-# Build graph from pre-acquired data (requires josh-pipeline to have run first)
-uv run python build.py analyze --city "Berkeley" --data-dir /path/to/josh-pipeline/data/berkeley
-
-# Evaluate a specific project
-uv run python build.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75 \
-  --data-dir /path/to/josh-pipeline/data/berkeley
-
-# Generate the multi-project interactive demo map
-uv run python build.py demo --city "Berkeley" \
-  --data-dir /path/to/josh-pipeline/data/berkeley \
-  --projects /path/to/josh-pipeline/projects/berkeley_demo.yaml
-# → output/berkeley/demo_map.html
 ```
 
-The live Berkeley demo output is included in this repo at `output/berkeley/` — you can open
-`output/berkeley/demo_map.html` directly without running any commands.
+The live Berkeley demo is already included — open `output/berkeley/demo_map.html` directly,
+no commands required.
+
+To run analysis for your own city, assemble a data directory (see [Data Requirements](#data-requirements) below), then:
+
+```bash
+# Build the evacuation route graph
+uv run python build.py analyze --city "Encinitas" --data-dir /path/to/data/encinitas
+
+# Evaluate a specific project
+uv run python build.py evaluate --city "Encinitas" --lat 33.04 --lon -117.29 --units 80 \
+  --data-dir /path/to/data/encinitas
+
+# Generate a multi-project interactive demo map
+uv run python build.py demo --city "Encinitas" \
+  --data-dir /path/to/data/encinitas \
+  --projects /path/to/your/projects.yaml
+# → output/encinitas/demo_map.html
+```
 
 ---
 
@@ -128,34 +128,48 @@ output/berkeley/         # Live Berkeley demo output (tracked)
 tests/                   # Anti-divergence + unit tests
 ```
 
-City data acquisition, OSM downloads, and all client city configs live in the companion
-private repo (`josh-pipeline`). See [Two-Repo Setup](#two-repo-setup) below.
+City configs and project YAMLs follow the schema in `config/cities/berkeley.yaml`
+and `config/parameters.yaml`. See [Data Requirements](#data-requirements) below.
 
 ---
 
-## Two-Repo Setup
+## Data Requirements
 
-```bash
-# Clone both repos side by side
-git clone https://github.com/twgonzalez/josh.git
-git clone https://github.com/twgonzalez/josh-pipeline.git   # private — request access
-cd josh-pipeline && echo "JOSH_DIR=$(pwd)/../josh" > .env
+`build.py analyze` expects a `--data-dir` containing these files:
 
-# Acquire city data (runs in josh-pipeline)
-cd josh-pipeline
-uv run python acquire.py --city "Berkeley"
+| File | Description | Source |
+|------|-------------|--------|
+| `roads.gpkg` | OSM road network (GeoPackage) | [OpenStreetMap](https://www.openstreetmap.org/) via [OSMnx](https://osmnx.readthedocs.io/) |
+| `fhsz.geojson` | CAL FIRE Fire Hazard Severity Zones | [CAL FIRE OSFM ArcGIS REST API](https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HAZ/) |
+| `boundary.geojson` | City boundary polygon | [U.S. Census TIGER](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) via OSMnx (`ox.geocode_to_gdf`) |
+| `block_groups.geojson` | Census block groups (optional — used for SB 99 single-access scan) | [Census TIGER](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) |
 
-# Full pipeline: acquire → analyze → demo (runs both repos)
-JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
+**Fetching with OSMnx (roads + boundary):**
+```python
+import osmnx as ox
+G = ox.graph_from_place("Berkeley, California")
+ox.save_graph_geopackage(G, filepath="data/berkeley/roads.gpkg")
+boundary = ox.geocode_to_gdf("Berkeley, California")
+boundary.to_file("data/berkeley/boundary.geojson", driver="GeoJSON")
 ```
+
+**City config:** Copy `config/cities/berkeley.yaml` as a starting point. Set `city_name`,
+`state`, `analysis_crs`, and any parameter overrides. Pass it to `build.py` via
+`--city-config /path/to/your/city.yaml`.
+
+**Projects YAML:** See `config/cities/berkeley.yaml` comments for the schema.
+Each project needs `name`, `lat`, `lon`, `units`, and optionally `stories` and `address`.
 
 ## Adding a New City
 
-New city configs, project YAMLs, and FHSZ data all live in `josh-pipeline`.
-See `CLAUDE.md § Two-Repo Setup` for the full workflow.
-
-The `config/cities/berkeley.yaml` in this repo is a **schema reference only** — the
-canonical city configs for all deployed cities are in `josh-pipeline/cities/`.
+1. Fetch the four data files above into `data/{city}/`
+2. Copy `config/cities/berkeley.yaml` → `config/cities/{city}.yaml` and update fields
+3. Create a projects YAML with your proposed developments
+4. Run the pipeline:
+   ```bash
+   uv run python build.py analyze --city "YourCity" --data-dir data/{city} --city-config config/cities/{city}.yaml
+   uv run python build.py demo --city "YourCity" --data-dir data/{city} --projects projects/{city}.yaml
+   ```
 
 ---
 
