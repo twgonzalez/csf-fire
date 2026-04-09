@@ -13,7 +13,7 @@ California AB 747 (Gov. Code §65302.15) requires cities to analyze fire evacuat
 1. **Downloads** CAL FIRE FHSZ zones, the OSM road network, and Census housing data for any California city
 2. **Identifies** evacuation routes and computes per-route bottleneck capacity (HCM 2022)
 3. **Applies** hazard degradation to road capacity based on FHSZ zone (NIST Camp Fire / HCM composite)
-4. **Runs** the ΔT test — marginal evacuation clearance time added by the proposed project (v3.4 standard)
+4. **Runs** the ΔT test — marginal evacuation clearance time added by the proposed project (v4.0 standard)
 5. **Issues** a three-tier determination: `MINISTERIAL`, `CONDITIONAL MINISTERIAL`, or `DISCRETIONARY`
 6. **Generates** a full audit trail for city attorney and planning commission review
 
@@ -45,7 +45,7 @@ The home page covers the methodology, legal framework, adoption pathway, and doc
 
 ---
 
-## Determination Logic (v3.4 ΔT Standard)
+## Determination Logic (v4.0 ΔT Standard)
 
 ```
 Standard 1 — Size gate:       units ≥ 15
@@ -71,19 +71,27 @@ MINISTERIAL             — below size threshold (Std 1 not met)
 git clone https://github.com/twgonzalez/josh.git
 cd josh
 uv sync
-
-# Analyze a city (downloads data + computes evacuation route capacity)
-uv run python main.py analyze --city "Berkeley" --state "CA"
-
-# Evaluate a specific project
-uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75
-
-# Generate the multi-project interactive demo map
-uv run python main.py demo --city "Berkeley"
-# → output/berkeley/demo_map.html
 ```
 
-Data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-download.
+The live Berkeley demo is already included — open `output/berkeley/demo_map.html` directly,
+no commands required.
+
+To run analysis for your own city, assemble a data directory (see [Data Requirements](#data-requirements) below), then:
+
+```bash
+# Build the evacuation route graph
+uv run python build.py analyze --city "Encinitas" --data-dir /path/to/data/encinitas
+
+# Evaluate a specific project
+uv run python build.py evaluate --city "Encinitas" --lat 33.04 --lon -117.29 --units 80 \
+  --data-dir /path/to/data/encinitas
+
+# Generate a multi-project interactive demo map
+uv run python build.py demo --city "Encinitas" \
+  --data-dir /path/to/data/encinitas \
+  --projects /path/to/your/projects.yaml
+# → output/encinitas/demo_map.html
+```
 
 ---
 
@@ -98,31 +106,70 @@ Data is cached in `data/{city}/` with a 90-day TTL. Use `--refresh` to force re-
 
 ---
 
-## Project Structure
+## Repository Structure
+
+This repo (`josh`, public) contains the methodology engine only:
 
 ```
 agents/
-  data_acquisition.py    # Stage 1: download CAL FIRE FHSZ, OSM roads, Census data
   capacity_analysis.py   # Stage 2: HCM capacity, hazard degradation, route ID
   objective_standards.py # Stage 3: ΔT determination, audit trail generation
+  export.py              # graph.json + whatif_engine.js serializer
   scenarios/             # WildlandScenario (Standards 1–4), Sb79TransitScenario (Std 5)
   visualization/         # Folium demo map, determination briefs, popups
+  analysis/              # City-wide clearance time, SB 99 single-access scan
 models/                  # Project, EvacuationPath, RoadSegment dataclasses
 config/
-  parameters.yaml        # All thresholds (HCM tables, ΔT limits, egress penalties)
-  cities/berkeley.yaml   # City-specific config and overrides
-  projects/              # Demo project batches for testing
+  parameters.yaml        # CANONICAL — all thresholds (HCM tables, ΔT limits, egress penalties)
+  cities/berkeley.yaml   # Schema example — city config format
+build.py                 # CLI: analyze, demo, evaluate, report
+static/                  # JS what-if engine (whatif_engine.js, app.js)
+output/berkeley/         # Live Berkeley demo output (tracked)
+tests/                   # Anti-divergence + unit tests
 ```
+
+City configs and project YAMLs follow the schema in `config/cities/berkeley.yaml`
+and `config/parameters.yaml`. See [Data Requirements](#data-requirements) below.
 
 ---
 
+## Data Requirements
+
+`build.py analyze` expects a `--data-dir` containing these files:
+
+| File | Description | Source |
+|------|-------------|--------|
+| `roads.gpkg` | OSM road network (GeoPackage) | [OpenStreetMap](https://www.openstreetmap.org/) via [OSMnx](https://osmnx.readthedocs.io/) |
+| `fhsz.geojson` | CAL FIRE Fire Hazard Severity Zones | [CAL FIRE OSFM ArcGIS REST API](https://egis.fire.ca.gov/arcgis/rest/services/FRAP/HAZ/) |
+| `boundary.geojson` | City boundary polygon | [U.S. Census TIGER](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) via OSMnx (`ox.geocode_to_gdf`) |
+| `block_groups.geojson` | Census block groups (optional — used for SB 99 single-access scan) | [Census TIGER](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) |
+
+**Fetching with OSMnx (roads + boundary):**
+```python
+import osmnx as ox
+G = ox.graph_from_place("Berkeley, California")
+ox.save_graph_geopackage(G, filepath="data/berkeley/roads.gpkg")
+boundary = ox.geocode_to_gdf("Berkeley, California")
+boundary.to_file("data/berkeley/boundary.geojson", driver="GeoJSON")
+```
+
+**City config:** Copy `config/cities/berkeley.yaml` as a starting point. Set `city_name`,
+`state`, `analysis_crs`, and any parameter overrides. Pass it to `build.py` via
+`--city-config /path/to/your/city.yaml`.
+
+**Projects YAML:** See `config/cities/berkeley.yaml` comments for the schema.
+Each project needs `name`, `lat`, `lon`, `units`, and optionally `stories` and `address`.
+
 ## Adding a New City
 
-1. Create `config/cities/{city}.yaml` modeled on `config/cities/berkeley.yaml`
-2. Create `config/projects/{city}_demo.yaml` with representative test projects
-3. Run `uv run python main.py analyze --city "{City}" --state "CA"`
-
-JOSH will download all required data automatically. The only required fields in the city config are `osmnx_place`, `tiger_url`, `state_fips`, `county_fips`, and `place_fips`.
+1. Fetch the four data files above into `data/{city}/`
+2. Copy `config/cities/berkeley.yaml` → `config/cities/{city}.yaml` and update fields
+3. Create a projects YAML with your proposed developments
+4. Run the pipeline:
+   ```bash
+   uv run python build.py analyze --city "YourCity" --data-dir data/{city} --city-config config/cities/{city}.yaml
+   uv run python build.py demo --city "YourCity" --data-dir data/{city} --projects projects/{city}.yaml
+   ```
 
 ---
 

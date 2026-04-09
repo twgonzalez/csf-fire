@@ -101,11 +101,16 @@ def analyze_capacity(
             _glob_evac.get("exit_highway_types", _default_hw))
     )
 
+    # known_exit_nodes: explicit OSM node IDs for non-municipal jurisdictions
+    # where ox.graph_from_polygon() clips exit roads before they reach the boundary.
+    _known_exits = city_config.get("known_exit_nodes") or None
+
     # Step 3: Evacuation routes + catchment weights + bottleneck tracking
     roads_gdf, evacuation_paths = _identify_evacuation_routes(
         roads_gdf, fhsz_gdf, boundary_gdf, config, analysis_crs, block_groups_gdf,
         data_dir=data_dir,
         exit_highway_types=exit_hw_types,
+        known_exit_nodes=_known_exits,
     )
 
     # Step 4: Baseline demand
@@ -451,6 +456,7 @@ def _identify_evacuation_routes(
     block_groups_gdf: Optional[gpd.GeoDataFrame] = None,
     data_dir: Optional[Path] = None,
     exit_highway_types: set | None = None,
+    known_exit_nodes: list | None = None,
 ) -> tuple[gpd.GeoDataFrame, list]:
     """
     Identify evacuation routes via Dijkstra network analysis.
@@ -461,6 +467,13 @@ def _identify_evacuation_routes(
     - During path traversal, tracks bottleneck_segment per path:
         bottleneck = argmin(effective_capacity_vph) along the path
     - Returns list of EvacuationPath objects alongside the enriched roads_gdf.
+
+    known_exit_nodes (optional): explicit list of OSM node IDs to use as exit
+        handoff points, bypassing automatic boundary-proximity detection.
+        Use for non-municipal jurisdictions whose road network is clipped to the
+        district polygon by ox.graph_from_polygon() — exit nodes may be 100–500 m
+        inside the boundary and outside the default 50 m detection threshold.
+        Set via ``known_exit_nodes`` in the city YAML.
 
     Returns:
         (roads_gdf with is_evacuation_route/connectivity_score/catchment_units,
@@ -510,7 +523,26 @@ def _identify_evacuation_routes(
         ox.save_graphml(G_proj, filepath=str(graph_path))
         logger.info(f"  Saved road graph → {graph_path}")
 
-    exits = _find_exit_nodes(G_proj, boundary_proj, exit_highway_types=exit_highway_types)
+    if known_exit_nodes:
+        # City YAML supplied explicit exit node IDs — use them directly.
+        # This is required for non-municipal jurisdictions (fire districts, etc.)
+        # whose road network is clipped to the district polygon by
+        # ox.graph_from_polygon(): the last node on each primary road before the
+        # boundary clip is 100–500 m inside the boundary, beyond the default
+        # 50 m proximity threshold used by _find_exit_nodes().
+        exits = [n for n in known_exit_nodes if n in G_proj.nodes]
+        n_missing = len(known_exit_nodes) - len(exits)
+        if n_missing:
+            logger.warning(
+                f"  {n_missing} known_exit_nodes not found in graph — "
+                f"check that node IDs match the downloaded OSM network."
+            )
+        logger.info(
+            f"  Using {len(exits)} explicit exit nodes from city config "
+            f"(known_exit_nodes)."
+        )
+    else:
+        exits = _find_exit_nodes(G_proj, boundary_proj, exit_highway_types=exit_highway_types)
     logger.info(f"  Found {len(exits)} regional-network exit nodes.")
     if not exits:
         logger.warning("  No exit nodes found — skipping route identification.")
