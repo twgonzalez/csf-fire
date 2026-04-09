@@ -1,0 +1,161 @@
+# ============================================================
+# Berkeley AB 747 Demo Projects — JOSH v4.0 (ΔT Standard)
+# ============================================================
+# Use with:  uv run python build.py demo --city "Berkeley" --data-dir data/berkeley --projects projects/berkeley_demo.yaml
+#
+# Purpose: Demonstrate ministerial vs discretionary determination
+# to city planners.  Each project appears as a toggleable layer
+# on the output map so reviewers can compare impacts side-by-side.
+#
+# Tier logic (v4.0 — ΔT Standard, constant mobilization):
+#   DISCRETIONARY           — size >= 15 AND ΔT > threshold on any serving route
+#                             (threshold = safe_egress_window[zone] × max_project_share)
+#                             (no baseline precondition — routes already failing are tested equally)
+#   MINISTERIAL WITH STANDARD CONDITIONS — size >= 15 AND ΔT within threshold on all serving routes
+#   MINISTERIAL             — size < 15
+#
+# v4.0 thresholds (safe_egress_window × 5%):
+#   vhfhsz:        45 min × 5% = 2.25 min
+#   high_fhsz:     90 min × 5% = 4.50 min
+#   moderate_fhsz: 120 min × 5% = 6.00 min
+#   non_fhsz:      120 min × 5% = 6.00 min
+#
+# Core metric: ΔT = (project_vehicles / bottleneck_effective_capacity) × 60 + egress_penalty
+#   project_vehicles = units × 2.5 vpu × 0.90  (NFPA 101 constant — not zone-dependent)
+#   effective_capacity = hcm_capacity × hazard_degradation_factor(fhsz_zone)
+#   egress_penalty = 0 for < 4 stories; min(stories × 1.5, 12) for ≥ 4 stories
+#
+# Coverage matrix (one project per distinct legal concept):
+#   Size gate below threshold, no FHSZ → Project 1 (10 units, flat)
+#   Size gate below threshold, IN FHSZ → Project 4 (10 units, hills Zone 3)
+#   Size met, ΔT exceeds threshold, IN FHSZ Zone 3 → Project 3 (Hills Gateway, degraded road cap)
+#   Size met, ΔT within threshold, small project non-FHSZ → Project 5 (Claremont Hills, 25 units)
+#   Size met, ΔT exceeds threshold via road bottleneck alone → Project 2 (Downtown Mid-Rise, 75u)
+#   Size met, egress penalty pushes ΔT over threshold → Project 6 (Cedar Street, 6-story)
+# ============================================================
+
+city: "Berkeley"
+state: "CA"
+description: "Berkeley AB 747 — Ministerial vs Discretionary Demo (v4.0 ΔT Standard)"
+
+projects:
+
+  # -----------------------------------------------------------
+  # 1 — Small infill: below the 15-unit threshold → MINISTERIAL
+  # -----------------------------------------------------------
+  - name: "Ashby Small Infill"
+    address: "Ashby BART Station Area"
+    lat: 37.8528
+    lon: -122.2699
+    units: 10
+    stories: 2
+    description: >
+      10-unit project at Ashby BART — below the 15-unit size threshold.
+      Standard 1 (size gate) is not triggered, so the project qualifies for ministerial
+      approval regardless of evacuation route congestion or ΔT computation.
+    expected_tier: "MINISTERIAL"
+
+  # -----------------------------------------------------------
+  # 2 — Mid-rise downtown: at threshold, bottleneck on local street → DISCRETIONARY
+  #     3 stories → no egress penalty (below 4-story NFPA 101 threshold).
+  #     v4.0: non-FHSZ threshold = 120 min × 5% = 6.0 min.
+  #     With 0.90 mob: 85 × 2.5 × 0.90 = 191.25 vehicles.
+  #     Binding bottleneck: Adeline Street (multilane, 25 mph, 1 lane → 1,900 vph effective).
+  #     Tipping point: floor(6.0 × 1900 / 135) = 84 → 85 units flips to DISCRETIONARY.
+  #     ΔT = (191.25 / 1900) × 60 = 6.04 min > 6.00 min threshold.
+  # -----------------------------------------------------------
+  - name: "Downtown Mid-Rise"
+    address: "Shattuck Ave & Center St, Downtown Berkeley"
+    lat: 37.8695
+    lon: -122.2685
+    units: 85
+    stories: 3
+    description: >
+      85-unit, 3-story project on Shattuck Ave. Exceeds the 15-unit threshold.
+      Non-FHSZ → no road degradation. Mobilization rate 0.90 (NFPA 101 design basis)
+      → 191.25 project vehicles. No egress penalty (3 stories < 4-story threshold).
+      Binding bottleneck: Adeline Street (multilane, 25 mph, 1 lane → 1,900 vph effective).
+      ΔT = (191.25 / 1900) × 60 = 6.04 min > 6.00 min threshold → DISCRETIONARY.
+      Tipping point: 84 units → ΔT = 5.97 min (within threshold); 85 units → 6.04 min (over).
+      Demonstrates that even in non-FHSZ downtown, large projects can exceed threshold via
+      road network capacity constraints on evacuation route collectors.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 3 — Hills gateway: in FHSZ Zone 3 → elevated mob rate → DISCRETIONARY
+  # -----------------------------------------------------------
+  - name: "Hills Gateway"
+    address: "Claremont Ave & Tunnel Rd"
+    lat: 37.8914
+    lon: -122.2494
+    units: 80
+    stories: 3
+    description: >
+      80-unit project near the Berkeley Hills in FHSZ Zone 3. Mobilization rate 0.90
+      (NFPA 101 design basis, constant) → 180 project vehicles. Road capacity degraded
+      by factor 0.35 (VHFHSZ — HCM Exhibit 10-15/10-17 composite).
+      Narrow canyon roads at effective capacity far below HCM raw value.
+      VHFHSZ threshold: 45 min × 5% = 2.25 min. Max ΔT ~12.0 min → DISCRETIONARY.
+      Double constraint: tight threshold (45-min window) AND degraded road capacity.
+    expected_tier: "DISCRETIONARY"
+
+  # -----------------------------------------------------------
+  # 4 — Small hills infill IN FHSZ: size gate overrides fire zone → MINISTERIAL
+  #     Same location as Project 3 (Hills Gateway, 80 units → DISCRETIONARY).
+  #     Paired comparison proves FHSZ location alone cannot trigger discretionary.
+  # -----------------------------------------------------------
+  - name: "Hills FHSZ Small Infill"
+    address: "Tunnel Rd & Claremont Ave, Berkeley Hills (FHSZ Zone 3 area)"
+    lat: 37.8914
+    lon: -122.2494
+    units: 10
+    stories: 2
+    description: >
+      10-unit project in the Berkeley Hills FHSZ Zone 3 area — same location
+      as Hills Gateway (Project 3, 80 units → DISCRETIONARY).
+      Despite the fire zone and high mobilization rate, Standard 1 (size gate) is NOT
+      triggered: 10 < 15. Returns MINISTERIAL. FHSZ designation is a modifier, not a gate.
+    expected_tier: "MINISTERIAL"
+
+  # -----------------------------------------------------------
+  # 5 — Claremont Hills: NOT in FHSZ, hillside road, SMALL project → MINISTERIAL WITH STANDARD CONDITIONS
+  #     25 units × 2.5 × 0.90 = 56.25 vehicles.
+  #     56.25 / ~904 vph bottleneck × 60 ≈ 3.7 min — below 6.0-min non-FHSZ threshold.
+  #     Shows that smaller projects on constrained roads still pass.
+  # -----------------------------------------------------------
+  - name: "Claremont Hills Terrace"
+    address: "Ridge Road & Claremont Ave, Berkeley Hills"
+    lat: 37.876
+    lon: -122.260
+    units: 25
+    stories: 3
+    description: >
+      25-unit hillside project NOT in a mapped FHSZ zone. Mobilization rate 0.90
+      (NFPA 101 design basis, constant) → 56.25 project vehicles. No road capacity
+      degradation (non-FHSZ). Ridge Road bottleneck (~904 vph) → ΔT ≈ 3.7 min.
+      Non-FHSZ threshold: 120 min × 5% = 6.0 min. ΔT within threshold.
+      MINISTERIAL WITH STANDARD CONDITIONS: size threshold met, pre-adopted conditions apply automatically.
+      Compare with Project 2 (75 units, downtown) which exceeds threshold despite
+      lower road hazard — project scale is the differentiating factor here.
+    expected_tier: "MINISTERIAL WITH STANDARD CONDITIONS"
+
+  # -----------------------------------------------------------
+  # 6 — Cedar Street: multi-story egress penalty triggers ΔT → DISCRETIONARY
+  #     6-story building: egress_penalty = 6 × 1.5 = 9.0 min (above 4-story threshold)
+  #     Vehicle ΔT ≈ 2.5 min + 9.0 min egress = 11.5 min > 10-min threshold → DISCRETIONARY
+  # -----------------------------------------------------------
+  - name: "Cedar Street Infill"
+    address: "Cedar Street & Shattuck Ave, North Berkeley"
+    lat: 37.879
+    lon: -122.278
+    units: 75
+    stories: 6
+    description: >
+      75-unit, 6-story project in North Berkeley (NOT in FHSZ). Mobilization rate 0.90
+      (NFPA 101 constant) → 168.75 project vehicles. Building egress penalty: 6 stories
+      × 1.5 min/story = 9.0 min (NFPA 101). Cedar Street bottleneck (~1125 vph):
+      vehicle ΔT + 9.0 min egress → max ΔT ~18.0 min > 6.0-min threshold → DISCRETIONARY.
+      Mitigation: reduce stories to ≤3 (eliminates egress penalty, ΔT ≈ 9.0 min — still
+      DISCRETIONARY at this unit count), or reduce units to ~20 (ΔT ~9.0+0=9.0 min;
+      or ~15 units to get below threshold entirely for MINISTERIAL).
+    expected_tier: "DISCRETIONARY"
