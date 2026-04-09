@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).parent.parent
-PROJECTS_YAML = ROOT / "config" / "projects" / "berkeley_demo.yaml"
+PROJECTS_YAML = ROOT / "projects" / "berkeley_demo.yaml"
 OUTPUT_DIR = ROOT / "output" / "berkeley"
 
 TIER_COLORS = {
@@ -133,7 +133,7 @@ def main() -> None:
 
 <header>
   <h1>JOSH &mdash; Fire Evacuation Capacity Analysis System</h1>
-  <p>Berkeley, CA &nbsp;&bull;&nbsp; AB 747 / Government Code &sect;65302.15 &nbsp;&bull;&nbsp; v3.4 &Delta;T Standard</p>
+  <p>Berkeley, CA &nbsp;&bull;&nbsp; AB 747 / Government Code &sect;65302.15 &nbsp;&bull;&nbsp; v4.0 &Delta;T Standard</p>
 </header>
 
 <div class="container">
