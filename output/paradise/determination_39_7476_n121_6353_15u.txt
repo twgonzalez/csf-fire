@@ -1,0 +1,141 @@
+======================================================================
+FIRE EVACUATION CAPACITY ANALYSIS  -  PROJECT DETERMINATION
+JOSH v3.4 (dT Standard  -  Constant Mobilization, NFPA 101)
+======================================================================
+Date:           2026-04-08T05:49:40.163976
+Project:        Skyway  -  Minimum Threshold (15 units)
+Address:        5400 Skyway, Paradise, CA
+APN:            Not provided
+Location:       39.747643, -121.63531
+Dwelling Units: 15
+Stories:        2
+
+ALGORITHM
+----------------------------------------
+  Universal 5-Step Evacuation Capacity Algorithm v3.2 (dT Standard  -  constant mobilization)
+  Each scenario applies: (1) applicability check, (2) scale gate, (3) route identification (EvacuationPath objects with bottleneck tracking), (4) demand calculation (mobilization rate 0.90 x vpu x units  -  NFPA 101 design basis), (5) dT test (project_vehicles / bottleneck_effective_capacity x 60 + egress). FHSZ affects road capacity degradation only  -  not mobilization. Most restrictive tier across all applicable scenarios is the final determination.
+  Reference: See legal.md for full legal basis and defense reference.
+
+======================================================================
+SCENARIO: WILDLAND_AB747
+  Legal Basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone
+  Result: MINISTERIAL WITH STANDARD CONDITIONS  |  Triggered: NO
+======================================================================
+
+  STEP 1  -  APPLICABILITY CHECK (Standard 3: FHSZ Modifier)
+  --------------------------------------
+  Method: Always applicable; site FHSZ check via GIS point-in-polygon
+  Result: APPLICABLE
+  Note: Not in FHSZ (hazard_zone=non_fhsz)  -  no road degradation. Mobilization rate 0.90 (NFPA 101 design basis, constant).
+  Standard 3 (FHSZ): Not in FHSZ [HAZ_CLASS=0]  hazard_zone=non_fhsz  (not in FHSZ)
+  Note: Point not within any FHSZ polygon; nearest polygon 374 m away (>50 m threshold).
+  Mobilization Rate: 0.90 (NFPA 101 design basis  -  constant; Census ACS B25044 zero-vehicle adjustment)
+
+  STEP 2  -  SCALE GATE (Standard 1)
+  --------------------------------------
+  15 >= 15 -> TRIGGERED
+  (15 units vs. 15 threshold)
+
+  STEP 3  -  ROUTE IDENTIFICATION (Standard 2)
+  --------------------------------------
+  Method: Project-origin Dijkstra (v3.4, travel-time weight)  -  fastest path from project site to each regional-network exit node (motorway/trunk/primary at city boundary); weight=length/speed_limit (seconds) per speed_defaults config; 31 nodes within 0.5 mi network zone; respects road barriers (I-5, rail, etc.)
+  Radius: 0.5 miles (804.7 m)
+  Serving route segments found: 69
+  Serving EvacuationPaths identified: 3
+    - Skyway: eff_cap=3800 vph, fhsz=non_fhsz, deg=1.00, vc=0.400 (informational)
+    - Neal Road: eff_cap=1575 vph, fhsz=non_fhsz, deg=1.00, vc=0.041 (informational)
+    - Grinding Rock Road: eff_cap=1125 vph, fhsz=non_fhsz, deg=1.00, vc=0.058 (informational)
+
+  STEP 4  -  DEMAND CALCULATION
+  --------------------------------------
+  Formula: 15 x 2.5 x 0.90
+  Hazard Zone: non_fhsz
+  Mobilization Rate: 0.90 (NFPA 101 design basis, constant)
+  Project vehicles (peak hour): 33.8 vph
+  Source (vehicles/unit): U.S. Census ACS B25044
+  Source (mobilization): NFPA 101 (Life Safety Code) design basis  -  100% occupant evacuation; adjusted 0.90 for ~10% zero-vehicle households (Census ACS B25044).
+
+  STEP 5  -  dT TEST (Standard 4)
+  --------------------------------------
+  Method: dT = (project_vehicles / bottleneck_effective_capacity) x 60 + egress
+  Hazard Zone: non_fhsz
+  Mobilization Rate: 0.90 (NFPA 101 design basis, constant)
+  Project Vehicles: 33.8 vph
+  Egress Penalty: 0.0 min (NFPA 101/IBC; applies to buildings >= 4 stories)
+  Safe Egress Window: 120 min (non_fhsz, NIST TN 2135)
+  Max Project Share:  5%
+  dT Threshold:       6.00 min (120 min window x 5%, NIST TN 2135)
+  Paths Evaluated: 3
+  Max dT: 1.80 min
+  Triggered: NO
+
+  Per-Path Results (all evaluated paths  -  no deduplication):
+    Path proj_86416948_86422344  |  origin BG: project_origin  |  24 segments
+    Bottleneck: Grinding Rock Road [within threshold]
+      Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
+      dT = (33.8 vph / 1125 vph) x 60 + 0.0 min egress = 1.80 min  (threshold: 6.00 min (120 min x 5%))
+
+    Path proj_86416948_86431531  |  origin BG: project_origin  |  8 segments
+    Bottleneck: Skyway [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 3800 vph  x degradation 1.00 (non_fhsz)  = eff cap 3800 vph
+      dT = (33.8 vph / 3800 vph) x 60 + 0.0 min egress = 0.53 min  (threshold: 6.00 min (120 min x 5%))
+
+    Path proj_86416948_86431098  |  origin BG: project_origin  |  11 segments
+    Bottleneck: Skyway [within threshold]
+      Road: Multi-lane highway  |  Speed: 45 mph  |  Lanes: 2  |  HAZ_CLASS: 0 (non_fhsz)
+      HCM cap: 3800 vph  x degradation 1.00 (non_fhsz)  = eff cap 3800 vph
+      dT = (33.8 vph / 3800 vph) x 60 + 0.0 min egress = 0.53 min  (threshold: 6.00 min (120 min x 5%))
+
+
+  -> Scenario Tier: MINISTERIAL WITH STANDARD CONDITIONS
+  Reason: Project meets the 15-unit applicability threshold and has 3 serving path(s). Max dT 1.8 min within threshold (6.00 min). Not in FHSZ (hazard_zone=non_fhsz)  -  no road degradation. Mobilization: 0.90 (NFPA 101 design basis, constant). Ministerial approval with standard conditions applied automatically. Legal basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone.
+
+======================================================================
+SCENARIO: SB79_TRANSIT
+  Legal Basis: SB 79 (2025)  -  objective health and safety standard carve-out for by-right projects (transit proximity context); California Public Utilities Code Sec.21155 (Tier 1/2 transit)
+  Result: NOT_APPLICABLE  |  Triggered: NO
+======================================================================
+  NOT APPLICABLE: SB 79: project is not within 0.5 miles of Tier 1/2 transit. Informational only  -  no tier impact.
+  SB 79 Transit Proximity: outside transit buffer
+
+======================================================================
+FINAL DETERMINATION
+======================================================================
+  RESULT: MINISTERIAL WITH STANDARD CONDITIONS
+
+  Project meets the 15-unit applicability threshold and has 3 serving path(s). Max dT 1.8 min within threshold (6.00 min). Not in FHSZ (hazard_zone=non_fhsz)  -  no road degradation. Mobilization: 0.90 (NFPA 101 design basis, constant). Ministerial approval with standard conditions applied automatically. Legal basis: AB 747 (California Government Code Sec.65302.15)  -  General Plan Safety Element mandatory update for evacuation route capacity analysis; HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation; NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis (100% occupant evacuation, adjusted for ~10% zero-vehicle households per Census ACS B25044); NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone.
+
+  PARAMETERS APPLIED
+  --------------------------------------
+  Hazard Zone:        non_fhsz
+  Mobilization Rate:  0.90 (NFPA 101 design basis  -  constant; ~10% zero-vehicle HHs per Census ACS B25044)
+  Vehicles per Unit:  2.5 (U.S. Census ACS B25044)
+  Egress Penalty:     0.0 min (NFPA 101/IBC  -  2 stories)
+  Safe Egress Window: 120 min (non_fhsz, per NIST TN 2135)
+  Max Project Share:  5%
+  dT Threshold:       6.00 min (120 x 5%)
+  Max dT (project):   1.80 min
+
+  Determination Tier:
+    MINISTERIAL WITH STANDARD CONDITIONS
+
+  The project meets the dwelling unit size threshold and all serving paths' dT
+  are within the applicable threshold for the project's hazard zone.
+  Approved ministerially. The following pre-adopted, objective conditions apply
+  automatically: PRC Sec.4291 defensible space (if FHSZ); AB 1600 evacuation
+  infrastructure impact fee (if fee schedule adopted); emergency vehicle access
+  per local fire code; WUI building standards compliance (if FHSZ).
+
+  Scenario Tier Summary:
+    wildland_ab747: MINISTERIAL WITH STANDARD CONDITIONS
+    sb79_transit: NOT_APPLICABLE
+
+  Aggregation Logic: Most restrictive tier across all applicable scenarios wins.
+  Tier Ranking: DISCRETIONARY(3) > MINISTERIAL WITH STANDARD CONDITIONS(2) > MINISTERIAL(1) > NOT_APPLICABLE(0)
+
+  This determination is based solely on objective, verifiable criteria.
+  No professional discretion was applied. All calculations are reproducible.
+  See legal.md for full legal basis and defense reference.
+======================================================================
