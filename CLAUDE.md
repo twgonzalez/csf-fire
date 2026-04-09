@@ -21,18 +21,25 @@ This is a legally-focused system. All standards must be objective (no engineerin
 
 ## Run Commands
 
+### Public repo (`josh`) — graph builder + map renderer
+
 ```bash
-# Analyze a city (downloads data + calculates capacity)
-uv run python main.py analyze --city "Berkeley" --state "CA"
+# Build graph from pre-acquired data (requires josh-pipeline acquire to have run first)
+uv run python build.py analyze --city "Berkeley" --data-dir /path/to/josh-pipeline/data/berkeley
 
 # Evaluate a specific project
-uv run python main.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75
+uv run python build.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75 \
+  --data-dir /path/to/josh-pipeline/data/berkeley
 
-# Force refresh cached data
-uv run python main.py analyze --city "Berkeley" --state "CA" --refresh
-
-# Regenerate the primary demo map (REQUIRED after any visualization code change)
-uv run python main.py demo --city "Berkeley"
+# Regenerate the primary demo map
+# REQUIRED after any change to:
+#   agents/visualization/   — map rendering, popups, AntPath styling
+#   agents/scenarios/       — Dijkstra routing, path_wgs84_coords, ΔT engine
+#   agents/export.py        — JOSH_DATA schema
+# ALL CITIES must be regenerated; stale maps have straight-line AntPaths (pre-geometry fix)
+uv run python build.py demo --city "Berkeley" \
+  --data-dir /path/to/josh-pipeline/data/berkeley \
+  --projects /path/to/josh-pipeline/projects/berkeley_demo.yaml
 # → output/berkeley/demo_map.html  (window.JOSH_DATA inlined; loads app.js from CDN)
 # → static/v1/app.js               (GENERATED — shared CDN bundle; also regenerated here)
 
@@ -44,10 +51,22 @@ uv run python main.py demo --city "Berkeley"
 #       demo regenerates static/v1/app.js (which embeds whatif_engine.js).
 node --test tests/test_whatif_engine.js
 # Prerequisites: analyze + demo must have run first (generates graph.json + test_vectors.json)
+```
+
+### Private repo (`josh-pipeline`) — data acquisition + city configs
+
+```bash
+# Download city data (OSM, FHSZ, Census)
+cd /path/to/josh-pipeline
+uv run python acquire.py --city "Berkeley"
+uv run python acquire.py --city "Berkeley" --refresh   # force re-download
 
 # Validate project coordinates against the Census geocoder (REQUIRED after adding projects)
-uv run python main.py geocode --city "Berkeley"
-uv run python main.py geocode --city "Berkeley" --apply   # write corrections to YAML in place
+uv run python acquire.py geocode --city "Berkeley"
+uv run python acquire.py geocode --city "Berkeley" --apply   # write corrections to YAML in place
+
+# Full pipeline: acquire → analyze → demo (requires JOSH_DIR set)
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
 ```
 
 ## Adding Projects to a Demo YAML — Coordinate Protocol
@@ -57,11 +76,10 @@ wrong road segments and produce incorrect FHSZ lookups, ΔT calculations, and ro
 assignments — invalidating the legal analysis.
 
 **Project YAML location:**
-- Public cities → `config/projects/{city}_demo.yaml`
-- Private cities → `config/private/projects/{city}_demo.yaml`
+- All cities → `projects/{city}_demo.yaml` in `josh-pipeline`
 
-The pipeline resolves both automatically via `_resolve_config()` in `main.py` —
-no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
+Pass the path explicitly to `build.py demo --projects /path/to/{city}_demo.yaml`
+or use `acquire.py run` which chains everything automatically.
 
 **Required workflow when adding a new project:**
 
@@ -75,7 +93,7 @@ no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
    ```
 3. Set `lat`/`lon` from the Census geocoder result — run:
    ```bash
-   uv run python main.py geocode --city "CityName" --apply
+   cd josh-pipeline && uv run python acquire.py geocode --city "CityName" --apply
    ```
    This calls the U.S. Census Bureau Geocoder (no API key required) and patches the
    YAML in place while preserving all comments.
@@ -85,7 +103,7 @@ no flag or path argument needed. Just run `demo` or `geocode` with `--city`.
    within 0.5 km.
 5. Regenerate the demo map:
    ```bash
-   uv run python main.py demo --city "CityName"
+   JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
    ```
 
 ## Primary UX Artifact
@@ -119,25 +137,31 @@ block in `_inject_josh_data_bundle()` with `<script src="{_APP_JS_CDN_URL}" defe
 - Project markers, AntPath flow traces, demo panel detail cards
 - Brief HTML content, city-specific `what_happened` overlay
 - City data changes (new project, re-analysis)
+- Any change to `agents/scenarios/wildland.py` — Dijkstra routing, path coordinate
+  generation, or ΔT calculation. AntPath coordinates (`path_wgs84_coords`) are baked
+  into the HTML at `demo` time from the scenario evaluation run.
+
+**AntPath coordinate quality:** `path_wgs84_coords` is built from OSMnx edge geometry
+(the full original OSM way coordinate chain, 10–100+ points per segment). Do NOT
+revert to node-endpoint-only construction — that produces straight lines cutting
+through terrain and rivers instead of following the road.
 
 **What does NOT require rebuild (CDN update only, once switched to CDN delivery):**
 - What-if panel UX (layout, labels, buttons, results display)
 - Brief modal chrome / overlay styling
 - WhatIfEngine algorithm fixes (schema-compatible)
 
-**After ANY change to `agents/visualization/`**, regenerate it:
+**After ANY change to `agents/visualization/` or `agents/scenarios/`**, regenerate ALL cities
+via josh-pipeline (which has the data and project YAMLs):
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-uv run python main.py demo --city "Berkeley"
-# → output/berkeley/demo_map.html          (public city)
-uv run python main.py demo --city "Encinitas"
-# → config/private/output/encinitas/demo_map.html  (private city)
+cd /path/to/josh-pipeline
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Berkeley"
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "Encinitas"
+# → /path/to/josh/output/berkeley/demo_map.html
+# → /path/to/josh-pipeline/output/encinitas/demo_map.html
 ```
 
-Output paths depend on whether the city is public or private (see Private City
-Infrastructure below). Public city output is git-ignored in the public repo.
-Private city output is tracked in `josh-private`. Do NOT leave a stale demo map
-— always regenerate before sharing.
+Do NOT leave a stale demo map — always regenerate before sharing.
 
 **Brief / popup labeling convention (user-facing):** Criteria are labeled **A** (Applicability
 Threshold — size gate), **B** (Site Parameters — FHSZ zone + degradation + threshold), and
@@ -148,43 +172,63 @@ in all user-facing outputs (determination letter, popup, briefs).
 
 ## Directory Structure
 
+### `josh` (this repo — public)
+
 ```
 agents/
-  data_acquisition.py   # Agent 1: fetch FHSZ, roads, boundary, traffic
   capacity_analysis.py  # Agent 2: HCM calculations, evacuation route ID
   objective_standards.py # Agent 3: ministerial/discretionary determination
+  export.py             # graph.json + whatif_engine.js serializer
+  scenarios/            # ΔT + SB79 logic
+  visualization/        # Folium map renderer
+  analysis/             # clearance time, SB99
 
 models/
   road_network.py       # RoadSegment dataclass
   project.py            # Project dataclass
 
 config/
-  parameters.yaml       # All thresholds and HCM factors (never hardcode these)
+  parameters.yaml       # CANONICAL — legal methodology spec (parameters_version: "4.0")
   cities/
-    berkeley.yaml       # City-specific config and overrides (public cities only)
-  projects/
-    berkeley_demo.yaml  # Demo project definitions (public cities only)
-  private/              # ← gitignored; separate git repo (josh-private)
-    cities/             # City configs for private/client cities
-    projects/           # Demo project YAMLs for private/client cities
-    data/{city}/        # Cached source data for private cities (gitignored in josh-private)
-    output/{city}/      # Results for private cities (tracked in josh-private)
+    berkeley.yaml       # Schema example — canonical source is in josh-pipeline
 
-data/{city}/            # Cached source data — PUBLIC cities only (git-ignored, 90-day TTL)
-  fhsz.geojson
-  roads.gpkg
-  boundary.geojson
-  metadata.yaml
-
-output/{city}/          # Results — PUBLIC cities only (git-ignored except Berkeley demo)
-  routes.csv
-  determination_{id}.txt
-
+build.py                # CLI: analyze, demo, evaluate, report
 static/
   whatif_utils.js       # Hand-written drift-free JS utilities (MinHeap, haversine, etc.)
   whatif_engine.js      # GENERATED — never edit; regenerated by analyze
   v1/
     app.js              # GENERATED — CDN-hosted shared rendering bundle; regenerated by demo
+
+output/berkeley/        # Live Berkeley demo output (tracked)
+tests/                  # Anti-divergence + unit tests
+docs/                   # Specs, methodology docs
+```
+
+### `josh-pipeline` (private repo — all city data + client deliverables)
+
+```
+agents/
+  data_acquisition.py   # Agent 1: fetch FHSZ, roads, boundary, traffic; road overrides
+
+acquire.py              # CLI: acquire, geocode, run
+
+cities/                 # ALL city configs (Berkeley, Encinitas, RSF FPD, etc.)
+  berkeley.yaml
+  {city}_road_overrides.yaml  # OSM corrections + Standard 6 annotations
+  fhsz/                 # Pre-downloaded FHSZ GeoJSONs for LRA cities
+  boundaries/           # Pre-built boundary GeoJSONs for fire districts
+
+projects/               # ALL demo project YAMLs
+  berkeley_demo.yaml
+  encinitas_demo.yaml
+  rsf_fire_demo.yaml
+
+data/{city}/            # Cached downloads — gitignored (90-day TTL)
+output/{city}/          # Client deliverables — tracked
+  demo_map.html
+  routes.csv
+  brief_v3_*.html
+  determination_*.txt
 ```
 
 ## Key Parameters (from config/parameters.yaml) — v3.0 ΔT Standard
@@ -202,14 +246,14 @@ static/
 | `safe_egress_window.moderate_fhsz` | 120 min | Standard emergency planning |
 | `safe_egress_window.non_fhsz` | 120 min | FEMA standard |
 | `max_project_share` | 0.05 | Standard 5% engineering significance threshold |
-| Derived ΔT thresholds (v3.4) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
+| Derived ΔT thresholds (v4.0) | vhfhsz=2.25, high=4.50, mod/non=6.00 min | `safe_egress_window × max_project_share` |
 | `egress_penalty.threshold_stories` | 4 | NFPA 101 / IBC |
 | `egress_penalty.minutes_per_story` | 1.5 | NFPA 101 |
 | `egress_penalty.max_minutes` | 12 | NFPA 101 cap |
 | Evacuation route radius | 0.5 miles | per Standard 2 |
 | `vc_threshold` | 0.95 | Informational only — HCM LOS E/F boundary |
 
-**v3.4 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
+**v4.0 architecture:** FHSZ does ONE thing — reduces road capacity (hazard_degradation factor). Mobilization is 0.90, always. `mobilization_rates` dict removed.
 
 ## HCM 2022 Capacity Table
 
@@ -274,9 +318,8 @@ All downloaded data is cached with a 90-day TTL. Use `--refresh` to force re-dow
 `metadata.yaml` records source URLs and download dates for every file (required for legal
 audit trail).
 
-- **Public cities** → cached in `data/{city}/` (git-ignored in public repo)
-- **Private cities** → cached in `config/private/data/{city}/` (fully tracked in josh-private
-  for complete backup — all data files committed including roads.gpkg, graph.graphml, etc.)
+- All cities → cached in `josh-pipeline/data/{city}/` (gitignored in josh-pipeline).
+  Run `uv run python acquire.py --city "CityName" --refresh` to force re-download.
 
 ## Current MVP Phase
 
@@ -285,17 +328,152 @@ Phase 1 (MVP): Agents 1–3 only. CLI output to CSV + text. No web UI, no fee ca
 Phase 2 (next): Agent 4 (impact fee calculator) + Agent 6 (Folium maps).
 Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
 
-## v3.4 Migration Status (branch: feat/v3-delta-t)
+## v4.0 Migration Status (branch: feat/v3-delta-t)
 
 ✅ Replaced v/c marginal causation test with ΔT (marginal evacuation clearance time).
-✅ **v3.4: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
-✅ **v3.4: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
+✅ **v4.0: Mobilization is now constant 0.90 (NFPA 101 design basis). `mobilization_rates` dict removed.**
+✅ **v4.0: FHSZ affects road capacity only (hazard_degradation). Not mobilization.**
 ✅ Hazard-aware capacity degradation applied by Agent 2 (HCM composite + NIST Camp Fire validation).
 ✅ Building egress penalty (NFPA 101/IBC) for buildings ≥ 4 stories.
 ✅ `EvacuationPath` dataclass with per-path bottleneck tracking (argmin effective_capacity_vph).
 ✅ `Sb79TransitScenario` replaces `LocalDensityScenario` (informational flag, no tier impact).
-✅ Audit trail v3.4: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
+✅ Audit trail v4.0: shows ΔT per path, bottleneck details, hazard degradation, egress penalty.
 ✅ `data/{city}/evacuation_paths.json` persisted by Agent 2 after routing.
+
+## Road Network Overrides
+
+OSM highway tags are often wrong for non-standard jurisdictions (e.g. internal covenant
+roads in Rancho Santa Fe tagged as `primary` when they are local collectors). These errors
+inflate HCM capacity, distort the evacuation route heatmap, and produce incorrect routing.
+
+### Override file location and naming
+
+All cities: `josh-pipeline/cities/{city_slug}_road_overrides.yaml`
+
+The file is auto-detected by `acquire_data()` — no config key needed. Overrides are
+applied after `fetch_road_network()` returns OSM data, before `roads.gpkg` is saved.
+The corrected values are baked into `roads.gpkg`; a `--refresh` run is required when
+overrides change.
+
+### Schema
+
+```yaml
+road_overrides:
+  - name: "La Granada"          # match by road name (case-insensitive, full match)
+    highway: "secondary"         # reclassify OSM highway tag
+    reason: "Internal covenant road; primary tag is an OSM error"
+    osm_correction_pending: true # flag for upstream OSM fix
+
+  - osmid: "6024716"             # match by OSM way ID (scalar only; not list osmids)
+    width_ft: 18                 # physical road width for Standard 6 / IFC §503
+    access_type: "dead_end"      # dead_end | single_access | one_way | two_way
+    reason: "Clark Ave — below IFC §503 20-ft minimum"
+    source: "City Engineering Survey 2024-03"
+
+  - name: "Linea del Cielo"
+    highway: "tertiary"
+    lanes: 2                     # explicit lane count override
+    speed: 25                    # speed limit override (mph)
+    reason: "Hilltop residential dead-end; secondary tag overstates capacity"
+```
+
+### Supported correction fields
+
+| Field | Effect |
+|-------|--------|
+| `highway` | Re-classifies OSM tag; automatically re-derives `road_type` and `lane_count` (when estimated) |
+| `lanes` | Overrides lane count; clears `lane_count_estimated` flag |
+| `speed` | Overrides speed limit (mph); clears `speed_estimated` flag |
+| `width_ft` | Stores physical width (feet) for Standard 6 / IFC §503 (future use) |
+| `access_type` | Stores access classification for Standard 6 (future use) |
+
+### Audit trail
+
+Every overridden segment gains two new columns in `roads.gpkg`:
+- `highway_original` — original OSM highway tag before correction
+- `override_reason` — reason string from the YAML entry
+
+The number of corrected segments is logged at `analyze` time and recorded in
+`data/{city}/metadata.yaml` under `roads_overrides`.
+
+### When to use vs. when to fix OSM
+
+- **Fix in OSM first** when the tag is clearly wrong (e.g. a residential cul-de-sac
+  tagged as `primary`). Mark with `osm_correction_pending: true` in the YAML.
+- **Use overrides** for corrections that require local knowledge not in OSM (physical
+  widths, gated access, COA-mandated restrictions), or where OSM edits may be reverted.
+- **Never use overrides to tune ΔT results** — only use them to correct factual OSM
+  errors or add physically-verified data. All overrides must have a `reason` and `source`.
+
+### After adding or changing overrides
+
+```bash
+cd josh-pipeline && uv run python acquire.py --city "CityName" --refresh
+JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
+```
+
+## Non-Municipal Jurisdiction Configuration
+
+Fire protection districts and other non-municipal jurisdictions require three
+extra config keys that standard (Census PLACE) cities do not need.
+
+### `boundary_file` — pre-built district boundary GeoJSON
+
+Census TIGER has no entries for fire districts. Set `boundary_file` to a
+pre-built GeoJSON and the pipeline uses `ox.graph_from_polygon()` instead
+of `ox.graph_from_place()`.
+
+```yaml
+boundary_file: "cities/boundaries/rsf_fire_boundary.geojson"
+```
+
+**SD County FPD boundary source:** SD County LAFCO MapServer
+`https://gis-public.sandiegocounty.gov/arcgis/rest/services/LAFCO/lafco_water_and_fire_districts/MapServer`
+Layer IDs: RSF FPD=34, Alpine=7, Borrego=13, Deer Springs=16, Julian-Cuyamaca=19,
+Lakeside=22, North County=27, Pine Valley=30, San Miguel=39, Valley Center=42, Vista=45.
+
+### `fhsz_local_file` / `fhsz_fallback_api` — LRA FHSZ data
+
+CAL FIRE's `HHZ_ref_FHSZ` API returns only SRA zones; LRA jurisdictions get 0 features.
+Use `fhsz_local_file` for a pre-downloaded GeoJSON or `fhsz_fallback_api` for a
+FeatureServer URL (SD County OES works for San Diego County LRA cities).
+
+```yaml
+fhsz_local_file: "cities/fhsz/rsf_fire_fhsz.geojson"
+fhsz_fallback_api: "https://gis-public.sandiegocounty.gov/arcgis/rest/services/hosted/OES_KnowYourHazards_Wildfire_1/FeatureServer/0"
+```
+
+### `known_exit_nodes` — explicit evacuation exit node IDs
+
+**Why this is needed:** `ox.graph_from_polygon()` clips the OSM network to the district
+polygon. Primary road endpoints end up 100–500 m inside the boundary — outside the
+default 50 m proximity threshold used by `_find_exit_nodes()`. Without explicit nodes,
+the algorithm detects only the tiny subset of nodes that happen to be clipped right at
+the boundary edge, producing incorrect routing (e.g. all paths routing to one corner
+instead of using the main western exit).
+
+```yaml
+known_exit_nodes:
+  # Via de la Valle — primary western exit toward I-5
+  # lat=32.98715, lon=-117.21711 (179 m inside western boundary)
+  - 49171047
+  # South Rancho Santa Fe Road — southern exit toward SR-56 / I-15
+  # lat=33.03373, lon=-117.23512 (98 m inside boundary)
+  - 3522701601
+```
+
+**How to find node IDs:**
+1. Open the district boundary in [geojson.io](https://geojson.io) to visualize it.
+2. In OSM iD editor (or JOSM), zoom to where the primary exit road leaves the district.
+3. Click the last node inside the district on that road — the node ID appears in the URL
+   or sidebar (e.g. `node/49171047`).
+4. Add lat/lon comments to the YAML entry for future verification.
+5. Re-run `analyze --refresh` — the log line `Using N explicit exit nodes from city config`
+   confirms they were found in the graph.
+
+**When `known_exit_nodes` is set**, `_find_exit_nodes()` is skipped entirely. Include
+**all** legitimate exits (western, southern, and any auto-detectable NE/boundary nodes)
+so the Dijkstra routing has complete coverage.
 
 ## Pending Methodology Work
 
@@ -339,59 +517,55 @@ Phase 3 (later): Agent 5 (Flask what-if web app) + Agent 7 (Word/PDF reports).
    - Single access point: flag for large projects (city-adopted N)
    This should be a new scenario subclass (`agents/scenarios/site_access.py`) using OSM
    `width` tags and road geometry as inputs.
+   **Infrastructure ready**: `{city}_road_overrides.yaml` now supports `width_ft` and
+   `access_type` fields (stored in `roads.gpkg` as pass-through columns). Standard 6
+   can read these columns without additional data pipeline work.
 
-## Private City Infrastructure
+## Two-Repo Setup
 
-Client cities (Encinitas, Solana Beach, etc.) are kept out of the public repo using a
-two-repo pattern. The private repo (`josh-private`) lives at `config/private/` inside the
-public repo and is gitignored by `csf-josh`.
+JOSH uses two repos. Client city data lives in `josh-pipeline` (private). The public
+methodology engine lives in `josh` (this repo).
 
-### Detection and Path Routing
+### Setup on a New Machine
 
-`main.py` contains three helpers that route paths automatically — no CLI flags needed:
-
-```python
-_is_private_city(city_slug, base_dir)   # True if config/private/cities/{slug}.yaml exists
-_resolve_data_dir(city_slug, base_dir)  # config/private/data/{city} or data/{city}
-_resolve_output_dir(city_slug, base_dir)# config/private/output/{city} or output/{city}
+```bash
+git clone https://github.com/twgonzalez/josh.git csf-josh
+git clone https://github.com/twgonzalez/josh-pipeline.git josh-pipeline
+cd josh-pipeline && echo "JOSH_DIR=/path/to/csf-josh" > .env
 ```
 
-All four CLI commands (`analyze`, `evaluate`, `demo`, `report`) use these helpers.
-Adding a new private city requires only a city YAML in `config/private/cities/` —
-no code changes.
+### Adding a New City
 
-### What josh-private Tracks
+1. Create `josh-pipeline/cities/{city_slug}.yaml` (copy from encinitas.yaml as template)
+2. Create `josh-pipeline/projects/{city_slug}_demo.yaml` (copy from encinitas_demo.yaml)
+3. Run geocode to set coordinates:
+   ```bash
+   cd josh-pipeline && uv run python acquire.py geocode --city "CityName" --apply
+   ```
+4. Run full pipeline:
+   ```bash
+   JOSH_DIR=/path/to/josh uv run python acquire.py run --city "CityName"
+   ```
+5. Commit to josh-pipeline: city YAML, project YAML, fhsz.geojson if applicable, output/
+
+### What josh-pipeline Tracks
 
 | Path | Tracked? | Reason |
 |------|----------|--------|
 | `cities/*.yaml` | ✅ Yes | City config — irreplaceable business logic |
 | `projects/*_demo.yaml` | ✅ Yes | Project definitions — irreplaceable |
 | `output/{city}/**` | ✅ Yes | Legal deliverables (briefs, maps, determinations) |
-| `data/{city}/**` | ✅ Yes | Full data backup — all files tracked |
+| `data/{city}/**` | ❌ Gitignored | Regeneratable — run `acquire.py --refresh` |
 
-### Setup on a New Machine
-
-```bash
-git clone https://github.com/twgonzalez/josh.git csf-josh
-cd csf-josh
-git clone https://github.com/twgonzalez/josh-private.git config/private
-```
-
-### Adding a New Private City
-
-1. Create `config/private/cities/{city_slug}.yaml` (copy from encinitas.yaml as template)
-2. Create `config/private/projects/{city_slug}_demo.yaml` (copy from encinitas_demo.yaml)
-3. Run `uv run python main.py geocode --city "CityName" --apply` to set coordinates
-4. Run `uv run python main.py analyze --city "CityName"` to download data
-5. Run `uv run python main.py demo --city "CityName"` to generate the map
-6. Commit and push inside `config/private/`: city YAML, project YAML, fhsz.geojson, output/
-
-### Private Cities Currently in josh-private
+### Active Cities in josh-pipeline
 
 | City | Status |
 |------|--------|
+| Berkeley, CA | ✅ Active — schema example + live demo |
 | Encinitas, CA | ✅ Active — full analysis, demo map, AB 747 report |
-| Solana Beach, CA | 🔄 In progress — configs and demo projects created; `analyze` not yet run |
+| Del Mar, CA | ✅ Active — full analysis, demo map |
+| Solana Beach, CA | ✅ Active — full analysis, demo map |
+| Rancho Santa Fe FPD (rsf_fire) | ✅ Active — fire district; boundary_file + known_exit_nodes; Silvergate project (148 units, VHFHSZ, ΔT=15.0 min DISCRETIONARY) |
 
 ## IP & Copyright Protocol
 

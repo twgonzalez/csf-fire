@@ -1,0 +1,30 @@
+{
+  "parameters_version": "4.0",
+  "unit_threshold": 15,
+  "mobilization_rate": 0.9,
+  "vehicles_per_unit": 2.5,
+  "serving_route_radius_miles": 0.5,
+  "max_path_length_ratio": 2.0,
+  "hazard_degradation": {
+    "vhfhsz": 0.35,
+    "high_fhsz": 0.5,
+    "moderate_fhsz": 0.75,
+    "non_fhsz": 1.0
+  },
+  "safe_egress_window": {
+    "vhfhsz": 45.0,
+    "high_fhsz": 90.0,
+    "moderate_fhsz": 120.0,
+    "non_fhsz": 120.0
+  },
+  "max_project_share": 0.05,
+  "egress_penalty": {
+    "threshold_stories": 4,
+    "minutes_per_story": 1.5,
+    "max_minutes": 12.0
+  },
+  "fhsz_trigger_zones": [
+    2,
+    3
+  ]
+}

@@ -4,7 +4,7 @@
 # See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
 
 """
-Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v3.4
+Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v4.0
 
 Legal basis: AB 747 (California Government Code §65302.15), HCM 2022,
 NFPA 101 (Life Safety Code) mobilization design basis.
@@ -233,7 +233,7 @@ class WildlandScenario(EvacuationScenario):
                         nearby_osmids.update(oid_strs)
 
                 method_note = (
-                    f"Project-origin Dijkstra (v3.4, travel-time weight) — "
+                    f"Project-origin Dijkstra (v4.0, travel-time weight) — "
                     f"fastest path from project site to each regional-network "
                     f"exit node (motorway/trunk/primary at city boundary); "
                     f"weight=length/speed_limit (seconds) per speed_defaults config; "
@@ -509,12 +509,56 @@ class WildlandScenario(EvacuationScenario):
                         if _cutoff < len(path_nodes):
                             break
 
+                    # Build WGS84 coordinate chain from EDGE GEOMETRIES, not just
+                    # node endpoints.  OSMnx simplified graphs preserve the full
+                    # original OSM way geometry on each edge as a Shapely LineString
+                    # in the "geometry" attribute.  Without this, each edge renders
+                    # as a straight line between intersections — visually cutting
+                    # through terrain and rivers instead of following the road.
                     path_wgs84_local: list[list[float]] = []
-                    for _nid in path_nodes[:_cutoff]:
-                        _nx_x = G.nodes[_nid].get("x", 0)
-                        _nx_y = G.nodes[_nid].get("y", 0)
-                        _lon, _lat = _to_wgs84.transform(_nx_x, _nx_y)
-                        path_wgs84_local.append([_lat, _lon])
+                    _edge_pairs = list(zip(path_nodes[:-1], path_nodes[1:]))
+                    for _ei, (_eu, _ev) in enumerate(_edge_pairs):
+                        if _ei >= _cutoff - 1:
+                            break  # freeway truncation
+                        _ed = (G.get_edge_data(_eu, _ev)
+                               or G.get_edge_data(_ev, _eu))
+                        _kd = (next(iter(_ed.values()))
+                               if isinstance(_ed, dict) else _ed) if _ed else None
+                        _geom = _kd.get("geometry") if _kd else None
+                        if _geom is not None:
+                            _raw = list(_geom.coords)  # projected CRS
+                            # Determine direction: compare geom endpoints to _eu position
+                            _eu_x = G.nodes[_eu].get("x", 0)
+                            _eu_y = G.nodes[_eu].get("y", 0)
+                            if ((_raw[-1][0] - _eu_x)**2 + (_raw[-1][1] - _eu_y)**2
+                                    < (_raw[0][0] - _eu_x)**2 + (_raw[0][1] - _eu_y)**2):
+                                _raw = list(reversed(_raw))
+                            # Add coords; skip first point of each edge to avoid
+                            # duplicating the shared junction point.
+                            for _ci, (_cx, _cy) in enumerate(_raw):
+                                if _ci == 0 and path_wgs84_local:
+                                    continue
+                                _c_lon, _c_lat = _to_wgs84.transform(_cx, _cy)
+                                path_wgs84_local.append([_c_lat, _c_lon])
+                        else:
+                            # No geometry stored — fall back to endpoint node position
+                            _fx = G.nodes[_eu].get("x", 0) if not path_wgs84_local else None
+                            _fy = G.nodes[_eu].get("y", 0) if not path_wgs84_local else None
+                            if _fx is not None:
+                                _f_lon, _f_lat = _to_wgs84.transform(_fx, _fy)
+                                path_wgs84_local.append([_f_lat, _f_lon])
+                            _vx = G.nodes[_ev].get("x", 0)
+                            _vy = G.nodes[_ev].get("y", 0)
+                            _v_lon, _v_lat = _to_wgs84.transform(_vx, _vy)
+                            path_wgs84_local.append([_v_lat, _v_lon])
+                    # Ensure the final cutoff node is included when path wasn't truncated
+                    if _cutoff == len(path_nodes) and path_nodes:
+                        _last_nid = path_nodes[_cutoff - 1]
+                        _lx = G.nodes[_last_nid].get("x", 0)
+                        _ly = G.nodes[_last_nid].get("y", 0)
+                        _l_lon, _l_lat = _to_wgs84.transform(_lx, _ly)
+                        if not path_wgs84_local or path_wgs84_local[-1] != [_l_lat, _l_lon]:
+                            path_wgs84_local.append([_l_lat, _l_lon])
 
                     path_osmids_local: list[str] = []
                     path_length       = 0.0   # metres — for logging only

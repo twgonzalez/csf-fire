@@ -41,7 +41,7 @@
 /**
  * JOSH What-If Evaluation Engine (feat/whatif-browser)
  *
- * Pure JavaScript implementation of the JOSH v3.4 ΔT evacuation clearance
+ * Pure JavaScript implementation of the JOSH v4.0 ΔT evacuation clearance
  * algorithm.  Mirrors agents/scenarios/wildland.py + agents/scenarios/base.py
  * exactly — same Dijkstra weights, same deduplication logic, same ΔT formula.
  *

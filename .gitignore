@@ -2,6 +2,7 @@ data/*
 !data/berkeley/
 output/*
 !output/berkeley/
+!output/paradise/
 config/private/
 prompts/
 __pycache__/
