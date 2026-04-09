@@ -24,7 +24,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Generate Berkeley demo
-        run: uv run python main.py demo --city "Berkeley"
+        run: |
+          uv run python build.py analyze --city "Berkeley" --data-dir data/berkeley
+          uv run python build.py demo --city "Berkeley" \
+            --data-dir data/berkeley \
+            --projects projects/berkeley_demo.yaml
 
       - name: Generate index page
         run: uv run python ci/make_index.py
