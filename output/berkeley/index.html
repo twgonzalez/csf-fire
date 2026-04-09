@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JOSH — Berkeley Fire Evacuation Capacity Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8f9fa; color: #212529; line-height: 1.6;
+    }
+    header {
+      background: #1a2b4a; color: #fff; padding: 28px 40px 24px;
+      border-bottom: 4px solid #c0392b;
+    }
+    header h1 { font-size: 22px; font-weight: 700; letter-spacing: .02em; }
+    header p { font-size: 14px; color: #aab8c8; margin-top: 6px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+    .hero {
+      background: #fff; border: 1px solid #dee2e6; border-radius: 6px;
+      padding: 28px 32px; margin-bottom: 28px;
+    }
+    .hero h2 { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
+    .hero p { font-size: 14px; color: #444; max-width: 780px; }
+    .map-btn {
+      display: inline-block; margin-top: 18px; padding: 10px 22px;
+      background: #c0392b; color: #fff; border-radius: 4px;
+      text-decoration: none; font-weight: 600; font-size: 14px;
+    }
+    .map-btn:hover { background: #a93226; }
+    table {
+      width: 100%; border-collapse: collapse;
+      background: #fff; border: 1px solid #dee2e6; border-radius: 6px;
+      overflow: hidden; font-size: 14px;
+    }
+    thead tr { background: #1a2b4a; color: #fff; }
+    thead th {
+      padding: 10px 14px; text-align: left;
+      font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    }
+    tbody tr { border-top: 1px solid #e9ecef; }
+    tbody tr:hover { background: #f8f9fa; }
+    tbody td { padding: 12px 14px; vertical-align: top; }
+    footer {
+      margin-top: 36px; padding: 18px 0; border-top: 1px solid #dee2e6;
+      font-size: 12px; color: #777; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>JOSH &mdash; Fire Evacuation Capacity Analysis System</h1>
+  <p>Berkeley, CA &nbsp;&bull;&nbsp; AB 747 / Government Code &sect;65302.15 &nbsp;&bull;&nbsp; v3.2 &Delta;T Standard</p>
+</header>
+
+<div class="container">
+  <div class="hero">
+    <h2>What is JOSH?</h2>
+    <p>
+      JOSH is an objective, algorithmic system that calculates whether a proposed development
+      project materially degrades fire evacuation route capacity. It applies the Highway Capacity
+      Manual (HCM 2022) &Delta;T method: each project&rsquo;s peak-hour vehicle demand is compared
+      against the bottleneck effective capacity on all evacuation paths within 0.5 miles. If the
+      marginal evacuation delay (&Delta;T) exceeds the zone-specific threshold derived from NIST
+      safe-egress windows, the project requires discretionary review. All determinations are
+      fully reproducible from published sources &mdash; no professional judgment, no discretion.
+    </p>
+    <a class="map-btn" href="demo_map.html">Open Interactive Map &rarr;</a>
+  </div>
+
+  <h3 style="font-size:15px;font-weight:600;margin-bottom:12px">Demo Projects &mdash; Three-Tier Coverage Matrix</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Scale</th>
+        <th>Determination</th>
+        <th>Key Factor</th>
+        <th>Documents</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-weight:600">Ashby Small Infill</td>
+        <td style="color:#555;font-size:13px">10 units · 2 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#1a7f3c;background:#d4edda;border:1px solid #1a7f3c33">
+            MINISTERIAL
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">10-unit project at Ashby BART — below the 15-unit size threshold. Standard 1 (size gate) is not triggered, so the project qualifies for ministerial approval reg…</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8528_n122_2699_10u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8528_n122_2699.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="font-weight:600">Downtown Mid-Rise</td>
+        <td style="color:#555;font-size:13px">75 units · 3 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#721c24;background:#f8d7da;border:1px solid #721c2433">
+            DISCRETIONARY
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">75-unit, 3-story project on Shattuck Ave. Exceeds the 15-unit threshold. Non-FHSZ → no road degradation. Mobilization rate 0.90 (NFPA 101 design basis) → 168.75…</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8695_n122_2685_75u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8695_n122_2685.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="font-weight:600">Hills Gateway</td>
+        <td style="color:#555;font-size:13px">80 units · 3 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#721c24;background:#f8d7da;border:1px solid #721c2433">
+            DISCRETIONARY
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">80-unit project near the Berkeley Hills in FHSZ Zone 3. Mobilization rate 0.90 (NFPA 101 design basis, constant) → 180 project vehicles. Road capacity degraded …</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8914_n122_2494_80u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8914_n122_2494.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="font-weight:600">Hills FHSZ Small Infill</td>
+        <td style="color:#555;font-size:13px">10 units · 2 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#1a7f3c;background:#d4edda;border:1px solid #1a7f3c33">
+            MINISTERIAL
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">10-unit project in the Berkeley Hills FHSZ Zone 3 area — same location as Hills Gateway (Project 3, 80 units → DISCRETIONARY). Despite the fire zone and high mo…</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8914_n122_2494_10u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8914_n122_2494.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="font-weight:600">Claremont Hills Terrace</td>
+        <td style="color:#555;font-size:13px">25 units · 3 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#856404;background:#fff3cd;border:1px solid #85640433">
+            CONDITIONAL
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">25-unit hillside project NOT in a mapped FHSZ zone. Mobilization rate 0.90 (NFPA 101 design basis, constant) → 56.25 project vehicles. No road capacity degradat…</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8760_n122_2600_25u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8760_n122_2600.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="font-weight:600">Cedar Street Infill</td>
+        <td style="color:#555;font-size:13px">75 units · 6 stories</td>
+        <td>
+          <span style="
+            display:inline-block;padding:3px 8px;border-radius:4px;
+            font-size:12px;font-weight:700;letter-spacing:.04em;
+            color:#721c24;background:#f8d7da;border:1px solid #721c2433">
+            DISCRETIONARY
+          </span>
+        </td>
+        <td style="font-size:13px;color:#555;max-width:340px">75-unit, 6-story project in North Berkeley (NOT in FHSZ). Mobilization rate 0.90 (NFPA 101 constant) → 168.75 project vehicles. Building egress penalty: 6 stori…</td>
+        <td style="white-space:nowrap">
+          <a href="brief_v3_37_8790_n122_2780_75u.html" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
+          <a href="determination_37_8790_n122_2780.txt" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Legal basis: AB 747 (California Government Code &sect;65302.15) &nbsp;&bull;&nbsp;
+    HCM 2022 &nbsp;&bull;&nbsp; NFPA 101 &nbsp;&bull;&nbsp; NIST TN 2135 &nbsp;&bull;&nbsp;
+    All calculations are objective and reproducible. No professional discretion applied.
+  </footer>
+</div>
+
+</body>
+</html>
