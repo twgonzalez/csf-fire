@@ -520,10 +520,11 @@ def demo(city: str, state: str, projects_file: str | None, output_name: str,
         from agents.objective_standards import generate_audit_trail
         lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
         lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-        brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
-        create_determination_brief_v3(project, audit, config, city_config, brief_path)
+        # Write determination txt FIRST so brief_v3.py reads current content
         audit_path = output_dir / f"determination_{lat_str}_{lon_str}_{units}u.txt"
         generate_audit_trail(project, audit, audit_path)
+        brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
+        create_determination_brief_v3(project, audit, config, city_config, brief_path)
 
     console.print()
     _print_demo_summary(evaluated, config)
@@ -858,7 +859,7 @@ def _print_demo_summary(projects: list, config: dict):
     unit_threshold = config.get("unit_threshold", 15)
 
     table = Table(
-        title="Demo Project Summary (v3.4 ΔT Standard)",
+        title="Demo Project Summary (v4.0 ΔT Standard)",
         show_header=True,
         header_style="bold blue",
         show_lines=False,

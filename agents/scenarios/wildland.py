@@ -4,7 +4,7 @@
 # See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
 
 """
-Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v3.4
+Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v4.0
 
 Legal basis: AB 747 (California Government Code §65302.15), HCM 2022,
 NFPA 101 (Life Safety Code) mobilization design basis.
@@ -233,7 +233,7 @@ class WildlandScenario(EvacuationScenario):
                         nearby_osmids.update(oid_strs)
 
                 method_note = (
-                    f"Project-origin Dijkstra (v3.4, travel-time weight) — "
+                    f"Project-origin Dijkstra (v4.0, travel-time weight) — "
                     f"fastest path from project site to each regional-network "
                     f"exit node (motorway/trunk/primary at city boundary); "
                     f"weight=length/speed_limit (seconds) per speed_defaults config; "
