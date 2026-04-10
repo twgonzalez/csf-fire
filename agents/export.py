@@ -507,10 +507,13 @@ def export_graph_json(
 
     speed_defaults: dict = config.get("speed_defaults", {})
 
-    # ── Build osmid → capacity/zone lookup from roads_gdf ────────────────────
+    # ── Build osmid → capacity/zone/name lookup from roads_gdf ──────────────
     osmid_to_eff_cap: dict[str, float] = {}
     osmid_to_zone: dict[str, str] = {}
     osmid_to_haz_deg: dict[str, float] = {}
+    osmid_to_name: dict[str, str | None] = {}
+    osmid_to_road_type: dict[str, str | None] = {}
+    osmid_to_lanes: dict[str, int | None] = {}
 
     for _, row in roads_gdf.iterrows():
         oid = row.get("osmid")
@@ -519,12 +522,19 @@ def export_graph_json(
         eff = float(row.get("effective_capacity_vph", row.get("capacity_vph", 1000.0)))
         zone = str(row.get("fhsz_zone", "non_fhsz"))
         haz_deg = float(row.get("hazard_degradation", 1.0))
+        road_name = row.get("name") or None
+        road_type = row.get("road_type") or None
+        lc = row.get("lane_count")
+        lanes = int(lc) if lc is not None and str(lc) not in ("", "nan") else None
         for o in (oid if isinstance(oid, list) else [oid]):
             key = str(o)
             if eff > osmid_to_eff_cap.get(key, -1):
                 osmid_to_eff_cap[key] = eff
                 osmid_to_zone[key] = zone
                 osmid_to_haz_deg[key] = haz_deg
+                osmid_to_name[key] = road_name
+                osmid_to_road_type[key] = road_type
+                osmid_to_lanes[key] = lanes
 
     # ── Nodes ─────────────────────────────────────────────────────────────────
     nodes: list[dict] = []
@@ -563,6 +573,9 @@ def export_graph_json(
             "eff_cap_vph": round(eff_cap, 1),
             "fhsz_zone": zone,
             "haz_deg": round(haz_deg, 4),
+            "name": osmid_to_name.get(osmid_str),
+            "road_type": osmid_to_road_type.get(osmid_str),
+            "lanes": osmid_to_lanes.get(osmid_str),
         })
 
     # ── Exit nodes ────────────────────────────────────────────────────────────

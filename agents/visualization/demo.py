@@ -889,7 +889,15 @@ def create_demo_map(
     if graph_json_path and graph_json_path.exists() and params_json_path and params_json_path.exists():
         from agents.export import export_app_js
         export_app_js()   # regenerate static/v1/app.js (embeds fresh engine)
-        _inject_josh_data_bundle(output_path, graph_json_path, params_json_path, fhsz_gdf)
+        _city_slug = output_path.parent.name
+        _city_name = (city_config or {}).get(
+            "city_name",
+            (city_config or {}).get("name", (city_config or {}).get("city", "City"))
+        )
+        _inject_josh_data_bundle(
+            output_path, graph_json_path, params_json_path, fhsz_gdf,
+            city_name=_city_name, city_slug=_city_slug,
+        )
     else:
         # graph.json not yet generated (analyze not run). Fall back to the
         # self-contained brief modal injection so "View Brief" links still work.
@@ -1029,15 +1037,31 @@ def _inject_brief_modals(html_path: Path) -> None:
     <div style="
         display:flex; align-items:center; justify-content:space-between;
         padding:11px 16px; border-bottom:1px solid #dee2e6;
-        background:#1c4a6e; flex-shrink:0;">
+        background:#1c4a6e; flex-shrink:0; gap:8px;">
       <span style="
           font-family:system-ui,sans-serif; font-weight:600;
-          font-size:13px; color:#fff; letter-spacing:0.02em;">
+          font-size:13px; color:#fff; letter-spacing:0.02em; flex:1;">
         Determination Brief
       </span>
+      <!-- Print button -->
+      <button onclick="window.joshBrief.print()" title="Print / Save as PDF"
+              style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+                     border-radius:4px;font-size:12px;cursor:pointer;color:#fff;
+                     padding:3px 9px;font-family:system-ui,sans-serif;white-space:nowrap;">
+        &#128438; Print
+      </button>
+      <!-- Download button -->
+      <button onclick="window.joshBrief.download()" title="Download as HTML file"
+              style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+                     border-radius:4px;font-size:12px;cursor:pointer;color:#fff;
+                     padding:3px 9px;font-family:system-ui,sans-serif;white-space:nowrap;">
+        &#8659; Download
+      </button>
+      <!-- Close button -->
       <button onclick="document.getElementById('josh-brief-modal').style.display='none'"
+              title="Close"
               style="background:none;border:none;font-size:20px;cursor:pointer;
-                     color:rgba(255,255,255,0.75);line-height:1;padding:0;">&#10005;</button>
+                     color:rgba(255,255,255,0.75);line-height:1;padding:0 0 0 4px;">&#10005;</button>
     </div>
     <iframe id="josh-brief-frame"
             style="flex:1;border:none;width:100%;background:#fff;"
@@ -1047,16 +1071,54 @@ def _inject_brief_modals(html_path: Path) -> None:
 
 <script id="josh-brief-modals">
 (function () {{
-  var _BRIEFS = {brief_data_js};
+  var _BRIEFS   = {brief_data_js};
+  var _curHtml  = '';   // current brief HTML (for download / print)
+  var _curFile  = '';   // suggested download filename
 
   window.joshBrief = {{
-    show: function (filename) {{
-      var html = _BRIEFS[filename];
-      if (!html) {{ console.warn('joshBrief: no data for', filename); return; }}
+    // show(filenameOrHtml, filename)
+    //   filenameOrHtml — either:
+    //     (a) a filename key into _BRIEFS (pipeline pre-baked briefs), or
+    //     (b) a raw HTML string from BriefRenderer.render() (what-if / project manager)
+    //   filename — optional download filename override (used by project manager)
+    show: function (filenameOrHtml, filename) {{
+      var html;
+      if (typeof filenameOrHtml === 'string' && filenameOrHtml.trimStart().startsWith('<!')) {{
+        html      = filenameOrHtml;
+        _curFile  = filename || ('brief_' + new Date().toISOString().slice(0,10) + '.html');
+      }} else {{
+        html = _BRIEFS[filenameOrHtml];
+        if (!html) {{ console.warn('joshBrief: no data for', filenameOrHtml); return; }}
+        _curFile = filenameOrHtml;  // use the original filename key (e.g. brief_v3_*.html)
+      }}
+      _curHtml = html;
       var frame = document.getElementById('josh-brief-frame');
       frame.srcdoc = html;
       document.getElementById('josh-brief-modal').style.display = 'block';
-    }}
+    }},
+
+    // download() — save current brief as a standalone HTML file
+    download: function () {{
+      if (!_curHtml) return;
+      var blob = new Blob([_curHtml], {{ type: 'text/html;charset=utf-8' }});
+      var url  = URL.createObjectURL(blob);
+      var a    = document.createElement('a');
+      a.href   = url;
+      a.download = _curFile || 'determination_brief.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () {{ URL.revokeObjectURL(url); }}, 5000);
+    }},
+
+    // print() — print the brief (browser print dialog; use "Save as PDF" for PDF output)
+    print: function () {{
+      var frame = document.getElementById('josh-brief-frame');
+      if (frame && frame.contentWindow) {{
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+      }}
+    }},
   }};
 
   // Intercept brief link clicks — override href navigation with inline modal.
@@ -1102,6 +1164,8 @@ def _inject_josh_data_bundle(
     graph_json_path: Path,
     params_json_path: Path,
     fhsz_gdf: gpd.GeoDataFrame,
+    city_name: str = "City",
+    city_slug: str = "",
 ) -> None:
     """
     Inject window.JOSH_DATA (graph, parameters, fhsz, briefs) into demo_map.html,
@@ -1133,6 +1197,8 @@ def _inject_josh_data_bundle(
     josh_data = {
         "schema_version": 1,
         "app_js_version": _APP_JS_VERSION,
+        "city_name":      city_name,
+        "city_slug":      city_slug,
         "graph":          graph_data,
         "parameters":     params_data,
         "fhsz":           fhsz_geojson,
@@ -1155,20 +1221,34 @@ def _inject_josh_data_bundle(
         app_block = f'<script src="{_APP_JS_CDN_URL}" defer></script>\n'
         app_note  = f"CDN → {_APP_JS_CDN_URL}"
 
+    # ── brief_renderer.js: inline for BriefRenderer.render() in browser ────────
+    static_dir = Path(__file__).parent.parent.parent / "static"
+    br_path = static_dir / "brief_renderer.js"
+    br_js   = br_path.read_text(encoding="utf-8") if br_path.exists() else ""
+    br_block = f'<script id="josh-br">\n{br_js}\n</script>\n' if br_js else ""
+    br_note  = f"inlined ({len(br_js) // 1024} KB)" if br_js else "not found (skipped)"
+
+    # ── project_manager.js: inline if available ──────────────────────────────
+    pm_path = static_dir / "project_manager.js"
+    pm_js   = pm_path.read_text(encoding="utf-8") if pm_path.exists() else ""
+    pm_block = f'<script id="josh-pm">\n{pm_js}\n</script>\n' if pm_js else ""
+    pm_note  = f"inlined ({len(pm_js) // 1024} KB)" if pm_js else "not found (skipped)"
+
     footer_block = (
         f'\n<div style="position:fixed;bottom:4px;right:8px;font-size:10px;'
         f'color:#888;z-index:9999;pointer-events:none;">'
         f'JOSH v{_PARAMETERS_VERSION} · © 2026 Thomas Gonzalez · AGPL-3.0'
         f'</div>\n'
     )
-    injection = data_block + app_block + footer_block
+    injection = data_block + app_block + br_block + pm_block + footer_block
     if "</body>" in html:
         html = html.replace("</body>", injection + "</body>", 1)
     else:
         html += injection
     html_path.write_text(html, encoding="utf-8")
     logger.info(
-        "  JOSH data bundle injected (%d briefs); app.js %s.", len(brief_data), app_note
+        "  JOSH data bundle injected (%d briefs); app.js %s; brief_renderer.js %s; project_manager.js %s.",
+        len(brief_data), app_note, br_note, pm_note,
     )
 
 
@@ -1182,7 +1262,7 @@ def _build_whatif_ui_html() -> str:
 <div id="josh-whatif-panel" style="
     position: fixed;
     bottom: 32px;
-    right: 16px;
+    left: 16px;
     width: 300px;
     background: #fff;
     border-radius: 8px;
@@ -1251,7 +1331,7 @@ def _build_whatif_ui_html() -> str:
 <button id="josh-whatif-open-btn" onclick="joshWhatIf.openPanel()" style="
     position: fixed;
     bottom: 32px;
-    right: 16px;
+    left: 16px;
     z-index: 10000;
     background: #1c4a6e;
     color: #fff;
@@ -1355,6 +1435,7 @@ def _build_whatif_ui_js() -> str:
 
   // ── Panel open ──────────────────────────────────────────────────────────────
   function openPanel() {
+    if (window.joshPM && window.joshPM.closePanel) { window.joshPM.closePanel(); }
     document.getElementById('josh-whatif-open-btn').style.display = 'none';
     document.getElementById('josh-whatif-panel').style.display    = 'block';
   }
@@ -1671,7 +1752,29 @@ def _build_whatif_ui_js() -> str:
     document.getElementById('josh-whatif-open-btn').style.display = '';
   }
 
-  window.joshWhatIf = { openPanel, closePanel, startDropPin, cancelDropPin, clearWhatIf };
+  /**
+   * startDropPinForProject(onPlaced) — called by project manager.
+   * Enters crosshair mode; calls onPlaced(lat, lng) once the user clicks.
+   * Cancels any prior AWAITING state before entering a new one.
+   */
+  function startDropPinForProject(onPlaced) {
+    cancelDropPin();
+    _dropPinActive = true;
+    const map = _getMap();
+    if (!map) return;
+    _origCursor = map.getContainer().style.cursor;
+    map.getContainer().style.cursor = 'crosshair';
+    map.once('click', function(e) {
+      _dropPinActive = false;
+      map.getContainer().style.cursor = _origCursor;
+      onPlaced(e.latlng.lat, e.latlng.lng);
+    });
+  }
+
+  /** Allow project manager to cancel drop-pin mode without touching WhatIf state. */
+  function cancelExternalDropPin() { cancelDropPin(); }
+
+  window.joshWhatIf = { openPanel, closePanel, startDropPin, cancelDropPin, clearWhatIf, startDropPinForProject, cancelExternalDropPin };
 })();
 """
 
@@ -2170,90 +2273,63 @@ def _build_demo_legend_html(
     heatmap_js_name: str = "",
 ) -> str:
     """
-    Minimal legend for the demo map — v4.0 ΔT Standard.
+    Leaflet-native evacuation layer toggle — v4.1 redesign.
 
-    Shows only:
-      1. Project determination tier dot-key (3 items)
-      2. Evacuation capacity pill toggle + gradient bar
-      3. Footer
-    All technical details (vph buckets, FHSZ zones, footnotes) are accessible
-    via marker popups and are omitted here per city attorney / planner UX.
+    Replaces the 195×90px floating legend box with a 26×26px flame-icon button
+    that stacks below the zoom controls (topleft). Hover reveals a tooltip to the
+    right with the capacity gradient bar + attribution. Bottom-left corner freed
+    for the What-If panel.
     """
-    tier_items = (
-        '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">'
-        f'<span style="display:inline-block; width:11px; height:11px; border-radius:50%; '
-        f'background:{_TIER_CSS_COLOR["DISCRETIONARY"]}; flex-shrink:0;"></span>'
-        '<span style="color:#343a40;">Discretionary</span></div>'
-
-        '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">'
-        f'<span style="display:inline-block; width:11px; height:11px; border-radius:50%; '
-        f'background:{_TIER_CSS_COLOR["MINISTERIAL WITH STANDARD CONDITIONS"]}; flex-shrink:0;"></span>'
-        '<span style="color:#343a40;">Ministerial w/ Standard Conditions</span></div>'
-
-        '<div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">'
-        f'<span style="display:inline-block; width:11px; height:11px; border-radius:50%; '
-        f'background:{_TIER_CSS_COLOR["MINISTERIAL"]}; flex-shrink:0;"></span>'
-        '<span style="color:#343a40;">Ministerial</span></div>'
-    )
-
     return f"""
-<div id="map-legend" style="
-    position: fixed;
-    bottom: 26px; left: 10px;
-    z-index: 9999;
-    width: 195px;
-    background: white;
-    border: 1px solid #dee2e6;
-    border-radius: 10px;
-    padding: 13px 14px;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 11px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.11);
-    line-height: 1.4;
-">
-  <!-- Evacuation capacity toggle + gradient -->
-  <div>
-    <div style="display:flex; align-items:center; gap:9px; margin-bottom:7px;">
-      <!-- Pill toggle -->
-      <input type="checkbox" id="heatmapToggle" checked style="display:none;">
-      <div id="heatmapPill"
-           onclick="var cb=document.getElementById('heatmapToggle'); cb.checked=!cb.checked; toggleHeatmap(cb.checked);"
-           style="width:34px; height:18px; border-radius:9px; background:#27ae60;
-                  position:relative; cursor:pointer; flex-shrink:0;
-                  transition:background 0.2s;">
-        <div id="heatmapKnob"
-             style="position:absolute; width:13px; height:13px; background:white;
-                    border-radius:50%; top:2.5px; left:18px;
-                    transition:left 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.25);"></div>
-      </div>
-      <span style="font-size:11px; color:#495057; font-weight:500;">Evac. Layer</span>
-    </div>
-    <!-- Gradient: red (severe) → orange → yellow → gray (ample) -->
-    <div style="height:7px; border-radius:4px;
-                background: linear-gradient(to right, #dc3545, #fd7e14, #ffc107, #adb5bd);
-                opacity:0.85;">
-    </div>
-    <div style="display:flex; justify-content:space-between; font-size:10px;
-                color:#868e96; margin-top:3px;">
-      <span>Severe</span><span>Ample</span>
-    </div>
-  </div>
-
-  <div style="margin-top:10px; border-top:1px solid #f1f3f5; padding-top:8px;
-              font-size:9px; color:#adb5bd;">JOSH v4.0 &middot; California Stewardship Alliance</div>
-</div>
+<style>
+.josh-evac-btn {{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 26px !important;
+  height: 26px !important;
+  color: #333 !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  transition: color 0.2s;
+}}
+.josh-evac-btn:hover {{ background: #f4f4f4 !important; }}
+.josh-evac-btn.evac-off {{ color: #ccc !important; }}
+.josh-evac-tip {{
+  position: absolute;
+  left: 32px;
+  top: 0;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  z-index: 9999;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  min-width: 150px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+}}
+</style>
 
 <script>
 (function () {{
-  var MAP_NAME      = '{map_js_name}';
-  var HEATMAP_NAME  = '{heatmap_js_name}';
+  var MAP_NAME     = '{map_js_name}';
+  var HEATMAP_NAME = '{heatmap_js_name}';
+  var _vis = true;
 
   window.toggleHeatmap = function (visible) {{
-    var pill = document.getElementById('heatmapPill');
-    var knob = document.getElementById('heatmapKnob');
-    if (pill) pill.style.background  = visible ? '#27ae60' : '#adb5bd';
-    if (knob) knob.style.left        = visible ? '18px'   : '2px';
-
+    _vis = visible;
+    var btn = document.querySelector('.josh-evac-btn');
+    if (btn) {{
+      if (visible) btn.classList.remove('evac-off');
+      else         btn.classList.add('evac-off');
+      btn.title = visible ? 'Hide evacuation capacity layer'
+                          : 'Show evacuation capacity layer';
+    }}
     var mapObj = window[MAP_NAME];
     var layer  = window[HEATMAP_NAME];
     if (!mapObj || !layer) return;
@@ -2263,6 +2339,64 @@ def _build_demo_legend_html(
       if (mapObj.hasLayer(layer)) mapObj.removeLayer(layer);
     }}
   }};
+
+  function _initControl() {{
+    if (typeof L === 'undefined') return;
+    var mapObj = window[MAP_NAME];
+    if (!mapObj) return;
+
+    var EvacToggle = L.Control.extend({{
+      options: {{ position: 'topleft' }},
+      onAdd: function () {{
+        var c = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        c.style.cssText = 'position:relative;overflow:visible;';
+
+        var btn = L.DomUtil.create('a', 'josh-evac-btn', c);
+        btn.href  = '#';
+        btn.title = 'Hide evacuation capacity layer';
+        btn.setAttribute('role', 'button');
+        btn.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" ' +
+          'style="display:block;pointer-events:none;">' +
+          '<path d="M13.5 0.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73' +
+          'l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z' +
+          'M11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58' +
+          '.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/>' +
+          '</svg>';
+
+        var tip = L.DomUtil.create('div', 'josh-evac-tip', c);
+        tip.innerHTML =
+          '<div style="font-weight:600;font-size:11px;color:#343a40;margin-bottom:5px;">Evac. Capacity</div>' +
+          '<div style="height:6px;border-radius:3px;' +
+          'background:linear-gradient(to right,#dc3545,#fd7e14,#ffc107,#adb5bd);opacity:0.9;"></div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:10px;color:#868e96;margin-top:3px;">' +
+          '<span>Severe</span><span>Ample</span></div>' +
+          '<div style="margin-top:7px;border-top:1px solid #f1f3f5;padding-top:5px;' +
+          'font-size:9px;color:#adb5bd;">JOSH v4.0 &middot; California Stewardship Alliance</div>';
+
+        L.DomEvent.on(btn, 'click', function (e) {{
+          L.DomEvent.preventDefault(e);
+          window.toggleHeatmap(!_vis);
+        }});
+        L.DomEvent.on(btn, 'mouseenter', function () {{
+          tip.style.opacity     = '1';
+          tip.style.visibility  = 'visible';
+        }});
+        L.DomEvent.on(btn, 'mouseleave', function () {{
+          tip.style.opacity     = '0';
+          tip.style.visibility  = 'hidden';
+        }});
+        L.DomEvent.disableClickPropagation(c);
+        L.DomEvent.disableScrollPropagation(c);
+        return c;
+      }}
+    }});
+
+    mapObj.addControl(new EvacToggle());
+  }}
+
+  // Folium initialises the map via window.onload — wait for that before adding the control
+  window.addEventListener('load', _initControl);
 }})();
 </script>
 """
