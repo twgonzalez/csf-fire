@@ -623,9 +623,14 @@
     (project.result.paths || []).forEach(path => {
       const coords = path.path_coords || path.coordinates || [];
       if (coords.length < 2) return;
-      // AntPath for full route
-      if (typeof window.L !== 'undefined' && typeof window.L.antPath === 'function') {
-        const ap = window.L.antPath(coords, {
+      // AntPath for full route.
+      // The leaflet-ant-path plugin exposes L.antPath() and L.polyline.antPath()
+      // as aliases.  Guard against both in case only one form is available.
+      const _antPathFn = typeof window.L !== 'undefined'
+        ? (window.L.antPath || (window.L.polyline && window.L.polyline.antPath))
+        : null;
+      if (_antPathFn) {
+        const ap = _antPathFn(coords, {
           color, weight: 3, opacity: 0.8, delay: 1200, dashArray: [10, 20],
         });
         ap.addTo(map);
