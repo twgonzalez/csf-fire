@@ -982,10 +982,6 @@ def export_app_js() -> Path:
 
     Returns: Path to generated static/v1/app.js
     """
-    # Lazy import to avoid circular dependency (demo.py → export.py already exists;
-    # avoid export.py → demo.py at module load time).
-    from agents.visualization.demo import _build_whatif_ui_html, _build_whatif_ui_js
-
     # Refresh the engine first (keeps whatif_engine.js and app.js in sync).
     export_whatif_engine_js()
 
@@ -993,20 +989,10 @@ def export_app_js() -> Path:
     engine_path = static_dir / "whatif_engine.js"
     engine_js = engine_path.read_text(encoding="utf-8")
 
-    # ── What-if UI panel DOM injector (HTML → DOMContentLoaded append) ───────
-    panel_html = _build_whatif_ui_html()
-    panel_html_escaped = panel_html.replace("`", "\\`").replace("${", "\\${")
-    whatif_ui_injector = f"""\
-(function () {{
-  document.addEventListener('DOMContentLoaded', function () {{
-    var _tmp = document.createElement('div');
-    _tmp.innerHTML = `{panel_html_escaped}`;
-    while (_tmp.firstChild) document.body.appendChild(_tmp.firstChild);
-  }});
-}})();
-"""
-
     # ── Assemble app.js ───────────────────────────────────────────────────────
+    # Phase 3: what-if UI panel (joshWhatIf FAB + floating panel) removed.
+    # sidebar.js is inlined separately by _inject_josh_data_bundle() and
+    # provides all project creation, analysis, and route rendering.
     header = """\
 // Copyright (C) 2026 Thomas Gonzalez
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -1016,9 +1002,8 @@ def export_app_js() -> Path:
 // ============================================================================
 // GENERATED FILE — DO NOT EDIT
 // Source:   agents/export.py  (export_app_js)
-//           agents/visualization/demo.py  (_build_whatif_ui_html, _build_whatif_ui_js)
 //           static/whatif_engine.js  (embedded verbatim)
-// Regenerate:  uv run python main.py demo --city "Berkeley"
+// Regenerate:  uv run python build.py demo --city "Berkeley"
 // ============================================================================
 
 // ── Schema compatibility check ────────────────────────────────────────────────
@@ -1042,12 +1027,6 @@ def export_app_js() -> Path:
         header,
         "// ── WhatIfEngine IIFE (from static/whatif_engine.js) " + "─" * 26 + "\n\n",
         engine_js,
-        section_sep,
-        "// ── What-If UI panel injector " + "─" * 48 + "\n\n",
-        whatif_ui_injector,
-        section_sep,
-        "// ── What-If UI controller " + "─" * 52 + "\n\n",
-        _build_whatif_ui_js(),
         section_sep,
         "// ── Brief modal overlay injector " + "─" * 45 + "\n\n",
         _build_brief_modal_overlay_js(),
