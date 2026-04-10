@@ -240,6 +240,62 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
     assert.ok(text.includes('New Project'), '"New Project" form heading must appear after clicking + New');
   });
 
+  // ── SMOKE_14: "View Report" brief modal ──────────────────────────────────
+  test('SMOKE_14: clicking "View Report" opens the determination brief modal', async () => {
+    // SMOKE_12 left the sidebar in "New Project" form mode — no detail card visible.
+    // Be self-sufficient: cancel any open form and re-select a pipeline project.
+    await page.evaluate(() => {
+      // Cancel form if open
+      if (typeof joshSidebar_cancelForm === 'function') joshSidebar_cancelForm();
+      // Select the first pipeline project that has a result
+      const firstWithResult = (window.JOSH_DATA.projects || []).find(p => p.result);
+      if (firstWithResult && typeof joshSidebar_select === 'function') {
+        joshSidebar_select(firstWithResult.id);
+      }
+    });
+    await page.waitForTimeout(300);
+
+    // The brief modal overlay is injected on DOMContentLoaded by app.js.
+    const modalExists = await page.evaluate(() =>
+      !!document.getElementById('josh-brief-modal')
+    );
+    assert.ok(modalExists, '#josh-brief-modal overlay must exist in DOM (injected by app.js)');
+
+    // Ensure modal is currently hidden before clicking
+    await page.evaluate(() => {
+      const m = document.getElementById('josh-brief-modal');
+      if (m) m.style.display = 'none';
+    });
+
+    // Click "View Report"
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button'))
+        .find(b => b.textContent.trim() === 'View Report');
+      if (btn) btn.click();
+    });
+    await page.waitForTimeout(600);  // allow BriefRenderer.render() + srcdoc write
+
+    // Modal must be visible
+    const modalVisible = await page.evaluate(() => {
+      const m = document.getElementById('josh-brief-modal');
+      return m && m.style.display !== 'none';
+    });
+    assert.ok(modalVisible, '#josh-brief-modal must be visible after clicking "View Report"');
+
+    // iframe must have content (srcdoc set, not about:blank)
+    const frameHasSrcdoc = await page.evaluate(() => {
+      const f = document.getElementById('josh-brief-frame');
+      return f && f.srcdoc && f.srcdoc.length > 100;
+    });
+    assert.ok(frameHasSrcdoc, '#josh-brief-frame must have brief HTML in srcdoc (not about:blank)');
+
+    // Close modal for subsequent tests
+    await page.evaluate(() => {
+      const m = document.getElementById('josh-brief-modal');
+      if (m) m.style.display = 'none';
+    });
+  });
+
   // ── SMOKE_13: cancel form ─────────────────────────────────────────────────
   test('SMOKE_13: Cancel dismisses the form and restores the project list', async () => {
     await page.evaluate(() => {

@@ -625,10 +625,23 @@ if (typeof module !== "undefined" && module.exports) {
 
 (function () {
   window.joshBrief = {
-    show: function (filename) {
-      var briefs = window.JOSH_DATA && window.JOSH_DATA.briefs;
-      var html = briefs && briefs[filename];
-      if (!html) { console.warn('joshBrief: no data for', filename); return; }
+    // show(html, filename)  — sidebar.js / BriefRenderer path: html is the full HTML
+    //                         string generated on-the-fly; filename is for future use.
+    // show(filename)         — legacy pipeline path: filename is a key in
+    //                         JOSH_DATA.briefs (pre-baked HTML).
+    // Both calling conventions are supported so existing brief_v3_*.html links
+    // (which call show(filename)) continue to work alongside the on-demand path.
+    show: function (htmlOrKey, _filename) {
+      var html;
+      if (htmlOrKey && htmlOrKey.trimStart().startsWith('<')) {
+        // Direct HTML string — from sidebar.js _openBrief() via BriefRenderer.render()
+        html = htmlOrKey;
+      } else {
+        // Filename key — look up pre-baked HTML in JOSH_DATA.briefs
+        var briefs = window.JOSH_DATA && window.JOSH_DATA.briefs;
+        html = briefs && briefs[htmlOrKey];
+      }
+      if (!html) { console.warn('joshBrief: no brief HTML for', htmlOrKey); return; }
       var frame = document.getElementById('josh-brief-frame');
       frame.srcdoc = html;
       document.getElementById('josh-brief-modal').style.display = 'block';
