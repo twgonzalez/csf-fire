@@ -97,6 +97,7 @@ const WhatIfEngine = (() => {
   let _fhsz      = null;   // parsed fhsz GeoJSON FeatureCollection
   let _adjacency = null;   // Map<nodeId, [{v, osmid, len_m, speed_mph, ...}]>
   let _nodeMap   = null;   // Map<nodeId, {lon, lat}>
+  let _edgeMap   = null;   // Map<osmid_str, edge> — for bottleneck lookup + AntPath overlay
   let _exitSet   = null;   // Set<nodeId>
   let _ready     = false;
 
@@ -123,6 +124,8 @@ _JS_INIT = """\
       _nodeMap.set(n.id, { lon: n.lon, lat: n.lat });
     }
     _adjacency = _buildAdjacency(_graph.edges);
+    _edgeMap = new Map();
+    for (const e of _graph.edges) _edgeMap.set(e.osmid, e);
     _exitSet = new Set(_graph.exit_nodes);
     _ready = true;
   }
@@ -228,9 +231,35 @@ _JS_DIJKSTRA = """\
       }
       pathNodes.unshift(startNode);
 
-      const pathCoords = pathNodes
-        .map(id => { const p = _nodeMap.get(id); return p ? [p.lat, p.lon] : null; })
-        .filter(c => c !== null);
+      // Build pathCoords from full edge geometry (mirrors wildland.py AntPath fix).
+      // For each edge: extract geom [[lat,lon],...], detect direction, chain segments.
+      // Fallback to node endpoints when edge.geom is absent.
+      const pathCoords = [];
+      for (let _gi = 0; _gi < pathEdges.length; _gi++) {
+        const _ge = pathEdges[_gi];
+        if (!_ge.geom || _ge.geom.length === 0) {
+          // No geometry — fall back to node endpoint positions
+          if (_gi === 0) { const _s = _nodeMap.get(pathNodes[0]); if (_s) pathCoords.push([_s.lat, _s.lon]); }
+          const _d = _nodeMap.get(pathNodes[_gi + 1]);
+          if (_d) pathCoords.push([_d.lat, _d.lon]);
+          continue;
+        }
+        // Direction check: compare geom endpoints to source node (Euclidean, lat/lon space)
+        const _src = _nodeMap.get(pathNodes[_gi]);
+        let _gc = _ge.geom;
+        if (_src) {
+          const _d0 = (_gc[0][0] - _src.lat) ** 2 + (_gc[0][1] - _src.lon) ** 2;
+          const _dN = (_gc[_gc.length - 1][0] - _src.lat) ** 2 + (_gc[_gc.length - 1][1] - _src.lon) ** 2;
+          if (_dN < _d0) _gc = [..._gc].reverse();
+        }
+        // Chain: skip first point on non-first segments (avoids duplicate junction points)
+        const _gStart = pathCoords.length > 0 ? 1 : 0;
+        for (let _gj = _gStart; _gj < _gc.length; _gj++) pathCoords.push(_gc[_gj]);
+      }
+      // Edge case: single-node path or all edges had no geometry
+      if (pathCoords.length === 0 && pathNodes.length > 0) {
+        const _fn = _nodeMap.get(pathNodes[0]); if (_fn) pathCoords.push([_fn.lat, _fn.lon]);
+      }
 
       results.set(exitNode, {
         cost_s:      dist.get(exitNode),
@@ -312,15 +341,20 @@ _JS_IDENTIFY_SERVING_PATHS = """\
         ? [c.path_coords[bi], c.path_coords[bi + 1]]
         : [];
       return {
-        pathId:               `project_origin_${c.exitNode}_${i}`,
-        exitNodeId:           c.exitNode,
-        bottleneckOsmid:      c.bottleneck.osmid,
-        bottleneckEffCapVph:  c.bottleneck.eff_cap_vph,
-        bottleneckFhszZone:   c.bottleneck.fhsz_zone,
-        cost_s:               c.cost_s,
-        path_edges:           c.path_edges,
-        path_coords:          c.path_coords,
-        bottleneck_coords:    bnCoords,
+        pathId:                    `project_origin_${c.exitNode}_${i}`,
+        exitNodeId:                c.exitNode,
+        bottleneckOsmid:           c.bottleneck.osmid,
+        bottleneckEffCapVph:       c.bottleneck.eff_cap_vph,
+        bottleneckFhszZone:        c.bottleneck.fhsz_zone,
+        bottleneck_name:           c.bottleneck.name        ?? '',
+        bottleneck_road_type:      c.bottleneck.road_type   ?? '',
+        bottleneck_lanes:          c.bottleneck.lanes        ?? 0,
+        bottleneck_speed:          c.bottleneck.speed_mph   ?? 0,
+        hazard_degradation_factor: c.bottleneck.haz_deg     ?? 1.0,
+        cost_s:                    c.cost_s,
+        path_edges:                c.path_edges,
+        path_coords:               c.path_coords,
+        bottleneck_coords:         bnCoords,
       };
     });
   }
@@ -359,17 +393,22 @@ _JS_COMPUTE_DELTA_T = """\
     return servingPaths.map(path => {
       const delta_t = (projectVehicles / path.bottleneckEffCapVph) * 60 + egressMinutes;
       return {
-        pathId:              path.pathId,
-        bottleneckOsmid:     path.bottleneckOsmid,
-        bottleneckFhszZone:  path.bottleneckFhszZone,
-        bottleneckEffCapVph: path.bottleneckEffCapVph,
-        delta_t_minutes:     delta_t,
-        threshold_minutes:   threshold,
-        flagged:             delta_t > threshold,
-        project_vehicles:    projectVehicles,
-        egress_minutes:      egressMinutes,
-        path_coords:         path.path_coords     ?? [],
-        bottleneck_coords:   path.bottleneck_coords ?? [],
+        pathId:                    path.pathId,
+        bottleneckOsmid:           path.bottleneckOsmid,
+        bottleneckFhszZone:        path.bottleneckFhszZone,
+        bottleneckEffCapVph:       path.bottleneckEffCapVph,
+        bottleneck_name:           path.bottleneck_name           ?? '',
+        bottleneck_road_type:      path.bottleneck_road_type      ?? '',
+        bottleneck_lanes:          path.bottleneck_lanes          ?? 0,
+        bottleneck_speed:          path.bottleneck_speed          ?? 0,
+        hazard_degradation_factor: path.hazard_degradation_factor ?? 1.0,
+        delta_t_minutes:           delta_t,
+        threshold_minutes:         threshold,
+        flagged:                   delta_t > threshold,
+        project_vehicles:          projectVehicles,
+        egress_minutes:            egressMinutes,
+        path_coords:               path.path_coords      ?? [],
+        bottleneck_coords:         path.bottleneck_coords ?? [],
       };
     });
   }
@@ -564,6 +603,20 @@ def export_graph_json(
         zone = osmid_to_zone.get(osmid_str, "non_fhsz")
         haz_deg = osmid_to_haz_deg.get(osmid_str, 1.0)
 
+        # Geometry: Shapely LineString → WGS84 [[lat,lon],...] at 5-decimal precision.
+        # Enables full-quality AntPath rendering in the browser (mirrors wildland.py fix).
+        # None for the rare edge that has no stored geometry (fallback: node endpoints).
+        geom_obj = edata.get("geometry")
+        geom_coords: list | None = None
+        if geom_obj is not None:
+            try:
+                geom_coords = [
+                    [round(lat, 5), round(lon, 5)]
+                    for lon, lat in (to_wgs84.transform(x, y) for x, y in geom_obj.coords)
+                ]
+            except Exception:
+                pass  # leave geom_coords as None; JS falls back to node endpoints
+
         edges.append({
             "u": int(u),
             "v": int(v),
@@ -576,6 +629,7 @@ def export_graph_json(
             "name": osmid_to_name.get(osmid_str),
             "road_type": osmid_to_road_type.get(osmid_str),
             "lanes": osmid_to_lanes.get(osmid_str),
+            "geom": geom_coords,  # [[lat,lon],...] or null — full road curve for AntPath
         })
 
     # ── Exit nodes ────────────────────────────────────────────────────────────
