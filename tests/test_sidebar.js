@@ -20,6 +20,13 @@
  *   S9:  stale result detection on deserialize (parameters_version mismatch)
  *   S10: project below threshold (< 15 units) can still be saved
  *   S11: empty paths list stored correctly (no-routes-found state)
+ *
+ * Tests S12–S16 cover Phase 4 (session restore, stale detection, dirty tracking, YAML export):
+ *   S12: session restore banner returns non-empty HTML when flag is set
+ *   S13: city_slug mismatch in _deserialize leaves project list unchanged
+ *   S14: stale _deserialize returns valid project (not rejected) with _stale: true
+ *   S15: _toYaml omits projects with null lat/lng
+ *   S16: _toYaml outputs lon: not lng: (pipeline convention)
  */
 
 const { test } = require('node:test');
@@ -387,4 +394,92 @@ test('S11: empty paths list stored and round-trips correctly (no-routes-found st
   const bi = sb._buildBriefInput(p);
   assert.equal(bi.result.serving_paths_count, 0);
   assert.equal(bi.result.paths.length,        0);
+});
+
+// ── Phase 4 tests ─────────────────────────────────────────────────────────────
+
+test('S12: session restore banner returns non-empty HTML when flag is set', () => {
+  setup();
+  // Initially the restore banner should be empty (flag is false after reset)
+  assert.equal(sb._renderRestoreBanner(), '', '_renderRestoreBanner should return "" when flag is false');
+  // Set the flag via test helper
+  sb._setRestoreBanner(true);
+  const html = sb._renderRestoreBanner();
+  assert.ok(html.length > 0,           'restore banner should be non-empty when flag is set');
+  assert.ok(html.includes('Restore'),  'restore banner should mention "Restore"');
+  // Reset clears the flag
+  sb._resetState();
+  assert.equal(sb._renderRestoreBanner(), '', '_resetState must clear restore banner flag');
+});
+
+test('S13: city_slug mismatch in _deserialize leaves project list unchanged', () => {
+  setup();
+  const p          = freshProject({ name: 'Keep Me' });
+  const countBefore = sb.getProjects().length;
+  const badJson = JSON.stringify({
+    schema_v:           1,
+    city_slug:          'encinitas',   // ← wrong city
+    parameters_version: '4.0',
+    name:               'Wrong City',
+    lat:                33.03,
+    lng:                -117.29,
+    units:              50,
+    stories:            4,
+    source:             'browser',
+    result:             null,
+  });
+  assert.throws(
+    () => sb._deserialize(badJson),
+    err => err.message.includes('city_slug mismatch'),
+    'should throw on city_slug mismatch'
+  );
+  // Project list must be unmodified — _deserialize does not push to _projects
+  assert.equal(sb.getProjects().length, countBefore,        'list length must not change');
+  assert.ok(sb.getProjects().some(x => x.id === p.id), 'existing project must still be present');
+});
+
+test('S14: stale _deserialize returns valid project object (not rejected) with _stale: true', () => {
+  setup();
+  const staleJson = JSON.stringify({
+    schema_v:           1,
+    city_slug:          'berkeley',
+    parameters_version: '3.4',         // ← old version; current is 4.0
+    name:               'Stale but Valid',
+    lat:                37.87,
+    lng:                -122.27,
+    units:              60,
+    stories:            5,
+    source:             'browser',
+    analyzed_at:        '2026-01-01T00:00:00Z',
+    result:             fakeResult(),
+  });
+  // _deserialize must succeed (not throw) even for stale projects
+  const deserialized = sb._deserialize(staleJson);
+  assert.equal(deserialized._stale,  true,              '_stale must be true');
+  assert.equal(deserialized.name,    'Stale but Valid');
+  assert.equal(deserialized.units,   60);
+
+  // The stale project can be added to the list via createProject
+  const added = sb.createProject(deserialized);
+  assert.equal(added._stale, true, '_stale field must be preserved through createProject');
+  assert.ok(sb.getProjects().some(x => x.id === added.id), 'stale project must be addable to list');
+});
+
+test('S15: _toYaml omits projects with null lat/lng', () => {
+  setup();
+  // Project with NO lat/lng — createProject defaults to lat: null
+  sb.createProject({ name: 'No Location', units: 50, stories: 4, source: 'browser' });
+  // Project WITH lat/lng — via freshProject helper
+  freshProject({ name: 'Has Location' });
+  const yaml = sb._toYaml();
+  assert.ok(!yaml.includes('No Location'), 'project with null lat must be excluded from YAML');
+  assert.ok(yaml.includes('Has Location'), 'project with lat must be included in YAML');
+});
+
+test('S16: _toYaml outputs lon: not lng: (pipeline convention)', () => {
+  setup();
+  freshProject({ name: 'Coord Convention' });
+  const yaml = sb._toYaml();
+  assert.ok(yaml.includes('lon:'),   'YAML must use lon: (pipeline/YAML convention)');
+  assert.ok(!yaml.includes('lng:'),  'YAML must NOT use lng: (internal JS field name)');
 });
