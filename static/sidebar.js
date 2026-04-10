@@ -24,6 +24,10 @@
  *   window._joshMap into the page.
  *
  * Run tests: node --test tests/test_sidebar.js
+ *
+ * Phase 4 additions:
+ *   - Dirty tracking: _dirtyIds Set, _markDirty/_markClean, ● Save indicator
+ *   - Session restore banner: _renderRestoreBanner + _setRestoreBanner export
  */
 
 (function () {
@@ -57,6 +61,7 @@
   let _routeLayers     = [];    // active AntPath + bottleneck Leaflet layers
   let _idb             = null;  // IndexedDB connection (opened lazily)
   let _restoreBanner   = false; // whether to show session-restore banner
+  let _dirtyIds        = new Set(); // ids of projects with unsaved changes (have handle, written ≠ memory)
 
   // ── Normalize WhatIfEngine output → file-format schema ───────────────────────
   // WhatIfEngine.evaluateProject() returns mixed camelCase/snake_case.
@@ -122,8 +127,18 @@
     if ('result' in fields) {
       _projects[idx].analyzed_at = new Date().toISOString();
     }
+    _markDirty(id);   // no-op when project has no file handle
     return _projects[idx];
   }
+
+  // ── Dirty tracking ────────────────────────────────────────────────────────────
+  function _markDirty(id) {
+    // Only mark dirty when the project already has a file handle (written to disk before)
+    const p = getProject(id);
+    if (p && p._handle) _dirtyIds.add(id);
+  }
+
+  function _markClean(id) { _dirtyIds.delete(id); }
 
   function deleteProject(id) {
     _projects = _projects.filter(p => p.id !== id);
@@ -464,6 +479,7 @@
       const writable = await project._handle.createWritable();
       await writable.write(_serialize(project));
       await writable.close();
+      _markClean(id);  // disk matches memory — no unsaved changes
       return true;
     } catch (_) { return false; }
   }
@@ -1018,6 +1034,12 @@
               'border-radius:3px;margin-bottom:8px;">\u2139 Re-analyzed \u2014 parameters updated.</div>';
     }
 
+    // Unsaved changes notice (has file handle but memory is ahead of disk)
+    if (_dirtyIds.has(p.id)) {
+      html += '<div style="font-size:11px;color:#856404;background:#fff3cd;padding:4px 8px;' +
+              'border-radius:3px;margin-bottom:8px;">\u25cf Unsaved changes \u2014 click Save to write file.</div>';
+    }
+
     if (!r) {
       html += '<div style="color:#aaa;font-size:12px;">No analysis result yet.</div>';
     } else {
@@ -1164,8 +1186,10 @@
   function _renderFooter() {
     const p = _selectedId ? getProject(_selectedId) : null;
     if (!p || !p.result) return '';
+    const dirty     = _dirtyIds.has(_selectedId);
+    const saveLabel = dirty ? '\u25cf Save' : 'Save';   // ● Save when unsaved changes
     return '<div style="padding:10px 14px;border-top:1px solid #eee;flex-shrink:0;display:flex;flex-wrap:wrap;gap:6px;">' +
-      '<button onclick="joshSidebar_save(\'' + _selectedId + '\')" style="flex:1;min-width:60px;' + _btn('#1c4a6e','#fff') + '">Save</button>' +
+      '<button onclick="joshSidebar_save(\'' + _selectedId + '\')" style="flex:1;min-width:60px;' + _btn('#1c4a6e','#fff') + '">' + saveLabel + '</button>' +
       '<button onclick="joshSidebar_saveAs(\'' + _selectedId + '\')" style="flex:1;min-width:70px;' + _btn('#f5f5f5','#555','#ccc') + '">Save As\u2026</button>' +
       '<button onclick="joshSidebar_exportYaml()" style="width:100%;' + _btn('#f5f5f5','#555','#ccc') + '">Export for pipeline</button>' +
     '</div>';
@@ -1258,7 +1282,14 @@
         _formResult      = null;
         _deleteConfirmId = null;
         _restoreBanner   = false;
+        _dirtyIds        = new Set();
       },
+      // Phase 4 test helpers
+      _renderRestoreBanner,
+      _setRestoreBanner(val) { _restoreBanner = !!val; },
+      _markDirty,
+      _markClean,
+      _getDirtyIds()  { return _dirtyIds; },
     };
   }
 
