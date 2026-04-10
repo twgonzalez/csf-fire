@@ -1190,6 +1190,10 @@ def _inject_josh_data_bundle(
     # CSS shifts the Folium map container right + down so it never renders under
     # either fixed panel.  z-index: sidebar=1000, header=10001, map layers<999.
     layout_block = """\
+<!-- Leaflet.AntPath plugin — required by sidebar.js _drawRoutes().
+     Phase 3 removed all folium.AntPath() calls (routes now drawn by sidebar.js),
+     so Folium no longer auto-injects this CDN script.  We inject it explicitly. -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.1.2/dist/leaflet-ant-path.min.js"></script>
 <style id="josh-layout">
   .folium-map {
     left: 320px !important;
