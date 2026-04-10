@@ -117,7 +117,7 @@ Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.1
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,51.98373392672696,False,False,True
 Cedar Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,4952.25,4.402,F,4,2201.0,catchment_based,5841,16154,8323.425,16154.0,938.2987234473613,99.9572531084467,False,False,True
 Cedar Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7249.5,6.444,F,6,3222.0,catchment_based,5403,16074,7699.275,16074.0,938.2987234473613,77.10104538171609,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,2060,1197,2935.4999999999995,1197.0,0.0,121.44124705767096,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,2060,1197,2935.4999999999995,1197.0,0.0,121.44124776762938,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,2511,1265,3578.1749999999997,1265.0,0.0,102.53988094573752,False,False,True
 Fourth Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,607.5,0.54,D,1,270.0,catchment_based,1869,13689,2663.325,13689.0,0.0,199.69884608311887,True,False,True
 Fourth Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,607.5,0.54,D,1,270.0,catchment_based,2723,13377,3880.2749999999996,13377.0,0.0,136.18879473261296,True,False,True
@@ -184,7 +184,7 @@ Tunnel Road,primary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,585.0,0.1539473684
 Marin Avenue,tertiary,two_lane,2,20,900.0,vhfhsz,0.35,315.0,5240.25,5.8225,F,5,2329.0,catchment_based,2041,994,2908.4249999999997,994.0,0.0,89.59923945491536,False,False,True
 Marin Avenue,tertiary,two_lane,2,20,900.0,vhfhsz,0.35,315.0,5240.25,5.8225,F,5,2329.0,catchment_based,2041,994,2908.4249999999997,994.0,0.0,113.17661711974657,False,False,True
 University Drive,unclassified,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,72.0,0.064,A,1,32.0,catchment_based,1583,15202,2255.7749999999996,15202.0,2537.431422688214,73.98751155659541,True,True,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,145.7705154057543,True,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,145.7705154057543,False,False,True
 The Alameda,tertiary,two_lane,3,25,1125.0,non_fhsz,1.0,1125.0,1473.75,1.31,F,2,655.0,catchment_based,3009,1137,4287.825,1137.0,0.0,9.117706456168065,False,False,True
 The Circle,secondary,multilane,1,25,1900.0,non_fhsz,1.0,1900.0,6390.0,3.363157894736842,F,6,2840.0,catchment_based,1585,379,2258.625,379.0,0.0,12.864666676983104,False,False,True
 Los Angeles Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,920.25,0.818,E,1,409.0,catchment_based,1203,226,1714.2749999999999,226.0,0.0,22.836088484354043,False,False,True
@@ -245,15 +245,15 @@ Haste Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1338.75,1.19,F,1,
 Haste Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1338.75,1.19,F,1,595.0,catchment_based,7071,5058,10076.175,5058.0,2558.8971242463776,202.28737040952436,False,False,True
 Haste Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1338.75,1.19,F,1,595.0,catchment_based,4301,1941,6128.924999999999,1941.0,2420.7650888333537,202.02964438559394,False,False,True
 Bowditch Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,960.75,0.854,E,1,427.0,catchment_based,4477,1938,6379.724999999999,1938.0,2345.565809373416,99.50275845230502,True,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,103.84043823574552,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,103.84043882821723,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2560.5,2.276,F,4,1138.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,94.94712420005978,False,False,True
 Haste Street,tertiary,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1080.0,0.96,F,2,480.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,12.476441552619262,True,False,True
 Piedmont Avenue,tertiary,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1080.0,0.96,F,2,480.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,98.18791205734756,False,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,3657,1992,5211.224999999999,1992.0,0.0,89.6650933889684,True,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,3657,1992,5211.224999999999,1992.0,0.0,95.66371185470884,True,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,4368,2126,6224.4,2126.0,0.0,95.64143732971387,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,4368,2126,6224.4,2126.0,0.0,95.64143740081995,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,60.933268759134975,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,83.46906840567556,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,83.4690684292805,False,False,True
 Haskell Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,50566.5,44.948,F,45,22474.0,catchment_based,5546,8933,7903.049999999999,8933.0,0.0,203.14699521386478,False,False,True
 Haskell Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,50566.5,44.948,F,45,22474.0,catchment_based,3349,9704,4772.325,9704.0,0.0,256.70678992276663,False,False,True
 Mabel Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6610.5,5.876,F,8,2938.0,catchment_based,4486,8539,6392.549999999999,8539.0,0.0,84.6081609077079,True,False,True
@@ -368,10 +368,9 @@ Sacramento Street,tertiary,two_lane,2,30,1350.0,non_fhsz,1.0,1350.0,3035.25,2.24
 67th Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,5656.5,5.028,F,6,2514.0,catchment_based,4541,1471,6470.924999999999,1471.0,0.0,204.08623461281445,True,False,True
 Woolsey Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3035.25,2.698,F,3,1349.0,catchment_based,4541,1471,6470.924999999999,1471.0,0.0,11.49525247038534,True,False,True
 66th Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,954.0,0.848,E,2,424.0,catchment_based,4541,1471,6470.924999999999,1471.0,0.0,167.51223222733344,True,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2169,1054,3090.825,1054.0,0.0,11.795688941720691,False,False,True
 Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2169,1054,3090.825,1054.0,0.0,155.22890692243894,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,42.70195035230392,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,2060,1197,2935.4999999999995,1197.0,0.0,121.44124705767096,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,2060,1197,2935.4999999999995,1197.0,0.0,121.44124776762939,False,False,True
 Encina Place,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1082.25,0.962,F,1,481.0,catchment_based,1794,1437,2556.45,1437.0,0.0,34.292893113573776,False,False,True
 Bonar Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1914.75,1.702,F,1,851.0,catchment_based,4926,9322,7019.549999999999,9322.0,0.0,99.2941293672388,True,False,True
 Bonar Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1914.75,1.702,F,1,851.0,catchment_based,3921,1756,5587.424999999999,1756.0,0.0,102.34752891689159,True,False,True
@@ -471,7 +470,7 @@ Colusa Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,859.5,0.764,E
 Sunset Lane,residential,two_lane,1,25,1125.0,vhfhsz,0.35,393.75,598.5,0.532,D,1,266.0,catchment_based,2041,994,2908.4249999999997,994.0,0.0,76.22465648212822,True,False,True
 Channing Way,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1080.0,0.96,F,2,480.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,75.72101271479025,True,False,True
 Channing Way,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,632.25,0.562,D,1,281.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,14.445572919619675,True,False,True
-Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3650,1714,5201.25,1714.0,0.0,25.617270336580066,False,False,True
+Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3650,1714,5201.25,1714.0,0.0,25.617271518281655,False,False,True
 Cedar Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7249.5,6.444,F,6,3222.0,catchment_based,4848,16036,6908.4,16036.0,938.2987234473613,39.09542734899706,False,False,True
 Cedar Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7249.5,6.444,F,6,3222.0,catchment_based,4569,16016,6510.825,16016.0,755.1248373291716,86.06647026967303,False,False,True
 Scenic Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2297.25,2.042,F,2,1021.0,catchment_based,4848,16036,6908.4,16036.0,938.2987234473613,94.82699921808022,True,False,True
@@ -524,8 +523,8 @@ Milvia Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,
 Milvia Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,6211,7342,8850.675,7342.0,317.933577867662,100.4169353609241,False,False,True
 Bowditch Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,960.75,0.854,E,1,427.0,catchment_based,4477,1938,6379.724999999999,1938.0,2345.565809373416,99.50275845230502,True,False,True
 Bowditch Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,960.75,0.854,E,1,427.0,catchment_based,3480,1793,4959.0,1793.0,2345.565809373416,100.97444656651898,True,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,103.84043823574551,False,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,95.92781209402398,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,4016,1590,5722.799999999999,1590.0,2237.129644739013,103.84043882821723,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,95.92781242564207,False,False,True
 Gilman Street,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,37809.0,9.949736842105263,F,35,16804.0,catchment_based,2066,6357,2944.0499999999997,6357.0,0.0,76.25485979717867,False,False,True
 Gilman Street,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,37809.0,9.949736842105263,F,35,16804.0,catchment_based,2066,6357,2944.0499999999997,6357.0,0.0,75.90220334234778,False,False,True
 Cedar Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1552.5,1.38,F,1,690.0,catchment_based,4034,1267,5748.45,1267.0,0.0,76.65546810736397,False,False,True
@@ -587,7 +586,6 @@ Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3873,2012,5519.025,2012.0,0.0,92.2703286241527,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3873,2012,5519.025,2012.0,0.0,91.67854247140184,False,False,True
 Prince Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,650.25,0.578,D,1,289.0,catchment_based,3186,1914,4540.049999999999,1914.0,0.0,86.84057739599001,True,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,1988,1829,2832.8999999999996,1829.0,0.0,88.02417374681762,False,False,True
 Essex Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3262,1947,4648.349999999999,1947.0,0.0,103.17125130069756,True,False,True
 Essex Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,2553,5090,3638.0249999999996,5090.0,0.0,180.76882619978014,True,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3278.25,2.914,F,3,1457.0,catchment_based,4190,2049,5970.749999999999,2049.0,0.0,53.941500073680004,True,False,True
@@ -816,8 +814,8 @@ Ashby Avenue,primary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1955.25,0.5145394
 Ashby Avenue,primary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1955.25,0.5145394736842105,D,2,869.0,catchment_based,3739,2868,5328.075,2868.0,0.0,59.8884322448858,False,False,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1584.0,1.408,F,1,704.0,catchment_based,2660,1580,3790.4999999999995,1580.0,0.0,61.055778086335046,True,False,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1584.0,1.408,F,1,704.0,catchment_based,2660,1580,3790.4999999999995,1580.0,0.0,58.766813509610465,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,6438,3899,9174.15,3899.0,343.15848796712214,201.62679520790735,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,199.7014589608347,True,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,6438,3899,9174.15,3899.0,343.15848796712214,201.62679520790735,False,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,199.7014589608347,False,False,True
 The Alameda,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1473.75,1.31,F,2,655.0,catchment_based,2972,1114,4235.099999999999,1114.0,0.0,76.97932933374281,False,False,True
 The Alameda,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1473.75,1.31,F,2,655.0,catchment_based,2601,1028,3706.4249999999997,1028.0,0.0,121.83469050158193,False,False,True
 The Alameda,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1473.75,1.31,F,2,655.0,catchment_based,2884,1107,4109.7,1107.0,0.0,184.820181991583,False,False,True
@@ -875,7 +873,7 @@ Emerson Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E
 Woolsey Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,3641,2191,5188.424999999999,2191.0,0.0,12.401373338287211,True,False,True
 Woolsey Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,3641,2191,5188.424999999999,2191.0,0.0,181.11032130952583,False,False,True
 Alcatraz Avenue,tertiary,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2046,1375,2915.5499999999997,1375.0,0.0,16.821866528145488,True,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,95.92781209402398,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,675.0,0.6,D,1,300.0,catchment_based,3019,1445,4302.075,1445.0,2237.129644739013,95.92781242564207,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,4696,2838,6691.799999999999,2838.0,297.1231618865906,34.85831858756085,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,4634,2422,6603.45,2422.0,313.73937201794587,166.61690049609038,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,4269,2154,6083.325,2154.0,0.0,44.169108819040034,False,False,True
@@ -885,9 +883,9 @@ College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3304,5501,4708.2,5501.0,0.0,93.5035376849589,True,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3304,5501,4708.2,5501.0,0.0,25.06350149885876,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3304,5501,4708.2,5501.0,0.0,107.03519236882777,False,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3166,5517,4511.549999999999,5517.0,0.0,294.1808398909183,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3166,5517,4511.549999999999,5517.0,0.0,294.1808411900594,False,False,True
 College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3163,5302,4507.275,5302.0,0.0,107.45107211743907,False,False,True
-College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3166,5517,4511.549999999999,5517.0,0.0,294.1808398909184,False,False,True
+College Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3166,5517,4511.549999999999,5517.0,0.0,294.1808411900594,False,False,True
 Colorado Avenue,residential,two_lane,1,25,1125.0,moderate_fhsz,0.75,843.75,648.0,0.576,D,1,288.0,catchment_based,2301,375,3278.9249999999997,375.0,0.0,80.51111478232168,True,False,True
 Colorado Avenue,residential,two_lane,1,25,1125.0,moderate_fhsz,0.75,843.75,648.0,0.576,D,1,288.0,catchment_based,2035,329,2899.8749999999995,329.0,0.0,75.01210578349831,True,False,True
 Ashby Avenue,primary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1955.25,0.5145394736842105,D,2,869.0,catchment_based,3733,2569,5319.525,2569.0,0.0,58.52665566125066,False,False,True
@@ -918,7 +916,7 @@ Milvia Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2619.0,2.328,
 Virginia Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2619.0,2.328,F,2,1164.0,catchment_based,7745,22057,11036.624999999998,22057.0,2595.6982190674485,203.10003121218438,True,False,True
 Virginia Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2619.0,2.328,F,2,1164.0,catchment_based,5763,21494,8212.275,21494.0,190.302763636099,99.08766661931392,True,False,True
 Southwest Place,residential,two_lane,1,25,1125.0,moderate_fhsz,0.75,843.75,1014.75,0.902,E,1,451.0,catchment_based,2219,815,3162.075,815.0,16.61621013135525,153.18626371335938,True,False,True
-Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3656,2013,5209.799999999999,2013.0,0.0,93.7447133616693,False,False,True
+Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3656,2013,5209.799999999999,2013.0,0.0,93.74471336174642,False,False,True
 Delaware Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1935.0,1.72,F,1,860.0,catchment_based,4001,14632,5701.424999999999,14632.0,0.0,100.28368654711406,True,False,True
 Delaware Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1935.0,1.72,F,1,860.0,catchment_based,3399,14441,4843.575,14441.0,0.0,96.06353663691431,True,False,True
 Seventh Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1935.0,1.72,F,1,860.0,catchment_based,3399,14441,4843.575,14441.0,0.0,137.80817801737552,True,False,True
@@ -958,7 +956,7 @@ Eighth Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1323.0,1.176,
 Addison Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2252.25,2.002,F,2,1001.0,catchment_based,5210,15194,7424.249999999999,15194.0,0.0,94.03183943481758,False,False,True
 Addison Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2252.25,2.002,F,2,1001.0,catchment_based,5210,15194,7424.249999999999,15194.0,0.0,100.28273333805559,False,False,True
 Santa Barbara Road,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,648.0,0.576,D,1,288.0,catchment_based,2035,329,2899.8749999999995,329.0,0.0,222.45234365499988,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4806,2595,6848.549999999999,2595.0,343.15848796712214,91.81114753058205,True,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4806,2595,6848.549999999999,2595.0,343.15848796712214,91.81114753058205,False,False,True
 Telegraph Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,7949.25,1.045953947368421,F,8,3533.0,catchment_based,5109,2887,7280.325,2887.0,451.5946526015248,104.29880198260295,False,False,True
 Telegraph Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,7949.25,1.045953947368421,F,8,3533.0,catchment_based,3784,1846,5392.2,1846.0,0.0,104.44647105813388,False,False,True
 Telegraph Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,7949.25,1.045953947368421,F,8,3533.0,catchment_based,3784,1846,5392.2,1846.0,0.0,104.4464710581339,False,False,True
@@ -1014,10 +1012,10 @@ Martin Luther King Junior Way,tertiary,two_lane,4,25,1125.0,non_fhsz,1.0,1125.0,
 Martin Luther King Junior Way,tertiary,two_lane,4,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,6011,5023,8565.675,5023.0,0.0,99.60948650329826,False,False,True
 Fulton Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2002.5,1.78,F,1,890.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,95.33345861339363,True,False,True
 Fulton Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2002.5,1.78,F,1,890.0,catchment_based,6521,4131,9292.425,4131.0,49.156501982604105,101.05800448903668,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,199.7014589608347,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,145.77051540575434,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4806,2595,6848.549999999999,2595.0,343.15848796712214,91.81114753058205,True,False,True
-Derby Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,6438,3899,9174.15,3899.0,343.15848796712214,201.62679520790732,True,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,199.7014589608347,False,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4760,2964,6782.999999999999,2964.0,0.0,145.77051540575434,False,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,4806,2595,6848.549999999999,2595.0,343.15848796712214,91.81114753058205,False,False,True
+Derby Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,7949.25,7.066,F,8,3533.0,catchment_based,6438,3899,9174.15,3899.0,343.15848796712214,201.62679520790732,False,False,True
 Addison Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2252.25,2.002,F,2,1001.0,catchment_based,1939,13830,2763.075,13830.0,0.0,37.388705191623565,True,False,True
 Ward Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2038.5,1.812,F,2,906.0,catchment_based,2704,7801,3853.2,7801.0,0.0,66.94642626254935,True,False,True
 Wallace Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2038.5,1.812,F,2,906.0,catchment_based,3415,7865,4866.375,7865.0,0.0,221.38762842780392,True,False,True
@@ -1041,7 +1039,7 @@ Chestnut Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2805.75,2.4
 California Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1842.75,1.638,F,1,819.0,catchment_based,5831,6491,8309.175,6491.0,0.0,11.438321651173002,True,False,True
 California Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1842.75,1.638,F,1,819.0,catchment_based,5875,6449,8371.875,6449.0,0.0,94.33777683286971,True,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,4615,2667,6576.374999999999,2667.0,0.0,90.74593306746775,False,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,4017,5350,5724.224999999999,5350.0,0.0,78.60999940603321,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,4017,5350,5724.224999999999,5350.0,0.0,78.61000047715217,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,3490,6263,4973.25,6263.0,0.0,92.05117205867762,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,3487,6048,4968.974999999999,6048.0,0.0,96.62996312056114,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,3490,6263,4973.25,6263.0,0.0,92.05117205867764,False,False,True
@@ -1056,11 +1054,11 @@ San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,1401.75,0.368
 Mabel Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6610.5,5.876,F,8,2938.0,catchment_based,3349,8351,4772.325,8351.0,0.0,91.38406228738364,True,False,True
 Mabel Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6610.5,5.876,F,8,2938.0,catchment_based,3349,8351,4772.325,8351.0,0.0,98.16191742834543,True,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,5918,8779,8433.15,8779.0,0.0,209.69704996863373,False,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3349,9704,4772.325,9704.0,0.0,262.7762557549762,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3349,9704,4772.325,9704.0,0.0,262.77625762090514,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,5849,2132,8334.824999999999,2132.0,0.0,239.42625518499702,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,4905,819,6989.624999999999,819.0,0.0,179.272132445947,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3918,2031,5583.15,2031.0,0.0,96.98131390078211,False,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,4368,2126,6224.4,2126.0,0.0,95.64143732971387,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,4368,2126,6224.4,2126.0,0.0,95.64143740081995,False,False,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1584.0,1.408,F,1,704.0,catchment_based,1800,1148,2565.0,1148.0,0.0,103.98539255804785,True,False,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1584.0,1.408,F,1,704.0,catchment_based,2660,1580,3790.4999999999995,1580.0,0.0,61.055778086335046,True,False,True
 Euclid Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,717.75,0.638,E,1,319.0,catchment_based,3753,915,5348.025,915.0,230.81515374961094,109.81243699823519,False,False,True
@@ -1090,8 +1088,6 @@ Mabel Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6610.5,5.876,F
 Mabel Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6610.5,5.876,F,8,2938.0,catchment_based,3349,8351,4772.325,8351.0,0.0,58.214733925852926,True,False,True
 Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2169,1054,3090.825,1054.0,0.0,155.22890692243897,False,False,True
 Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2169,1054,3090.825,1054.0,0.0,156.86624728752042,False,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,1988,1829,2832.8999999999996,1829.0,0.0,197.84822841056322,False,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2654,1832,3781.95,1832.0,0.0,166.1292109207631,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,60.933268759134975,False,False,True
 Avalon Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1370.25,1.218,F,1,609.0,catchment_based,2511,1265,3578.1749999999997,1265.0,0.0,156.9981809401846,True,False,True
 San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,1401.75,0.3688815789473684,C,1,623.0,catchment_based,2704,7801,3853.2,7801.0,0.0,72.54789779283394,False,False,True
@@ -1113,7 +1109,7 @@ Stannage Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,37809.0,33.
 Stannage Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,37809.0,33.608,F,35,16804.0,catchment_based,4665,6858,6647.624999999999,6858.0,0.0,65.94396302870265,False,False,True
 Avenida Drive,residential,two_lane,2,25,1125.0,high_fhsz,0.5,562.5,985.5,0.876,E,1,438.0,catchment_based,1304,353,1858.1999999999998,353.0,2020.9853785449056,83.66613129855668,False,False,True
 Avenida Drive,residential,two_lane,2,25,1125.0,high_fhsz,0.5,562.5,985.5,0.876,E,1,438.0,catchment_based,1025,333,1460.6249999999998,333.0,1837.8114924267159,47.72283756029389,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,83.46906840567556,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,83.46906842928048,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,13.588381201168296,False,False,True
 Berryman Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2621.25,2.33,F,2,1165.0,catchment_based,2770,1158,3947.2499999999995,1158.0,0.0,100.43761735285092,False,False,True
 Berryman Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2621.25,2.33,F,2,1165.0,catchment_based,2770,1158,3947.2499999999995,1158.0,0.0,100.3033575504957,False,False,True
@@ -1222,8 +1218,6 @@ Encina Place,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1082.25,0.962,
 Encina Place,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1082.25,0.962,F,1,481.0,catchment_based,1794,1437,2556.45,1437.0,0.0,42.794141914760615,False,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1392.75,1.238,F,1,619.0,catchment_based,4600,5373,6554.999999999999,5373.0,0.0,50.5447150805375,True,False,True
 Tunnel Road,primary,multilane,1,25,1900.0,non_fhsz,1.0,1900.0,585.0,0.3078947368421053,C,1,260.0,catchment_based,1359,1045,1936.5749999999998,1045.0,0.0,32.74648047809519,False,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,1988,1829,2832.8999999999996,1829.0,0.0,88.02417374681761,False,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,1988,1829,2832.8999999999996,1829.0,0.0,197.8482284105632,False,False,True
 Boynton Avenue,residential,two_lane,1,25,1125.0,moderate_fhsz,0.75,843.75,648.0,0.576,D,1,288.0,catchment_based,2035,329,2899.8749999999995,329.0,0.0,96.63996627125013,True,False,True
 Arlington Avenue,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1149.75,0.30256578947368423,C,1,511.0,catchment_based,1585,379,2258.625,379.0,0.0,38.99382707768663,False,False,True
 The Circle,secondary,multilane,1,25,1900.0,non_fhsz,1.0,1900.0,6390.0,3.363157894736842,F,6,2840.0,catchment_based,1585,379,2258.625,379.0,0.0,7.338265069170143,False,False,True
@@ -1294,8 +1288,6 @@ San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,2907.0,0.765,
 Sacramento Street,tertiary,two_lane,2,30,1350.0,non_fhsz,1.0,1350.0,2891.25,2.1416666666666666,F,2,1285.0,catchment_based,5482,916,7811.849999999999,916.0,0.0,99.01666184080878,False,False,True
 Ward Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1561.5,1.388,F,1,694.0,catchment_based,4015,632,5721.374999999999,632.0,0.0,13.44691475772297,True,False,True
 Ward Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1561.5,1.388,F,1,694.0,catchment_based,4015,632,5721.374999999999,632.0,0.0,185.9680340742454,True,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2169,1054,3090.825,1054.0,0.0,11.795688941720691,False,False,True
-Alcatraz Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2654,1832,3781.95,1832.0,0.0,166.12921092076311,False,False,True
 Parker Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1766.25,1.57,F,1,785.0,catchment_based,4801,766,6841.424999999999,766.0,0.0,13.297880058814336,False,False,True
 Sacramento Street,tertiary,two_lane,2,30,1350.0,non_fhsz,1.0,1350.0,2891.25,2.1416666666666666,F,2,1285.0,catchment_based,5586,925,7960.049999999999,925.0,0.0,100.00586847782444,False,False,True
 Parker Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1766.25,1.57,F,1,785.0,catchment_based,5586,925,7960.049999999999,925.0,0.0,180.66733021661608,False,False,True
@@ -1316,7 +1308,7 @@ Harmon Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,954.0,0.848,E
 Harmon Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,954.0,0.848,E,2,424.0,catchment_based,2640,1127,3761.9999999999995,1127.0,0.0,162.8924514682191,True,False,True
 San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,1215.0,0.31973684210526315,C,1,540.0,catchment_based,4294,8163,6118.95,8163.0,0.0,101.06069571738723,False,False,True
 San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,4437.0,1.1676315789473684,F,4,1972.0,catchment_based,2655,9586,3783.3749999999995,9586.0,0.0,97.06743497029518,False,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3349,9704,4772.325,9704.0,0.0,262.7762557549762,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,30946.5,4.071907894736842,F,27,13754.0,catchment_based,3349,9704,4772.325,9704.0,0.0,262.7762576209052,False,False,True
 San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,4437.0,1.1676315789473684,F,4,1972.0,catchment_based,2944,9571,4195.2,9571.0,0.0,70.59805484890005,False,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3222.0,2.864,F,3,1432.0,catchment_based,2944,8218,4195.2,8218.0,0.0,69.83331250890892,True,False,True
 San Pablo Avenue,primary,multilane,2,30,3800.0,non_fhsz,1.0,3800.0,1215.0,0.31973684210526315,C,1,540.0,catchment_based,2936,7824,4183.799999999999,7824.0,0.0,60.55492931321751,False,False,True
@@ -1372,8 +1364,8 @@ San Fernando Avenue,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,834.75,
 ,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,834.75,0.742,E,1,371.0,catchment_based,1990,376,2835.7499999999995,376.0,0.0,18.646833227681647,False,False,True
 Ashby Avenue,primary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1955.25,0.5145394736842105,D,2,869.0,catchment_based,2817,2675,4014.2249999999995,2675.0,0.0,7.731419891965293,False,False,True
 Garber Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,4973,2510,7086.525,2510.0,0.0,100.23365358844812,True,False,True
-Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3650,1714,5201.25,1714.0,0.0,25.617270336580066,False,False,True
-Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3656,2013,5209.799999999999,2013.0,0.0,93.7447133616693,False,False,True
+Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3650,1714,5201.25,1714.0,0.0,25.617271518281655,False,False,True
+Derby Street,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1014.75,0.902,E,1,451.0,catchment_based,3656,2013,5209.799999999999,2013.0,0.0,93.74471336174642,False,False,True
 Russell Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1370.25,1.218,F,1,609.0,catchment_based,2826,1300,4027.0499999999997,1300.0,0.0,259.4684285678251,False,False,True
 Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1370.25,1.218,F,1,609.0,catchment_based,2511,1265,3578.1749999999997,1265.0,0.0,23.774900991570302,False,True,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1584.0,1.408,F,1,704.0,catchment_based,3785,5635,5393.624999999999,5635.0,0.0,25.47098548021532,True,False,True
@@ -1396,7 +1388,6 @@ Martin Luther King Junior Way,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,
 Adeline Street,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,2187.0,0.5755263157894737,D,2,972.0,catchment_based,3186,1956,4540.049999999999,1956.0,0.0,29.728031566986946,False,False,True
 Alcatraz Avenue,tertiary,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,101.25,0.09,A,1,45.0,catchment_based,2046,1375,2915.5499999999997,1375.0,0.0,16.821866528145488,True,False,True
 Woolsey Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,3641,2191,5188.424999999999,2191.0,0.0,12.401373338287211,True,False,True
-Adeline Street,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,1095.75,0.2883552631578947,C,1,487.0,catchment_based,3641,2191,5188.424999999999,2191.0,0.0,16.419632266577125,False,False,True
 Woolsey Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2187.0,1.944,F,2,972.0,catchment_based,3186,1914,4540.049999999999,1914.0,0.0,69.39234396492553,True,False,True
 Martin Luther King Junior Way,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,2187.0,1.944,F,2,972.0,catchment_based,3186,1956,4540.049999999999,1956.0,0.0,69.45992376996648,False,False,True
 Webster Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,2666.25,2.37,F,2,1185.0,catchment_based,3304,5501,4708.2,5501.0,0.0,15.711349172681349,False,False,True
@@ -1430,6 +1421,7 @@ Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6957.0,6.184
 ,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3678.75,3.27,F,3,1635.0,catchment_based,3675,520,5236.875,520.0,0.0,8.32486053167808,False,False,True
 Oregon Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,3678.75,3.27,F,3,1635.0,catchment_based,4494,1326,6403.95,1326.0,0.0,190.50395446430608,False,False,True
 ,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3678.75,3.27,F,3,1635.0,catchment_based,3675,520,5236.875,520.0,0.0,8.072155775794393,False,False,True
+University Avenue,tertiary,two_lane,2,35,1575.0,non_fhsz,1.0,1575.0,2261.25,1.4357142857142857,F,1,1005.0,catchment_based,1275,13031,1816.8749999999998,13031.0,0.0,54.59438137846368,False,False,True
 Oregon Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,3678.75,3.27,F,3,1635.0,catchment_based,4387,2420,6251.474999999999,2420.0,0.0,141.5276813317481,False,False,True
 Oregon Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,3678.75,3.27,F,3,1635.0,catchment_based,5081,2538,7240.424999999999,2538.0,0.0,200.56897140426025,False,False,True
 Dowling Place,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2908,5813,4143.9,5813.0,0.0,9.194247071134178,True,False,True
@@ -1527,10 +1519,10 @@ Russell Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,3278.25,2.91
 ,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,6957.0,6.184,F,6,3092.0,catchment_based,3597,529,5125.724999999999,529.0,0.0,5.505339356258844,True,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,42.70195035230392,False,False,True
 Prince Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1082.25,0.962,F,1,481.0,catchment_based,3163,4714,4507.275,4714.0,0.0,437.7524724173564,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,88.34433419137625,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,88.34433421006295,False,False,True
 The Uplands,tertiary,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1082.25,0.962,F,1,481.0,catchment_based,1794,1437,2556.45,1437.0,0.0,111.52043908461856,True,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,1437,2556.45,1437.0,0.0,66.25943554597302,False,False,True
-Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,88.34433419137626,False,False,True
+Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,849,2556.45,849.0,0.0,88.34433421006295,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1448,1677,2063.3999999999996,1677.0,0.0,75.18856508409357,False,False,True
 Claremont Avenue,secondary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,1082.25,0.14240131578947368,B,1,481.0,catchment_based,1794,1437,2556.45,1437.0,0.0,66.25943554597302,False,False,True
 Hearst Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1935.0,1.72,F,1,860.0,catchment_based,2799,14066,3988.575,14066.0,0.0,94.82281543407747,False,False,True
@@ -1583,7 +1575,7 @@ Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.86447368
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,2865,5127,4082.6249999999995,5127.0,0.0,90.65653987422692,False,False,True
 Woolsey Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2553,5090,3638.0249999999996,5090.0,0.0,168.40900221696955,False,False,True
 Woolsey Street,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,3068,4623,4371.9,4623.0,0.0,88.20089866841775,False,False,True
-Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,79.32998781405077,False,False,True
+Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,79.32999235525278,False,False,True
 Essex Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,4368,5213,6224.4,5213.0,0.0,176.40272280205352,True,False,True
 Essex Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3262,1947,4648.349999999999,1947.0,0.0,103.17125130069756,True,False,True
 Tremont Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3262,1947,4648.349999999999,1947.0,0.0,81.33780870716829,True,False,True
@@ -1593,14 +1585,14 @@ Essex Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1
 Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2910,5146,4146.75,5146.0,0.0,81.01869871820094,False,False,True
 Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,81.20854543685289,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,2865,5127,4082.6249999999995,5127.0,0.0,90.65653987422692,False,False,True
-Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,4017,5350,5724.224999999999,5350.0,0.0,78.60999940603321,False,False,True
+Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,4017,5350,5724.224999999999,5350.0,0.0,78.61000047715217,False,False,True
 Prince Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,4368,5213,6224.4,5213.0,0.0,170.5327664255661,True,False,True
 Tremont Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3641,2191,5188.424999999999,2191.0,0.0,78.56235466595525,True,False,True
 Tremont Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3262,1947,4648.349999999999,1947.0,0.0,81.3378087071683,True,False,True
 Prince Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2553,5090,3638.0249999999996,5090.0,0.0,185.32163566263955,True,False,True
 Prince Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,4368,5213,6224.4,5213.0,0.0,170.5327664255661,True,False,True
 Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,81.2085454368529,False,False,True
-Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,79.32998781405075,False,False,True
+Shattuck Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1095.75,0.974,F,1,487.0,catchment_based,2550,4875,3633.7499999999995,4875.0,0.0,79.32999235525278,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,3487,6048,4968.974999999999,6048.0,0.0,96.62996312056113,False,False,True
 Ashby Avenue,primary,multilane,4,25,7600.0,non_fhsz,1.0,7600.0,6570.0,0.8644736842105263,E,6,2920.0,catchment_based,3487,6048,4968.974999999999,6048.0,0.0,80.26511325565266,False,False,True
 Tremont Street,residential,two_lane,1,25,1125.0,non_fhsz,1.0,1125.0,1012.5,0.9,E,1,450.0,catchment_based,3622,2218,5161.349999999999,2218.0,0.0,80.13018469224963,True,False,True
@@ -1648,6 +1640,7 @@ Euclid Avenue,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,717.75,0.638,E,1
 Dwight Way,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1125.0,1.0,F,1,500.0,catchment_based,5060,849,7210.499999999999,849.0,0.0,87.12925335263324,False,False,True
 Dwight Way,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1766.25,1.57,F,1,785.0,catchment_based,5060,849,7210.499999999999,849.0,0.0,53.37863999135414,False,False,True
 Allston Way,residential,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,758.25,0.674,E,1,337.0,catchment_based,3820,1978,5443.499999999999,1978.0,0.0,52.12571925106486,False,False,True
+University Avenue,tertiary,two_lane,2,35,1575.0,non_fhsz,1.0,1575.0,2261.25,1.4357142857142857,F,1,1005.0,catchment_based,1275,13031,1816.8749999999998,13031.0,0.0,351.60077985901006,False,False,True
 Telegraph Avenue,secondary,multilane,2,25,3800.0,non_fhsz,1.0,3800.0,3521.25,0.9266447368421052,E,5,1565.0,catchment_based,5564,2638,7928.699999999999,2638.0,599.5698065379934,58.79406576039842,False,False,True
 Martin Luther King Junior Way,tertiary,two_lane,4,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,4871,4338,6941.174999999999,4338.0,0.0,78.14326964402707,False,False,True
 Martin Luther King Junior Way,tertiary,two_lane,2,25,1125.0,non_fhsz,1.0,1125.0,1746.0,1.552,F,2,776.0,catchment_based,4871,4338,6941.174999999999,4338.0,0.0,25.389703850904027,False,False,True

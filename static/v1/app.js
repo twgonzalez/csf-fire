@@ -550,7 +550,7 @@ if (typeof module !== "undefined" && module.exports) {
 <div id="josh-whatif-panel" style="
     position: fixed;
     bottom: 32px;
-    right: 16px;
+    left: 16px;
     width: 300px;
     background: #fff;
     border-radius: 8px;
@@ -619,7 +619,7 @@ if (typeof module !== "undefined" && module.exports) {
 <button id="josh-whatif-open-btn" onclick="joshWhatIf.openPanel()" style="
     position: fixed;
     bottom: 32px;
-    right: 16px;
+    left: 16px;
     z-index: 10000;
     background: #1c4a6e;
     color: #fff;
@@ -712,6 +712,7 @@ if (typeof module !== "undefined" && module.exports) {
 
   // ── Panel open ──────────────────────────────────────────────────────────────
   function openPanel() {
+    if (window.joshPM && window.joshPM.closePanel) { window.joshPM.closePanel(); }
     document.getElementById('josh-whatif-open-btn').style.display = 'none';
     document.getElementById('josh-whatif-panel').style.display    = 'block';
   }
@@ -1028,7 +1029,29 @@ if (typeof module !== "undefined" && module.exports) {
     document.getElementById('josh-whatif-open-btn').style.display = '';
   }
 
-  window.joshWhatIf = { openPanel, closePanel, startDropPin, cancelDropPin, clearWhatIf };
+  /**
+   * startDropPinForProject(onPlaced) — called by project manager.
+   * Enters crosshair mode; calls onPlaced(lat, lng) once the user clicks.
+   * Cancels any prior AWAITING state before entering a new one.
+   */
+  function startDropPinForProject(onPlaced) {
+    cancelDropPin();
+    _dropPinActive = true;
+    const map = _getMap();
+    if (!map) return;
+    _origCursor = map.getContainer().style.cursor;
+    map.getContainer().style.cursor = 'crosshair';
+    map.once('click', function(e) {
+      _dropPinActive = false;
+      map.getContainer().style.cursor = _origCursor;
+      onPlaced(e.latlng.lat, e.latlng.lng);
+    });
+  }
+
+  /** Allow project manager to cancel drop-pin mode without touching WhatIf state. */
+  function cancelExternalDropPin() { cancelDropPin(); }
+
+  window.joshWhatIf = { openPanel, closePanel, startDropPin, cancelDropPin, clearWhatIf, startDropPinForProject, cancelExternalDropPin };
 })();
 
 // ────────────────────────────────────────────────────────────────────────────
