@@ -897,6 +897,7 @@ def create_demo_map(
         _inject_josh_data_bundle(
             output_path, graph_json_path, params_json_path, fhsz_gdf,
             city_name=_city_name, city_slug=_city_slug,
+            projects_data=_build_josh_data_projects(projects, _city_slug),
         )
     else:
         # graph.json not yet generated (analyze not run). Fall back to the
@@ -1159,6 +1160,69 @@ def _inject_brief_modals(html_path: Path) -> None:
 _APP_JS_CDN_URL = "https://twgonzalez.github.io/josh/static/v1/app.js"
 
 
+def _build_josh_data_projects(projects: list, city_slug: str) -> list[dict]:
+    """
+    Serialize pipeline-seeded Project objects into the JOSH_DATA.projects schema
+    (spec §7) so sidebar.js can initialize with full result data including
+    path_coords (full geometry from wildland.py) and bottleneck metadata.
+
+    Each project's delta_t_results contains the full per-path audit dict from
+    base.py compute_delta_t(), including path_wgs84_coords.
+    """
+    route_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    result = []
+    for proj in projects:
+        paths_raw: list[dict] = proj.delta_t_results or []
+        if not paths_raw:
+            continue  # skip projects with no analysis (e.g. below-threshold with no routes)
+
+        # Derive result-level fields from the first path (all paths share these values)
+        first = paths_raw[0]
+        paths_out = []
+        for idx, p in enumerate(paths_raw):
+            paths_out.append({
+                "route_id":                  route_labels[idx] if idx < len(route_labels) else str(idx),
+                "delta_t":                   round(float(p.get("delta_t_minutes", 0)), 2),
+                "flagged":                   bool(p.get("flagged", False)),
+                "bottleneck_osmid":          str(p.get("bottleneck_osmid", "")),
+                "bottleneck_name":           str(p.get("bottleneck_name", "")),
+                "bottleneck_road_type":      str(p.get("bottleneck_road_type", "")),
+                "bottleneck_lanes":          int(p.get("bottleneck_lane_count", 0) or 0),
+                "bottleneck_speed":          int(p.get("bottleneck_speed_limit", 0) or 0),
+                "effective_capacity_vph":    round(float(p.get("bottleneck_effective_capacity_vph", 0)), 1),
+                "hazard_degradation_factor": round(float(p.get("bottleneck_hazard_degradation", 1.0)), 4),
+                "path_coords":               p.get("path_wgs84_coords") or [],
+            })
+
+        result.append({
+            "id":          _slugify(proj.project_name or proj.address or "project"),
+            "name":        proj.project_name or "",
+            "address":     proj.address or "",
+            "lat":         proj.location_lat,
+            "lng":         proj.location_lon,
+            "units":       proj.dwelling_units,
+            "stories":     proj.stories,
+            "source":      "pipeline",
+            "city_slug":   city_slug,
+            "result": {
+                "tier":               proj.determination or "",
+                "hazard_zone":        proj.hazard_zone or "non_fhsz",
+                "in_fire_zone":       bool(proj.in_fire_zone),
+                "project_vehicles":   round(float(proj.project_vehicles_peak_hour), 1),
+                "egress_minutes":     round(float(proj.egress_minutes), 1),
+                "delta_t_threshold":  round(float(first.get("threshold_minutes", 0)), 4),
+                "paths":              paths_out,
+            },
+        })
+    return result
+
+
+def _slugify(text: str) -> str:
+    """Convert a project name to a URL-safe id string."""
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_") or "project"
+
+
 def _inject_josh_data_bundle(
     html_path: Path,
     graph_json_path: Path,
@@ -1166,6 +1230,7 @@ def _inject_josh_data_bundle(
     fhsz_gdf: gpd.GeoDataFrame,
     city_name: str = "City",
     city_slug: str = "",
+    projects_data: list | None = None,
 ) -> None:
     """
     Inject window.JOSH_DATA (graph, parameters, fhsz, briefs) into demo_map.html,
@@ -1203,6 +1268,7 @@ def _inject_josh_data_bundle(
         "parameters":     params_data,
         "fhsz":           fhsz_geojson,
         "briefs":         brief_data,
+        "projects":       projects_data or [],
     }
 
     data_block = (
