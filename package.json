@@ -1,0 +1,11 @@
+{
+  "name": "csf-josh",
+  "private": true,
+  "description": "JOSH smoke tests — browser-level integration via Playwright",
+  "scripts": {
+    "smoke": "node --test tests/smoke_sidebar.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  }
+}
