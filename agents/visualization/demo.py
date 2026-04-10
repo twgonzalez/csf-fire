@@ -335,6 +335,14 @@ def create_demo_map(
     heatmap_fg.add_to(m)
     heatmap_js_name = heatmap_fg.get_name()
 
+    # ── Permanent project-pin layer (home icons — always visible) ─────────
+    # Home markers are kept separate from per-project route FeatureGroups so
+    # they remain visible regardless of which project is selected in the sidebar.
+    # Phase 3 retired the demo-panel layer toggle; sidebar.js now handles route
+    # visibility via AntPath.  Without this layer, only project-0's marker was
+    # visible (show=(i==0) on per-project groups).
+    project_pins_fg = folium.FeatureGroup(name="Project Locations", show=True)
+
     # ── Per-project FeatureGroups ──────────────────────────────────────────
     proj_js_names: list[str] = []
     # Accumulate GeoJson var names that need post-creation popup binding.
@@ -701,7 +709,9 @@ def create_demo_map(
                     tooltip=_bn_tip,
                 ).add_to(proj_group)
 
-        # Project marker (wildland group — visible in Scenario A)
+        # Project marker — added to the permanent always-visible pins layer,
+        # NOT the per-project FeatureGroup, so it stays on the map regardless
+        # of which project is selected in the sidebar.
         folium.Marker(
             location=[project.location_lat, project.location_lon],
             popup=folium.Popup(
@@ -716,7 +726,7 @@ def create_demo_map(
             ),
             tooltip=f"{project.project_name} · {tier}",
             icon=folium.Icon(color=marker_color, icon="home", prefix="fa"),
-        ).add_to(proj_group)
+        ).add_to(project_pins_fg)
 
         # Additional egress point markers — city-planner-defined secondary exits.
         # Drawn as small circle markers distinct from the primary home pin.
@@ -749,6 +759,9 @@ def create_demo_map(
             ).add_to(proj_group)
 
         proj_group.add_to(m)
+
+    # Add permanent project-pin layer last so markers render above route layers.
+    project_pins_fg.add_to(m)
 
     # ── Fixed panels ───────────────────────────────────────────────────────
     m.get_root().html.add_child(folium.Element(_build_brand_header_html()))
