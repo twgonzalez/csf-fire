@@ -1,0 +1,1265 @@
+// Copyright (C) 2026 Thomas Gonzalez
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// This file is part of JOSH (Jurisdictional Objective Standards for Housing).
+// See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
+
+/**
+ * JOSH Sidebar — Phase 2
+ *
+ * Fixed left sidebar (320px) that is the single entry point for all project work.
+ * Replaces the what-if FAB + floating panel, the Saved Analyses FAB + panel,
+ * and the top-right Folium-generated official project panel.
+ *
+ * Persistence: FSAPI per-project JSON files + IndexedDB file-handle storage.
+ * Fallback for non-FSAPI browsers: <input type=file> open + Blob download save.
+ *
+ * Projects from JOSH_DATA.projects (pipeline seeds) and browser-created projects
+ * are identical in the UI — same full feature set: AntPath routes, detail card,
+ * determination brief.
+ *
+ * Architecture:
+ *   window.joshSidebar = { init, onPinPlaced, getProjects, selectProject }
+ *   Results normalized to file-format schema (snake_case) on analysis.
+ *   Map bridge calls (_drawRoutes, _enterPinMode) are no-ops until Phase 3 wires
+ *   window._joshMap into the page.
+ *
+ * Run tests: node --test tests/test_sidebar.js
+ */
+
+(function () {
+  'use strict';
+
+  // ── Constants ─────────────────────────────────────────────────────────────────
+  const SCHEMA_V   = 1;
+  const SIDEBAR_W  = 320;
+  const IDB_NAME   = 'josh_sidebar_v1';
+  const IDB_STORE  = 'handles';
+
+  // ── Data accessors ─────────────────────────────────────────────────────────────
+  function _jd()        { return (typeof window !== 'undefined' && window.JOSH_DATA) || {}; }
+  function _citySlug()  { return _jd().city_slug  || 'city'; }
+  function _cityName()  { return _jd().city_name  || 'City'; }
+  function _paramsVer() { return (_jd().parameters || {}).parameters_version || _jd().parameters_version || ''; }
+  function _joshVer()   { return _jd().josh_version || ''; }
+  function _params()    { return _jd().parameters || {}; }
+
+  // ── State ─────────────────────────────────────────────────────────────────────
+  let _projects        = [];    // normalized project objects (see file format, spec §7)
+  let _selectedId      = null;  // id of selected project (detail card + routes shown)
+  let _formMode        = null;  // null | 'new' | 'edit'
+  let _formProjectId   = null;  // id being edited (null for new)
+  let _formLat         = null;
+  let _formLng         = null;
+  let _formResult      = null;  // last analysis result while form is open
+  let _analyzeTimer    = null;  // debounce for form input → re-analysis
+  let _deleteConfirmId = null;  // project awaiting inline delete confirmation
+  let _pinMarker       = null;  // Leaflet DivIcon marker for form pin
+  let _routeLayers     = [];    // active AntPath + bottleneck Leaflet layers
+  let _idb             = null;  // IndexedDB connection (opened lazily)
+  let _restoreBanner   = false; // whether to show session-restore banner
+
+  // ── Normalize WhatIfEngine output → file-format schema ───────────────────────
+  // WhatIfEngine.evaluateProject() returns mixed camelCase/snake_case.
+  // File format (spec §7) and JOSH_DATA.projects use snake_case throughout.
+  // All code downstream of analysis uses the normalized form.
+  function _normalizeResult(r) {
+    if (!r) return null;
+    const paths = (r.paths || []).map((p, idx) => ({
+      route_id:                  String.fromCharCode(65 + idx),
+      delta_t:                   parseFloat((p.delta_t_minutes || 0).toFixed(3)),
+      flagged:                   !!p.flagged,
+      bottleneck_osmid:          String(p.bottleneckOsmid || p.bottleneck_osmid || ''),
+      bottleneck_name:           p.bottleneck_name || '',
+      bottleneck_road_type:      p.bottleneck_road_type || '',
+      bottleneck_lanes:          +(p.bottleneck_lanes || 0),
+      bottleneck_speed:          +(p.bottleneck_speed || 0),
+      effective_capacity_vph:    parseFloat((p.bottleneckEffCapVph || p.effective_capacity_vph || 0).toFixed(1)),
+      hazard_degradation_factor: parseFloat((p.hazard_degradation_factor || 1.0).toFixed(4)),
+      path_coords:               p.path_coords || p.coordinates || [],
+    }));
+    return {
+      tier:              r.tier              || 'MINISTERIAL',
+      hazard_zone:       r.hazard_zone       || 'non_fhsz',
+      in_fire_zone:      !!(r.in_fire_zone   || r.hazard_zone && r.hazard_zone !== 'non_fhsz'),
+      project_vehicles:  parseFloat((r.project_vehicles || 0).toFixed(1)),
+      egress_minutes:    parseFloat((r.egress_minutes   || 0).toFixed(1)),
+      delta_t_threshold: parseFloat((r.delta_t_threshold|| 0).toFixed(4)),
+      paths,
+    };
+  }
+
+  // ── CRUD ──────────────────────────────────────────────────────────────────────
+  function createProject(fields) {
+    const now = new Date().toISOString();
+    const p   = Object.assign({
+      id:                  _uuid(),
+      schema_v:            SCHEMA_V,
+      city_slug:           _citySlug(),
+      josh_version:        _joshVer(),
+      parameters_version:  _paramsVer(),
+      name:                '',
+      address:             '',
+      lat:                 null,
+      lng:                 null,
+      units:               50,
+      stories:             4,
+      source:              'browser',
+      created_at:          now,
+      analyzed_at:         null,
+      result:              null,
+      brief_cache:         null,
+      _handle:             null,   // FileSystemFileHandle — not serialized
+      _stale:              false,  // parameters_version mismatch flag
+    }, fields || {});
+    _projects.push(p);
+    return p;
+  }
+
+  function updateProject(id, fields) {
+    const idx = _projects.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+    _projects[idx] = Object.assign({}, _projects[idx], fields);
+    if ('result' in fields) {
+      _projects[idx].analyzed_at = new Date().toISOString();
+    }
+    return _projects[idx];
+  }
+
+  function deleteProject(id) {
+    _projects = _projects.filter(p => p.id !== id);
+    _clearHandle(id).catch(() => {});
+  }
+
+  function getProject(id) {
+    return _projects.find(p => p.id === id) || null;
+  }
+
+  function getProjects() { return _projects.slice(); }
+
+  // ── Analysis ──────────────────────────────────────────────────────────────────
+  function _runAnalysis(id, onDone) {
+    const project = getProject(id);
+    if (!project || project.lat === null || project.lng === null) {
+      if (onDone) onDone(null, 'No location set.');
+      return;
+    }
+    let engineResult;
+    try {
+      const WE = (typeof window !== 'undefined' && window.WhatIfEngine) ||
+                 (typeof WhatIfEngine !== 'undefined' && WhatIfEngine) || null;
+      if (!WE) { if (onDone) onDone(null, 'WhatIfEngine not loaded.'); return; }
+      engineResult = WE.evaluateProject(project.lat, project.lng, project.units, project.stories);
+    } catch (e) {
+      if (onDone) onDone(null, e.message);
+      return;
+    }
+    const result = _normalizeResult(engineResult);
+    updateProject(id, { result, parameters_version: _paramsVer(), brief_cache: null });
+    if (onDone) onDone(result, null);
+  }
+
+  function _scheduleAnalysis(id, onDone) {
+    clearTimeout(_analyzeTimer);
+    _analyzeTimer = setTimeout(() => _runAnalysis(id, onDone), 300);
+  }
+
+  // ── Brief renderer ────────────────────────────────────────────────────────────
+  const FHSZ_DESC  = { vhfhsz: 'Very High Fire Hazard Severity Zone', high_fhsz: 'High FHSZ', moderate_fhsz: 'Moderate FHSZ', non_fhsz: 'Not in FHSZ' };
+  const FHSZ_LEVEL = { vhfhsz: 3, high_fhsz: 2, moderate_fhsz: 1, non_fhsz: 0 };
+  const FHSZ_DEG   = { vhfhsz: 0.35, high_fhsz: 0.50, moderate_fhsz: 0.75, non_fhsz: 1.00 };
+
+  function _buildBriefInput(project) {
+    const result    = project.result || {};
+    const pr        = _params();
+    const hz        = result.hazard_zone || 'non_fhsz';
+    const ut        = +(pr.unit_threshold    || 15);
+    const maxShare  = +(pr.max_project_share || 0.05);
+    const degFactor = FHSZ_DEG[hz] || 1.00;
+
+    const lat    = +(project.lat || 0);
+    const lng    = +(project.lng || 0);
+    const latAbs = Math.abs(lat).toFixed(4).replace('.', '_');
+    const lngAbs = Math.abs(lng).toFixed(4).replace('.', '_');
+    const slug   = (project.name || '').toUpperCase()
+                     .replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, '').slice(0, 20);
+    const year   = new Date().getFullYear();
+    const caseNum = slug
+      ? `JOSH-${year}-${slug}-${lat < 0 ? 'n' : ''}${latAbs}-${lng < 0 ? 'n' : ''}${lngAbs}`
+      : `JOSH-${year}-${lat < 0 ? 'n' : ''}${latAbs}-${lng < 0 ? 'n' : ''}${lngAbs}`;
+
+    const enrichedPaths = (result.paths || []).map(function (p) {
+      const thrMin  = +(result.delta_t_threshold || 0);
+      const safeWin = thrMin > 0 && maxShare > 0 ? thrMin / maxShare : 0;
+      return {
+        path_id:                       p.bottleneck_osmid || '',
+        bottleneck_osmid:              p.bottleneck_osmid || '',
+        bottleneck_name:               p.bottleneck_name  || null,
+        bottleneck_fhsz_zone:          hz,
+        bottleneck_hcm_capacity_vph:   0,
+        bottleneck_eff_cap_vph:        +(p.effective_capacity_vph || 0),
+        bottleneck_hazard_degradation: +(p.hazard_degradation_factor || degFactor),
+        bottleneck_road_type:          p.bottleneck_road_type || null,
+        bottleneck_speed_mph:          p.bottleneck_speed   || null,
+        bottleneck_lanes:              p.bottleneck_lanes   || null,
+        delta_t_minutes:               +(p.delta_t          || 0),
+        threshold_minutes:             thrMin,
+        safe_egress_window_minutes:    safeWin,
+        max_project_share:             maxShare,
+        flagged:                       !!p.flagged,
+        project_vehicles:              +(result.project_vehicles || 0),
+        egress_minutes:                +(result.egress_minutes   || 0),
+      };
+    });
+
+    const fp         = enrichedPaths[0] || {};
+    const topThr     = +(fp.threshold_minutes || 0);
+    const topSafeWin = +(fp.safe_egress_window_minutes || 0);
+
+    return {
+      brief_input_version: 1,
+      source:              project.source === 'pipeline' ? 'pipeline' : 'whatif',
+      city_name:           _cityName(),
+      city_slug:           _citySlug(),
+      case_number:         caseNum,
+      eval_date:           new Date().toISOString().slice(0, 10),
+      audit_text:          '',
+      audit_filename:      '',
+      project: {
+        name:    project.name    || '',
+        address: project.address || '',
+        lat,
+        lon:     lng,
+        units:   project.units   || 0,
+        stories: project.stories || null,
+        apn:     '',
+      },
+      analysis: {
+        applicability_met:         (project.units || 0) >= ut,
+        dwelling_units:            project.units  || 0,
+        unit_threshold:            ut,
+        fhsz_flagged:              hz !== 'non_fhsz',
+        fhsz_desc:                 FHSZ_DESC[hz]  || hz,
+        fhsz_level:                FHSZ_LEVEL[hz] || 0,
+        hazard_zone:               hz,
+        mobilization_rate:         +(pr.mobilization_rate || 0.90),
+        hazard_degradation_factor: degFactor,
+        serving_route_count:       (result.paths || []).length,
+        route_radius_miles:        0.5,
+        routes_trigger_analysis:   (result.paths || []).length > 0,
+        delta_t_triggered:         result.tier === 'DISCRETIONARY',
+        egress_minutes:            +(result.egress_minutes || 0),
+      },
+      result: {
+        tier:                       result.tier || '',
+        hazard_zone:                hz,
+        project_vehicles:           +(result.project_vehicles || 0),
+        max_delta_t_minutes:        Math.max(...(result.paths || []).map(p => +(p.delta_t || 0)), 0),
+        threshold_minutes:          topThr,
+        safe_egress_window_minutes: topSafeWin,
+        max_project_share:          maxShare,
+        serving_paths_count:        (result.paths || []).length,
+        egress_minutes:             +(result.egress_minutes || 0),
+        parameters_version:         project.parameters_version || '',
+        analyzed_at:                project.analyzed_at || new Date().toISOString().slice(0, 10),
+        determination_reason:       '',
+        triggered:                  result.tier === 'DISCRETIONARY',
+        paths:                      enrichedPaths,
+      },
+      parameters: pr,
+    };
+  }
+
+  function _openBrief(project) {
+    if (typeof window === 'undefined' || !window.BriefRenderer) {
+      _showError('Brief renderer not loaded — try reloading the page.'); return;
+    }
+    if (!window.joshBrief) {
+      _showError('Brief modal not available — try reloading the page.'); return;
+    }
+    // Use cached HTML if available and result not stale
+    let html = project.brief_cache;
+    if (!html) {
+      try {
+        const briefInput = _buildBriefInput(project);
+        html = window.BriefRenderer.render(briefInput);
+        updateProject(project.id, { brief_cache: html });
+      } catch (e) {
+        _showError('Could not generate brief: ' + e.message); return;
+      }
+    }
+    const caseNum  = _buildBriefInput(project).case_number || 'brief';
+    const filename = caseNum.toLowerCase().replace(/[^a-z0-9_-]/g, '_') + '.html';
+    window.joshBrief.show(html, filename);
+  }
+
+  // ── FSAPI — FSAPI detection ───────────────────────────────────────────────────
+  const _hasFSAPI = (function () {
+    try { return typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'; }
+    catch (_) { return false; }
+  }());
+
+  // ── IndexedDB handle storage ──────────────────────────────────────────────────
+  function _openIdb() {
+    if (_idb) return Promise.resolve(_idb);
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') { reject(new Error('no IndexedDB')); return; }
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = e => {
+        e.target.result.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  async function _storeHandle(id, handle) {
+    try {
+      const db    = await _openIdb();
+      const tx    = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(handle, id);
+      await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = e => rej(e.target.error); });
+    } catch (e) { /* IndexedDB unavailable on file:// in some browsers — silent */ }
+  }
+
+  async function _clearHandle(id) {
+    try {
+      const db = await _openIdb();
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(id);
+    } catch (_) {}
+  }
+
+  async function _loadAllHandles() {
+    try {
+      const db  = await _openIdb();
+      const tx  = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const result = new Map();
+      await new Promise((res, rej) => {
+        const req = store.openCursor();
+        req.onsuccess = e => {
+          const cursor = e.target.result;
+          if (!cursor) { res(); return; }
+          result.set(cursor.key, cursor.value);
+          cursor.continue();
+        };
+        req.onerror = e => rej(e.target.error);
+      });
+      return result;
+    } catch (_) { return new Map(); }
+  }
+
+  // ── Serialize / deserialize (per-project file format, spec §7) ───────────────
+  function _serialize(project) {
+    const out = {
+      schema_v:           SCHEMA_V,
+      city_slug:          project.city_slug   || _citySlug(),
+      josh_version:       project.josh_version || _joshVer(),
+      parameters_version: project.parameters_version || _paramsVer(),
+      name:               project.name    || '',
+      address:            project.address || '',
+      lat:                project.lat,
+      lng:                project.lng,
+      units:              project.units,
+      stories:            project.stories,
+      source:             project.source  || 'browser',
+      created_at:         project.created_at  || new Date().toISOString(),
+      analyzed_at:        project.analyzed_at || null,
+      result:             project.result  || null,
+      brief_cache:        project.brief_cache || null,
+    };
+    return JSON.stringify(out, null, 2);
+  }
+
+  function _deserialize(json) {
+    let obj;
+    try { obj = JSON.parse(json); }
+    catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+
+    if (!obj.schema_v || obj.schema_v > SCHEMA_V) {
+      throw new Error('Unsupported schema_v: ' + obj.schema_v);
+    }
+    const mySlug = _citySlug();
+    if (mySlug && mySlug !== 'city' && obj.city_slug && obj.city_slug !== mySlug) {
+      throw new Error('city_slug mismatch: file is for "' + obj.city_slug + '", this map is "' + mySlug + '"');
+    }
+
+    // Stale detection: result parameters_version vs current
+    const stale = !!(obj.result && obj.parameters_version &&
+                     _paramsVer() && obj.parameters_version !== _paramsVer());
+
+    return Object.assign({
+      id:                 _uuid(),
+      schema_v:           SCHEMA_V,
+      city_slug:          obj.city_slug   || mySlug,
+      josh_version:       obj.josh_version || '',
+      parameters_version: obj.parameters_version || '',
+      name:               obj.name    || '',
+      address:            obj.address || '',
+      lat:                obj.lat     != null ? +obj.lat : null,
+      lng:                obj.lng     != null ? +obj.lng : null,
+      units:              +(obj.units   || 50),
+      stories:            +(obj.stories || 4),
+      source:             obj.source   || 'browser',
+      created_at:         obj.created_at  || new Date().toISOString(),
+      analyzed_at:        obj.analyzed_at || null,
+      result:             obj.result  || null,
+      brief_cache:        obj.brief_cache || null,
+      _handle:            null,
+      _stale:             stale,
+    });
+  }
+
+  // ── File I/O ──────────────────────────────────────────────────────────────────
+  async function openFile() {
+    if (_hasFSAPI) {
+      try {
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          types: [{ description: 'JOSH Project', accept: { 'application/json': ['.json'] } }],
+        });
+        let firstId = null;
+        for (const handle of handles) {
+          const id = await _loadFromHandle(handle);
+          if (id && !firstId) firstId = id;
+        }
+        if (firstId) selectProject(firstId);
+        _render();
+      } catch (e) {
+        if (e.name !== 'AbortError') _showError('Could not open file: ' + e.message);
+      }
+    } else {
+      _inputFileLoad();
+    }
+  }
+
+  async function _loadFromHandle(handle) {
+    try {
+      const file    = await handle.getFile();
+      const text    = await file.text();
+      const project = _deserialize(text);
+      // Dedup: replace existing project with same id if already in list
+      const existIdx = _projects.findIndex(p => p.id === project.id);
+      project._handle = handle;
+      if (existIdx !== -1) { _projects[existIdx] = project; }
+      else                  { _projects.push(project); }
+      await _storeHandle(project.id, handle);
+      if (project._stale) {
+        _runAnalysis(project.id, async () => {
+          await _writeToHandle(project.id);
+          _render();
+        });
+      }
+      return project.id;
+    } catch (e) {
+      _showError('Could not load file: ' + e.message);
+      return null;
+    }
+  }
+
+  async function _writeToHandle(id) {
+    const project = getProject(id);
+    if (!project || !project._handle) return false;
+    try {
+      const writable = await project._handle.createWritable();
+      await writable.write(_serialize(project));
+      await writable.close();
+      return true;
+    } catch (_) { return false; }
+  }
+
+  async function saveFile(id) {
+    const project = getProject(id);
+    if (!project) return;
+    if (project._handle) {
+      const ok = await _writeToHandle(id);
+      if (ok) return;
+    }
+    await saveAsFile(id);
+  }
+
+  async function saveAsFile(id) {
+    const project = getProject(id);
+    if (!project) return;
+    const filename = _citySlug() + '_' + _slugify(project.name || project.id) + '.json';
+    if (_hasFSAPI) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'JOSH Project', accept: { 'application/json': ['.json'] } }],
+        });
+        updateProject(id, {});  // bump analyzed_at if needed
+        const project2 = getProject(id);
+        project2._handle = handle;
+        await _writeToHandle(id);
+        await _storeHandle(id, handle);
+      } catch (e) {
+        if (e.name !== 'AbortError') _blobDownload(_serialize(project), filename);
+      }
+    } else {
+      _blobDownload(_serialize(project), filename);
+    }
+  }
+
+  function _blobDownload(text, filename) {
+    if (typeof document === 'undefined') return;
+    const blob = new Blob([text], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function _inputFileLoad() {
+    if (typeof document === 'undefined') return;
+    const inp    = document.createElement('input');
+    inp.type     = 'file';
+    inp.accept   = '.json';
+    inp.multiple = true;
+    inp.onchange = () => {
+      let firstId = null;
+      Array.from(inp.files || []).forEach(file => {
+        const reader   = new FileReader();
+        reader.onload  = e => {
+          try {
+            const project = _deserialize(e.target.result);
+            const existIdx = _projects.findIndex(p => p.id === project.id);
+            if (existIdx !== -1) _projects[existIdx] = project;
+            else _projects.push(project);
+            if (!firstId) { firstId = project.id; selectProject(firstId); }
+            _render();
+          } catch (err) { _showError(err.message); }
+        };
+        reader.readAsText(file);
+      });
+    };
+    inp.click();
+  }
+
+  // ── YAML export ───────────────────────────────────────────────────────────────
+  function _yamlStr(s) {
+    const str = String(s || '');
+    if (/[:#\[\]{}&*?|<>=!%@`,'"]/.test(str) || str.trim() !== str) {
+      return '"' + str.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+    }
+    return str;
+  }
+
+  function _toYaml() {
+    const slug  = _citySlug();
+    const name  = _cityName();
+    const lines = [];
+    lines.push('# ' + name + ' demo projects — exported from JOSH Sidebar');
+    lines.push('# To use: copy to josh-pipeline/projects/' + slug + '_demo.yaml');
+    lines.push('# Then run: JOSH_DIR=/path/to/josh uv run python acquire.py run --city "' + name + '"');
+    lines.push('');
+    lines.push('projects:');
+    const pinned = _projects.filter(p => p.lat !== null && p.lng !== null);
+    if (pinned.length === 0) lines.push('  # (no projects with coordinates)');
+    for (const p of pinned) {
+      lines.push('  - name: ' + _yamlStr(p.name || 'Untitled'));
+      if (p.address) lines.push('    address: ' + _yamlStr(p.address));
+      lines.push('    lat: ' + (+p.lat).toFixed(7));
+      lines.push('    lon: ' + (+p.lng).toFixed(7));
+      lines.push('    units: ' + (p.units || 50));
+      lines.push('    stories: ' + (p.stories || 4));
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  function exportYaml() {
+    _blobDownload(_toYaml(), _citySlug() + '_demo.yaml');
+  }
+
+  // ── Map bridge (no-ops until Phase 3 wires window._joshMap) ──────────────────
+  function _getMap() {
+    if (typeof window === 'undefined') return null;
+    return window._joshMap || null;
+  }
+
+  function _clearRoutes() {
+    const map = _getMap();
+    if (map) {
+      _routeLayers.forEach(l => { try { map.removeLayer(l); } catch (_) {} });
+    }
+    _routeLayers = [];
+  }
+
+  function _drawRoutes(id) {
+    _clearRoutes();
+    const project = getProject(id);
+    if (!project || !project.result) return;
+    const map = _getMap();
+    if (!map) return;
+    const tier  = project.result.tier || '';
+    const color = TIER_COLOR[tier] || '#555';
+    const bkMap = _jd().graph ? (function () {
+      const m = new Map();
+      (_jd().graph.edges || []).forEach(e => m.set(String(e.osmid), e));
+      return m;
+    }()) : new Map();
+
+    (project.result.paths || []).forEach(path => {
+      const coords = path.path_coords || path.coordinates || [];
+      if (coords.length < 2) return;
+      // AntPath for full route
+      if (typeof window.L !== 'undefined' && typeof window.L.antPath === 'function') {
+        const ap = window.L.antPath(coords, {
+          color, weight: 3, opacity: 0.8, delay: 1200, dashArray: [10, 20],
+        });
+        ap.addTo(map);
+        _routeLayers.push(ap);
+      }
+      // Thick bottleneck segment overlay
+      const bkEdge = bkMap.get(String(path.bottleneck_osmid || ''));
+      if (bkEdge && bkEdge.geom && bkEdge.geom.length >= 2 && typeof window.L !== 'undefined') {
+        const bl = window.L.polyline(bkEdge.geom, { color, weight: 6, opacity: 0.9 });
+        bl.addTo(map);
+        _routeLayers.push(bl);
+      }
+    });
+
+    // Pan to fit routes
+    if (_routeLayers.length > 0) {
+      try {
+        const allCoords = (project.result.paths || []).flatMap(p => p.path_coords || p.coordinates || []);
+        if (allCoords.length > 0) map.fitBounds(allCoords, { padding: [20, 20] });
+      } catch (_) {}
+    }
+  }
+
+  function _enterPinMode() {
+    if (typeof window !== 'undefined') window._joshPinModeActive = true;
+    const map = _getMap();
+    if (map) {
+      try { map.getContainer().style.cursor = 'crosshair'; } catch (_) {}
+    }
+  }
+
+  function _exitPinMode() {
+    if (typeof window !== 'undefined') window._joshPinModeActive = false;
+    const map = _getMap();
+    if (map) {
+      try { map.getContainer().style.cursor = ''; } catch (_) {}
+    }
+  }
+
+  function _placePinMarker(lat, lng) {
+    _clearPinMarker();
+    const map = _getMap();
+    if (!map || typeof window.L === 'undefined') return;
+    const icon = window.L.divIcon({
+      className: '',
+      html: '<div style="width:18px;height:18px;border-radius:50%;background:rgba(41,128,185,0.25);' +
+            'border:2px dashed #2980b9;box-sizing:border-box;"></div>',
+      iconSize:   [18, 18],
+      iconAnchor: [9, 9],
+    });
+    _pinMarker = window.L.marker([lat, lng], {
+      icon, draggable: true, zIndexOffset: 500,
+    }).addTo(map);
+    _pinMarker.on('dragend', function () {
+      const ll = _pinMarker.getLatLng();
+      onPinPlaced(ll.lat, ll.lng);
+    });
+  }
+
+  function _clearPinMarker() {
+    const map = _getMap();
+    if (_pinMarker && map) {
+      try { map.removeLayer(_pinMarker); } catch (_) {}
+    }
+    _pinMarker = null;
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────────
+  function init() {
+    // Load pipeline-seeded projects from JOSH_DATA.projects (source: "pipeline")
+    const seeds = _jd().projects || [];
+    for (const seed of seeds) {
+      const exists = _projects.find(p => p.id === seed.id);
+      if (exists) continue;
+      _projects.push({
+        id:                  seed.id || _uuid(),
+        schema_v:            SCHEMA_V,
+        city_slug:           seed.city_slug  || _citySlug(),
+        josh_version:        _joshVer(),
+        parameters_version:  _paramsVer(),
+        name:                seed.name    || '',
+        address:             seed.address || '',
+        lat:                 seed.lat     != null ? +seed.lat : null,
+        lng:                 seed.lng     != null ? +seed.lng : null,
+        units:               +(seed.units   || 50),
+        stories:             +(seed.stories || 4),
+        source:              'pipeline',
+        created_at:          new Date().toISOString(),
+        analyzed_at:         new Date().toISOString(),
+        result:              seed.result  || null,
+        brief_cache:         seed.brief_cache || null,
+        _handle:             null,
+        _stale:              false,
+      });
+    }
+
+    _render();
+
+    // Attempt session restore from IndexedDB (async, non-blocking)
+    if (_hasFSAPI) {
+      _loadAllHandles().then(handles => {
+        if (handles.size === 0) return;
+        // Filter out handles whose IDs are already in the list (pipeline seeds)
+        const newHandles = new Map([...handles].filter(([id]) =>
+          !_projects.find(p => p.id === id)
+        ));
+        if (newHandles.size === 0) return;
+        _restoreBanner = true;
+        _render();
+        // Store handles map for restore callback
+        window._joshSidebarRestoreHandles = newHandles;
+      }).catch(() => {});
+    }
+  }
+
+  async function _doSessionRestore() {
+    _restoreBanner = false;
+    const handles = window._joshSidebarRestoreHandles || new Map();
+    window._joshSidebarRestoreHandles = null;
+    for (const [id, handle] of handles) {
+      try {
+        await handle.requestPermission({ mode: 'readwrite' });
+        await _loadFromHandle(handle);
+      } catch (e) {
+        _showError('Could not restore ' + (handle.name || id) + ': ' + e.message);
+      }
+    }
+    _render();
+  }
+
+  function _dismissRestore() {
+    _restoreBanner = false;
+    window._joshSidebarRestoreHandles = null;
+    _render();
+  }
+
+  // ── onPinPlaced (called by map click handler from demo.py) ───────────────────
+  function onPinPlaced(lat, lng) {
+    _formLat = lat;
+    _formLng = lng;
+    _placePinMarker(lat, lng);
+    _exitPinMode();
+    // If form is open, run/schedule analysis for the form project
+    if (_formMode && _formProjectId) {
+      const project = getProject(_formProjectId);
+      if (project) {
+        updateProject(_formProjectId, { lat, lng });
+        _scheduleAnalysis(_formProjectId, result => {
+          _formResult = result;
+          _render();
+        });
+      }
+    }
+    _render();
+  }
+
+  // ── Selection ────────────────────────────────────────────────────────────────
+  function selectProject(id) {
+    if (_formMode) cancelForm();
+    if (_selectedId === id) {
+      // Click selected row again → deselect
+      _selectedId = null;
+      _clearRoutes();
+    } else {
+      _selectedId = id;
+      _deleteConfirmId = null;
+      if (id) _drawRoutes(id);
+      else _clearRoutes();
+    }
+    _render();
+  }
+
+  // ── Form ──────────────────────────────────────────────────────────────────────
+  function openNewForm() {
+    if (_formMode === 'new') return;
+    cancelForm();                     // clean up any previous form state
+    _formMode      = 'new';
+    _selectedId    = null;
+    _clearRoutes();
+    _formLat       = null;
+    _formLng       = null;
+    _formResult    = null;
+    // Create a temp project so analysis has an id to update
+    const tmp = createProject({ source: 'browser' });
+    _formProjectId = tmp.id;
+    _enterPinMode();
+    _render();
+  }
+
+  function openEditForm(id) {
+    cancelForm();
+    const project  = getProject(id);
+    if (!project) return;
+    _formMode      = 'edit';
+    _formProjectId = id;
+    _formLat       = project.lat;
+    _formLng       = project.lng;
+    _formResult    = project.result;
+    if (_formLat !== null) _placePinMarker(_formLat, _formLng);
+    _render();
+  }
+
+  function cancelForm() {
+    if (_formMode === 'new' && _formProjectId) {
+      // Remove the temp project created for the form
+      deleteProject(_formProjectId);
+    }
+    _exitPinMode();
+    _clearPinMarker();
+    _clearRoutes();
+    _formMode      = null;
+    _formProjectId = null;
+    _formLat       = null;
+    _formLng       = null;
+    _formResult    = null;
+    _deleteConfirmId = null;
+  }
+
+  function _submitForm() {
+    if (typeof document === 'undefined') return;
+    const name    = (_el('josh-sb-f-name')    || {}).value || '';
+    const address = (_el('josh-sb-f-addr')    || {}).value || '';
+    const units   = parseInt((_el('josh-sb-f-units')  || {}).value, 10) || 50;
+    const stories = parseInt((_el('josh-sb-f-stories') || {}).value, 10) || 0;
+    const lat     = _formLat;
+    const lng     = _formLng;
+
+    if (lat === null) { _showError('Place a pin on the map first.'); return; }
+    if (!_formProjectId) return;
+
+    if (_formMode === 'new') {
+      updateProject(_formProjectId, { name, address, units, stories, lat, lng });
+      _runAnalysis(_formProjectId, result => {
+        updateProject(_formProjectId, { result, brief_cache: null });
+        const id = _formProjectId;
+        _exitPinMode();
+        _clearPinMarker();
+        _formMode = null;
+        _formProjectId = null;
+        _formLat = _formLng = _formResult = null;
+        _selectedId = id;
+        _drawRoutes(id);
+        _render();
+        // Prompt Save As
+        saveAsFile(id).then(() => _render());
+      });
+    } else {
+      updateProject(_formProjectId, { name, address, units, stories, lat, lng, brief_cache: null });
+      const id = _formProjectId;
+      _exitPinMode();
+      _clearPinMarker();
+      _formMode = null;
+      _formProjectId = null;
+      _formLat = _formLng = _formResult = null;
+      _selectedId = id;
+      _drawRoutes(id);
+      _render();
+      saveFile(id).then(() => _render());
+    }
+  }
+
+  // ── Delete with inline confirmation ──────────────────────────────────────────
+  function _confirmDelete(id) {
+    _deleteConfirmId = id;
+    _render();
+  }
+
+  function _doDelete(id) {
+    deleteProject(id);
+    if (_selectedId === id) { _selectedId = null; _clearRoutes(); }
+    _deleteConfirmId = null;
+    _render();
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────────
+  const TIER_ABBR  = { 'MINISTERIAL': 'MIN', 'MINISTERIAL WITH STANDARD CONDITIONS': 'COND', 'DISCRETIONARY': 'DISC' };
+  const TIER_COLOR = { 'MINISTERIAL': '#27ae60', 'MINISTERIAL WITH STANDARD CONDITIONS': '#e67e22', 'DISCRETIONARY': '#e74c3c' };
+
+  function _esc(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _btn(bg, fg, bdr) {
+    bdr = bdr || bg;
+    return 'background:' + bg + ';color:' + fg + ';border:1px solid ' + bdr + ';' +
+           'border-radius:4px;padding:5px 10px;font-size:12px;cursor:pointer;' +
+           'font-family:system-ui,sans-serif;white-space:nowrap;';
+  }
+
+  function _inp() {
+    return 'width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;' +
+           'padding:5px 7px;font-size:12px;font-family:system-ui,sans-serif;';
+  }
+
+  function _el(id) { return typeof document !== 'undefined' ? document.getElementById(id) : null; }
+
+  function _sb() { return _el('josh-sidebar'); }
+
+  function _showError(msg) {
+    const sb = _sb();
+    if (!sb) { console.error('[joshSidebar]', msg); return; }
+    let el = _el('josh-sb-error');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'josh-sb-error';
+      el.style.cssText = 'padding:8px 14px;color:#c0392b;font-size:11px;' +
+                         'background:#fdf3f3;border-top:1px solid #f5c6c6;flex-shrink:0;';
+      sb.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = '';
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.style.display = 'none'; }, 5000);
+  }
+
+  function _uuid() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  function _slugify(s) {
+    return String(s || '').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '').slice(0, 30) || 'project';
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  function _render() {
+    if (typeof document === 'undefined') return;
+    const sb = _sb();
+    if (!sb) return;
+
+    sb.innerHTML = _renderHeader() + _renderRestoreBanner() + _renderList() +
+                   (_formMode ? _renderForm() : _renderDetail()) + _renderFooter();
+
+    _wireFormListeners();
+  }
+
+  function _renderHeader() {
+    return '<div style="background:#1c4a6e;color:#fff;padding:12px 14px;flex-shrink:0;">' +
+      '<div style="font-size:11px;opacity:0.65;margin-bottom:2px;">JOSH · Evacuation Capacity Analysis</div>' +
+      '<div style="font-size:15px;font-weight:700;margin-bottom:10px;">' + _esc(_cityName()) + '</div>' +
+      '<div style="display:flex;gap:6px;">' +
+        '<button onclick="joshSidebar_newProject()" style="' + _btn('#2980b9','#fff') + '">+ New</button>' +
+        '<button onclick="joshSidebar_openFile()" style="' + _btn('rgba(255,255,255,0.15)','#fff','rgba(255,255,255,0.3)') + '">Open\u2026</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _renderRestoreBanner() {
+    if (!_restoreBanner) return '';
+    return '<div style="background:#fff3cd;padding:8px 14px;font-size:11px;border-bottom:1px solid #ffc107;flex-shrink:0;">' +
+      'Restore projects from last session? ' +
+      '<button onclick="joshSidebar_doRestore()" style="' + _btn('#1c4a6e','#fff') + 'margin-right:4px;">Yes</button>' +
+      '<button onclick="joshSidebar_dismissRestore()" style="' + _btn('#f5f5f5','#555','#ccc') + '">No</button>' +
+    '</div>';
+  }
+
+  function _renderList() {
+    const maxH = _formMode ? '30vh' : '40vh';
+    let inner;
+    if (_projects.length === 0) {
+      inner = '<div style="padding:20px 14px;color:#aaa;font-size:12px;text-align:center;">' +
+              'No projects yet.<br>Click <b>+ New</b> or <b>Open\u2026</b>.</div>';
+    } else {
+      inner = _projects.map(p => {
+        const tier    = p.result ? p.result.tier : null;
+        const abbr    = tier ? (TIER_ABBR[tier] || tier.slice(0, 4)) : '\u2014';
+        const color   = tier ? (TIER_COLOR[tier] || '#888') : '#ccc';
+        const sel     = p.id === _selectedId;
+        const bg      = sel ? '#f0f7ff' : 'transparent';
+        const dotFill = tier ? color : (p.lat !== null ? '#aaa' : '#ddd');
+        const dot     = sel
+          ? '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="' + dotFill + '"/></svg>'
+          : '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="' + dotFill + '" stroke-width="1.5"/></svg>';
+        return '<div onclick="joshSidebar_select(\'' + p.id + '\')" style="' +
+          'display:flex;align-items:center;gap:6px;padding:7px 12px 7px 14px;' +
+          'border-bottom:1px solid #f0f0f0;cursor:pointer;background:' + bg + ';">' +
+          '<span style="flex-shrink:0;">' + dot + '</span>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" ' +
+            'title="' + _esc(p.name || '\u2014') + '">' + _esc(p.name || '<em style="color:#aaa">Untitled</em>') + '</span>' +
+          '<span style="font-size:11px;font-weight:700;color:' + color + ';flex-shrink:0;">' + _esc(abbr) + '</span>' +
+        '</div>';
+      }).join('');
+    }
+    return '<div style="overflow-y:auto;max-height:' + maxH + ';border-bottom:1px solid #e8e8e8;flex-shrink:0;">' +
+           inner + '</div>';
+  }
+
+  function _renderDetail() {
+    if (!_selectedId) return '<div style="flex:1;"></div>';
+    const p = getProject(_selectedId);
+    if (!p) return '<div style="flex:1;"></div>';
+    const r = p.result;
+
+    let html = '<div style="flex:1;overflow-y:auto;padding:14px;">';
+
+    // Project name
+    html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">' + _esc(p.name || 'Untitled') + '</div>';
+
+    // Stale notice
+    if (p._stale) {
+      html += '<div style="font-size:11px;color:#856404;background:#fff3cd;padding:4px 8px;' +
+              'border-radius:3px;margin-bottom:8px;">\u2139 Re-analyzed \u2014 parameters updated.</div>';
+    }
+
+    if (!r) {
+      html += '<div style="color:#aaa;font-size:12px;">No analysis result yet.</div>';
+    } else {
+      const tier    = r.tier;
+      const color   = TIER_COLOR[tier]  || '#888';
+      const fhszLbl = FHSZ_DESC[r.hazard_zone] || r.hazard_zone || '';
+
+      // Tier block
+      html += '<div style="background:' + color + ';color:#fff;padding:8px 12px;border-radius:5px;' +
+              'font-size:12px;font-weight:700;margin-bottom:10px;">' + _esc(tier) + '</div>';
+
+      // Summary line
+      html += '<div style="font-size:12px;color:#555;margin-bottom:8px;">' +
+              _esc(fhszLbl) + ' &nbsp;&middot;&nbsp; ' + _esc(String(p.units)) + ' units</div>';
+
+      // Vehicles + egress
+      html += '<div style="font-size:12px;color:#555;margin-bottom:8px;">' +
+              _esc(String(r.project_vehicles)) + ' vehicles';
+      if (r.egress_minutes > 0) {
+        html += ' &nbsp;+&nbsp; ' + r.egress_minutes.toFixed(1) + ' min egress penalty';
+      }
+      html += '</div>';
+
+      // Routes
+      if ((r.paths || []).length === 0) {
+        html += '<div style="font-size:12px;color:#e74c3c;margin-bottom:8px;">' +
+                'No evacuation routes found near this location.</div>';
+      } else {
+        (r.paths || []).forEach(path => {
+          const ok       = !path.flagged;
+          const dColor   = ok ? '#27ae60' : '#e74c3c';
+          const dIcon    = ok ? '\u2713' : '\u25b2';
+          const thrLabel = !ok ? '> ' + (r.delta_t_threshold || 0).toFixed(2) + ' min max' : '';
+          html += '<div style="margin-bottom:6px;">' +
+            '<div style="display:flex;align-items:center;gap:6px;">' +
+              '<span style="font-size:12px;font-weight:600;">Route ' + _esc(path.route_id) + '</span>' +
+              '<span style="font-size:12px;color:' + dColor + ';">' + path.delta_t.toFixed(2) + ' min ' + dIcon + '</span>' +
+            '</div>';
+          if (thrLabel) {
+            html += '<div style="font-size:11px;color:#e74c3c;margin-left:8px;">' + _esc(thrLabel) + '</div>';
+          }
+          if (path.bottleneck_name) {
+            html += '<div style="font-size:11px;color:#777;margin-left:8px;">' +
+                    'Bottleneck: ' + _esc(path.bottleneck_name) + '</div>';
+          }
+          html += '</div>';
+        });
+      }
+
+      // View Report button
+      html += '<button onclick="joshSidebar_openBrief(\'' + _selectedId + '\')" ' +
+              'style="width:100%;margin-bottom:6px;' + _btn('#1c4a6e','#fff') + '">View Report</button>';
+    }
+
+    // Edit / Delete
+    if (_deleteConfirmId === _selectedId) {
+      html += '<div style="font-size:12px;margin-top:6px;padding:8px;background:#fff3f3;border-radius:4px;">' +
+              'Delete <b>' + _esc(p.name || 'Untitled') + '</b>?' +
+              ' <button onclick="joshSidebar_doDelete(\'' + _selectedId + '\')" style="' + _btn('#e74c3c','#fff') + 'margin:0 4px;">Yes</button>' +
+              '<button onclick="joshSidebar_cancelDelete()" style="' + _btn('#f5f5f5','#555','#ccc') + '">Cancel</button>' +
+              '</div>';
+    } else {
+      html += '<div style="display:flex;gap:6px;margin-top:6px;">' +
+              '<button onclick="joshSidebar_edit(\'' + _selectedId + '\')" style="flex:1;' + _btn('#f5f5f5','#555','#ccc') + '">Edit</button>' +
+              '<button onclick="joshSidebar_confirmDelete(\'' + _selectedId + '\')" style="flex:1;' + _btn('#f5f5f5','#e74c3c','#ccc') + '">Delete</button>' +
+              '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function _renderForm() {
+    const project    = _formProjectId ? getProject(_formProjectId) : null;
+    const heading    = _formMode === 'edit' ? 'Edit Project' : 'New Project';
+    const nameVal    = project ? _esc(project.name || '') : '';
+    const addrVal    = project ? _esc(project.address  || '') : '';
+    const unitsVal   = project ? (project.units   || 50)  : 50;
+    const storiesVal = project ? (project.stories || 4)   : 4;
+    const hasPin     = _formLat !== null;
+    const coordText  = hasPin
+      ? _formLat.toFixed(5) + '\u00b0 N, ' + Math.abs(_formLng).toFixed(5) + '\u00b0 W'
+      : 'Click map to locate';
+
+    let html = '<div style="flex:1;overflow-y:auto;padding:14px;">';
+    html += '<div style="font-size:13px;font-weight:700;margin-bottom:12px;">' + heading + '</div>';
+
+    // Name
+    html += '<label style="display:block;margin-bottom:10px;">' +
+            '<div style="font-size:11px;color:#777;margin-bottom:3px;">Name (optional)</div>' +
+            '<input id="josh-sb-f-name" value="' + nameVal + '" placeholder="Project name" style="' + _inp() + '"></label>';
+
+    // Address
+    html += '<label style="display:block;margin-bottom:10px;">' +
+            '<div style="font-size:11px;color:#777;margin-bottom:3px;">Address (optional)</div>' +
+            '<input id="josh-sb-f-addr" value="' + addrVal + '" placeholder="123 Main St" style="' + _inp() + '"></label>';
+
+    // Units + Stories
+    html += '<div style="display:flex;gap:8px;margin-bottom:10px;">' +
+            '<label style="flex:1;">' +
+              '<div style="font-size:11px;color:#777;margin-bottom:3px;">Units</div>' +
+              '<input id="josh-sb-f-units" type="number" min="1" max="9999" value="' + unitsVal + '" style="' + _inp() + '"></label>' +
+            '<label style="flex:1;">' +
+              '<div style="font-size:11px;color:#777;margin-bottom:3px;">Stories</div>' +
+              '<input id="josh-sb-f-stories" type="number" min="0" max="60" value="' + storiesVal + '" style="' + _inp() + '"></label>' +
+            '</div>';
+
+    // Location
+    html += '<div style="margin-bottom:12px;">' +
+            '<div style="font-size:11px;color:#777;margin-bottom:4px;">Location</div>' +
+            '<div id="josh-sb-f-coords" style="font-size:12px;color:' + (hasPin ? '#2c3e50' : '#aaa') + ';margin-bottom:6px;">' +
+            _esc(coordText) + (hasPin ? ' <button onclick="joshSidebar_rePin()" style="' + _btn('#f5f5f5','#555','#ccc') + 'padding:2px 6px;font-size:11px;">Move</button>' : '') +
+            '</div>' +
+            (!hasPin ? '<div style="font-size:11px;color:#2980b9;">\u25ba Click anywhere on the map to place pin.</div>' : '') +
+            '</div>';
+
+    // Inline result preview
+    if (_formResult) {
+      const tier  = _formResult.tier;
+      const color = TIER_COLOR[tier] || '#888';
+      html += '<div style="background:' + color + ';color:#fff;padding:6px 10px;border-radius:4px;' +
+              'font-size:12px;font-weight:700;margin-bottom:8px;">' + _esc(tier) + '</div>';
+      (_formResult.paths || []).forEach(path => {
+        const ok    = !path.flagged;
+        const dClr  = ok ? '#27ae60' : '#e74c3c';
+        html += '<div style="font-size:12px;color:' + dClr + ';margin-bottom:4px;">' +
+                'Route ' + _esc(path.route_id) + ': ' + path.delta_t.toFixed(2) + ' min ' +
+                (ok ? '\u2713' : '\u25b2') + '</div>';
+      });
+    } else if (hasPin) {
+      html += '<div style="font-size:11px;color:#aaa;margin-bottom:8px;">Analyzing\u2026</div>';
+    }
+
+    // Actions
+    html += '<div style="display:flex;gap:6px;margin-top:4px;">' +
+            '<button onclick="joshSidebar_submitForm()" style="flex:1;' + _btn('#1c4a6e','#fff') + '">Save</button>' +
+            '<button onclick="joshSidebar_cancelForm()" style="flex:1;' + _btn('#f5f5f5','#555','#ccc') + '">Cancel</button>' +
+            '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function _renderFooter() {
+    const p = _selectedId ? getProject(_selectedId) : null;
+    if (!p || !p.result) return '';
+    return '<div style="padding:10px 14px;border-top:1px solid #eee;flex-shrink:0;display:flex;flex-wrap:wrap;gap:6px;">' +
+      '<button onclick="joshSidebar_save(\'' + _selectedId + '\')" style="flex:1;min-width:60px;' + _btn('#1c4a6e','#fff') + '">Save</button>' +
+      '<button onclick="joshSidebar_saveAs(\'' + _selectedId + '\')" style="flex:1;min-width:70px;' + _btn('#f5f5f5','#555','#ccc') + '">Save As\u2026</button>' +
+      '<button onclick="joshSidebar_exportYaml()" style="width:100%;' + _btn('#f5f5f5','#555','#ccc') + '">Export for pipeline</button>' +
+    '</div>';
+  }
+
+  // ── Wire live listeners on form inputs ────────────────────────────────────────
+  function _wireFormListeners() {
+    if (!_formMode || !_formProjectId) return;
+    ['josh-sb-f-units', 'josh-sb-f-stories'].forEach(elId => {
+      const el = _el(elId);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        if (!_formProjectId) return;
+        const units   = parseInt((_el('josh-sb-f-units')   || {}).value, 10) || 50;
+        const stories = parseInt((_el('josh-sb-f-stories') || {}).value, 10) || 0;
+        updateProject(_formProjectId, { units, stories });
+        if (_formLat !== null) {
+          _scheduleAnalysis(_formProjectId, result => {
+            _formResult = result;
+            _render();
+          });
+        }
+      });
+    });
+  }
+
+  // ── Global onclick handlers (inline HTML attributes → window globals) ─────────
+  if (typeof document !== 'undefined') {
+    window.joshSidebar_newProject     = () => openNewForm();
+    window.joshSidebar_openFile       = () => openFile();
+    window.joshSidebar_select         = id => selectProject(id);
+    window.joshSidebar_edit           = id => openEditForm(id);
+    window.joshSidebar_confirmDelete  = id => _confirmDelete(id);
+    window.joshSidebar_cancelDelete   = ()  => { _deleteConfirmId = null; _render(); };
+    window.joshSidebar_doDelete       = id => _doDelete(id);
+    window.joshSidebar_openBrief      = id => { const p = getProject(id); if (p) _openBrief(p); };
+    window.joshSidebar_submitForm     = () => _submitForm();
+    window.joshSidebar_cancelForm     = () => { cancelForm(); _render(); };
+    window.joshSidebar_rePin          = () => _enterPinMode();
+    window.joshSidebar_save           = id => saveFile(id).then(() => _render());
+    window.joshSidebar_saveAs         = id => saveAsFile(id).then(() => _render());
+    window.joshSidebar_exportYaml     = () => exportYaml();
+    window.joshSidebar_doRestore      = () => _doSessionRestore();
+    window.joshSidebar_dismissRestore = () => _dismissRestore();
+  }
+
+  // ── DOMContentLoaded — inject sidebar div ─────────────────────────────────────
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+      if (_el('josh-sidebar')) return;  // already injected by demo.py
+      const sb = document.createElement('div');
+      sb.id = 'josh-sidebar';
+      sb.style.cssText =
+        'position:fixed;top:0;left:0;width:' + SIDEBAR_W + 'px;height:100vh;' +
+        'background:#fff;box-shadow:2px 0 12px rgba(0,0,0,0.12);' +
+        'display:flex;flex-direction:column;overflow:hidden;' +
+        'font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;z-index:1000;';
+      document.body.appendChild(sb);
+      init();
+    });
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────────
+  if (typeof window !== 'undefined') {
+    window.joshSidebar = { init, onPinPlaced, getProjects, selectProject };
+  }
+
+  // CommonJS export for Node.js test runner
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      createProject,
+      updateProject,
+      deleteProject,
+      getProject,
+      getProjects,
+      _normalizeResult,
+      _serialize,
+      _deserialize,
+      _toYaml,
+      _buildBriefInput,
+      _citySlug,
+      _paramsVer,
+      _resetState() {
+        _projects        = [];
+        _selectedId      = null;
+        _formMode        = null;
+        _formProjectId   = null;
+        _formLat         = null;
+        _formLng         = null;
+        _formResult      = null;
+        _deleteConfirmId = null;
+        _restoreBanner   = false;
+      },
+    };
+  }
+
+})();
