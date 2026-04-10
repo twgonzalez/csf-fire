@@ -506,122 +506,14 @@ def create_demo_map(
                     tooltip=f"{project.project_name} — network reachable zone",
                 ).add_to(proj_group)
 
-        # ── Evacuation flow traces — all serving paths (v3.3) ────────────────
-        # Full route for every serving EvacuationPath, colored by ΔT severity.
-        # Green = within threshold, orange = >70% of threshold, red = exceeded.
-        # Renders below serving-route highlights so the bottleneck stands out.
-        _FLOW_GREEN  = "#2e7d32"
-        _FLOW_ORANGE = "#e65100"
-        _FLOW_RED    = "#b71c1c"
-
+        # ── Exit point markers (city-boundary exit flags) ────────────────────
+        # Phase 3: AntPath flow traces retired — sidebar.js draws routes from
+        # JOSH_DATA.projects path_coords using the Leaflet.AntPath plugin.
+        # Exit markers (⚑ flag icons) are kept as static map context.
         exit_osmids_drawn: set[str] = set()  # avoid duplicate exit markers
 
         for dt_result in (project.delta_t_results or []):
-            pid      = str(dt_result.get("path_id", ""))
-            dt_min   = float(dt_result.get("delta_t_minutes", 0))
-            thresh   = float(dt_result.get("threshold_minutes", 6.0)) or 6.0
-            flagged  = dt_result.get("flagged", False)
-            bn_name  = str(dt_result.get("bottleneck_name", "") or "bottleneck")
             exit_oid = str(dt_result.get("exit_segment_osmid", ""))
-
-            severity = dt_min / thresh
-            if flagged or severity >= 1.0:
-                flow_color, flow_w, flow_op = _FLOW_RED,    3.5, 0.75
-            elif severity >= 0.70:
-                flow_color, flow_w, flow_op = _FLOW_ORANGE, 2.5, 0.65
-            else:
-                flow_color, flow_w, flow_op = _FLOW_GREEN,  2.0, 0.50
-
-            if pid not in path_id_to_osmids:
-                continue
-            path_osmid_set = set(path_id_to_osmids[pid])
-
-            # Prefer the exact WGS84 coordinate chain stored in delta_t_results
-            # (computed from graph node positions in wildland.py — unambiguous).
-            # Fall back to the osmid-chain approach only for legacy paths that
-            # predate path_wgs84_coords storage.
-            _direct_coords = dt_result.get("path_wgs84_coords", [])
-
-            if len(_direct_coords) >= 2:
-                # v4.0+: use exact node coordinates — one AntPath, no gaps,
-                # no osmid-ambiguity (a single way ID can match many road segments).
-                ant_chains: list[list[list[float]]] = [_direct_coords]
-            else:
-                # Legacy fallback: reconstruct from osmid → geometry lookup.
-                path_osmids_ordered = path_id_to_osmids.get(pid, [])
-                path_rows = roads_wgs84[
-                    roads_wgs84["osmid"].apply(lambda o: _osmid_matches(o, path_osmid_set))
-                ]
-                osmid_to_seg_geom: dict[str, object] = {}
-                for _, _row in path_rows.iterrows():
-                    _oid = _row.get("osmid")
-                    if _oid is None or _row.geometry is None:
-                        continue
-                    _strs = ([str(o) for o in _oid] if isinstance(_oid, list)
-                             else [str(_oid)])
-                    for _s in _strs:
-                        if _s not in osmid_to_seg_geom:
-                            osmid_to_seg_geom[_s] = _row.geometry
-
-                _GAP_DEG      = 0.0005
-                proj_ref      = Point(project.location_lon, project.location_lat)
-                prev_exit_pt  = proj_ref
-                ant_chains    = []
-                current_chain: list[list[float]] = []
-
-                for _oid_str in path_osmids_ordered:
-                    _sg = osmid_to_seg_geom.get(_oid_str)
-                    if _sg is None or _sg.is_empty:
-                        if len(current_chain) >= 2:
-                            ant_chains.append(current_chain)
-                        current_chain = []
-                        continue
-                    _raw = list(_sg.coords)
-                    if len(_raw) < 2:
-                        continue
-                    _pt_a = Point(_raw[0])
-                    _pt_b = Point(_raw[-1])
-                    _ordered = _raw if prev_exit_pt.distance(_pt_a) <= prev_exit_pt.distance(_pt_b) \
-                               else list(reversed(_raw))
-                    _entry = Point(_ordered[0])
-                    if current_chain:
-                        _last = current_chain[-1]
-                        if math.hypot(_entry.y - _last[0], _entry.x - _last[1]) > _GAP_DEG:
-                            if len(current_chain) >= 2:
-                                ant_chains.append(current_chain)
-                            current_chain = []
-                    for _i, (_lon, _lat) in enumerate(_ordered):
-                        if _i == 0 and current_chain:
-                            _last = current_chain[-1]
-                            if abs(_lat - _last[0]) < 1e-7 and abs(_lon - _last[1]) < 1e-7:
-                                continue
-                        current_chain.append([_lat, _lon])
-                    if _ordered:
-                        prev_exit_pt = Point(_ordered[-1])
-                if len(current_chain) >= 2:
-                    ant_chains.append(current_chain)
-
-            tip = (
-                f"{'⚠ FLAGGED' if flagged else '✓ OK'} — {bn_name} | "
-                f"ΔT {dt_min:.1f} min / {thresh:.1f} min threshold | "
-                f"animated dashes flow project → exit"
-            )
-
-            # One AntPath per connected sub-chain.  Slow animation (2 s flagged,
-            # 3 s ok) so flow direction is easy to read at a glance.
-            _ant_weight = flow_w + 2.0
-            _ant_delay  = 2000 if flagged else 3000
-            for _chain in ant_chains:
-                if len(_chain) >= 2:
-                    AntPath(
-                        locations=_chain,
-                        color=flow_color,
-                        pulse_color="rgba(255,255,255,0.95)",
-                        weight=_ant_weight,
-                        delay=_ant_delay,
-                        dash_array=[10, 18],
-                        tooltip=tip,
-                    ).add_to(proj_group)
 
             # Exit point marker (triangle flag at city-boundary exit)
             if exit_oid and exit_oid not in exit_osmids_drawn:
@@ -860,14 +752,7 @@ def create_demo_map(
 
     # ── Fixed panels ───────────────────────────────────────────────────────
     m.get_root().html.add_child(folium.Element(_build_brand_header_html()))
-    m.get_root().html.add_child(folium.Element(
-        _build_demo_panel_html(
-            projects, demo_title, config,
-            proj_js_names=proj_js_names,
-            map_js_name=map_js_name,
-            proj_ld_data=proj_ld_data,
-        )
-    ))
+    # Phase 3: demo panel (top-right dropdown + detail cards) retired — sidebar handles it.
     m.get_root().html.add_child(folium.Element(
         _build_demo_legend_html(config, map_js_name=map_js_name, heatmap_js_name=heatmap_js_name)
     ))
@@ -1294,11 +1179,67 @@ def _inject_josh_data_bundle(
     br_block = f'<script id="josh-br">\n{br_js}\n</script>\n' if br_js else ""
     br_note  = f"inlined ({len(br_js) // 1024} KB)" if br_js else "not found (skipped)"
 
-    # ── project_manager.js: inline if available ──────────────────────────────
-    pm_path = static_dir / "project_manager.js"
-    pm_js   = pm_path.read_text(encoding="utf-8") if pm_path.exists() else ""
-    pm_block = f'<script id="josh-pm">\n{pm_js}\n</script>\n' if pm_js else ""
-    pm_note  = f"inlined ({len(pm_js) // 1024} KB)" if pm_js else "not found (skipped)"
+    # ── sidebar.js: inline (replaces project_manager.js + what-if panel) ───────
+    sb_path  = static_dir / "sidebar.js"
+    sb_js    = sb_path.read_text(encoding="utf-8") if sb_path.exists() else ""
+    sb_block = f'<script id="josh-sidebar-js">\n{sb_js}\n</script>\n' if sb_js else ""
+    sb_note  = f"inlined ({len(sb_js) // 1024} KB)" if sb_js else "not found (skipped)"
+
+    # ── Sidebar container + map layout CSS ────────────────────────────────────
+    # The sidebar (320 px) occupies the left edge; the brand header (54 px) the top.
+    # CSS shifts the Folium map container right + down so it never renders under
+    # either fixed panel.  z-index: sidebar=1000, header=10001, map layers<999.
+    layout_block = """\
+<style id="josh-layout">
+  .folium-map {
+    left: 320px !important;
+    width: calc(100% - 320px) !important;
+    top: 54px !important;
+    height: calc(100vh - 54px) !important;
+  }
+</style>
+<div id="josh-sidebar" style="
+  position:fixed;top:54px;left:0;width:320px;height:calc(100vh - 54px);
+  background:#fff;box-shadow:2px 0 12px rgba(0,0,0,0.12);
+  display:flex;flex-direction:column;overflow:hidden;
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  font-size:13px;z-index:1000;
+"></div>
+<script id="josh-sidebar-bridge">
+(function () {
+  // Expose the Leaflet map as window._joshMap once it has initialised.
+  // Folium attaches the map to a global named after the element id; scan
+  // window properties to find it without knowing the generated name.
+  function _findMap() {
+    for (var k in window) {
+      try {
+        var v = window[k];
+        if (v && v._leaflet_id && typeof v.getCenter === 'function') return v;
+      } catch (_) {}
+    }
+    return null;
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    // Wire the map click bridge: sidebar pin-awaiting mode → onPinPlaced
+    var attempt = 0;
+    (function wireMap() {
+      var m = _findMap();
+      if (!m && attempt++ < 40) { setTimeout(wireMap, 100); return; }
+      if (m) {
+        window._joshMap = m;
+        m.on('click', function (e) {
+          if (window._joshPinModeActive && window.joshSidebar) {
+            window.joshSidebar.onPinPlaced(e.latlng.lat, e.latlng.lng);
+          }
+        });
+      }
+    })();
+    // Initialise sidebar with JOSH_DATA.projects (pipeline seeds)
+    if (window.joshSidebar) window.joshSidebar.init();
+  });
+})();
+</script>
+"""
 
     footer_block = (
         f'\n<div style="position:fixed;bottom:4px;right:8px;font-size:10px;'
@@ -1306,15 +1247,15 @@ def _inject_josh_data_bundle(
         f'JOSH v{_PARAMETERS_VERSION} · © 2026 Thomas Gonzalez · AGPL-3.0'
         f'</div>\n'
     )
-    injection = data_block + app_block + br_block + pm_block + footer_block
+    injection = data_block + app_block + br_block + sb_block + layout_block + footer_block
     if "</body>" in html:
         html = html.replace("</body>", injection + "</body>", 1)
     else:
         html += injection
     html_path.write_text(html, encoding="utf-8")
     logger.info(
-        "  JOSH data bundle injected (%d briefs); app.js %s; brief_renderer.js %s; project_manager.js %s.",
-        len(brief_data), app_note, br_note, pm_note,
+        "  JOSH data bundle injected (%d briefs); app.js %s; brief_renderer.js %s; sidebar.js %s.",
+        len(brief_data), app_note, br_note, sb_note,
     )
 
 
