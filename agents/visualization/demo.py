@@ -1275,7 +1275,7 @@ def _build_whatif_ui_html() -> str:
 ">
   <div style="background:#1c4a6e;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:move;" id="josh-whatif-drag-handle">
     <span style="font-size:15px;">&#9654;</span>
-    <span style="font-weight:600;font-size:13px;letter-spacing:0.02em;">What-If Analysis</span>
+    <span style="font-weight:600;font-size:13px;letter-spacing:0.02em;">Project Analysis</span>
     <span style="margin-left:auto;cursor:pointer;font-size:16px;opacity:0.7;" onclick="joshWhatIf.closePanel();" title="Close">&#10005;</span>
   </div>
   <div style="padding:12px 14px;">
@@ -1297,7 +1297,7 @@ def _build_whatif_ui_html() -> str:
       <button id="josh-wi-btn-pin" onclick="joshWhatIf.startDropPin()" style="
           flex:1;background:#1c4a6e;color:#fff;border:none;border-radius:5px;
           padding:7px 0;font-size:12px;cursor:pointer;font-weight:600;">
-        &#x2316; Drop Pin
+        &#x2316; Click map to locate
       </button>
       <button id="josh-wi-btn-clear" onclick="joshWhatIf.clearWhatIf()" style="
           flex:0 0 auto;background:#f5f5f5;color:#555;border:1px solid #ccc;
@@ -1305,10 +1305,6 @@ def _build_whatif_ui_html() -> str:
           display:none;">
         &#x2715; Clear
       </button>
-    </div>
-    <div style="margin-top:10px;color:#999;font-size:10px;line-height:1.4;border-top:1px solid #f0f0f0;padding-top:8px;" id="josh-wi-disclaimer">
-      What-if estimates only &mdash; not a legal determination.<br>
-      Run <code>main.py evaluate</code> for a binding audit trail.
     </div>
   </div>
 </div>
@@ -1344,7 +1340,7 @@ def _build_whatif_ui_html() -> str:
     cursor: pointer;
     box-shadow: 0 3px 12px rgba(0,0,0,0.25);
     letter-spacing: 0.01em;
-">&#43; What-If Project</button>
+">Analyze a Project</button>
 """
 
 
@@ -1353,10 +1349,10 @@ def _build_whatif_ui_js() -> str:
     JavaScript controller for the what-if panel.
 
     UX state machine:
-      IDLE        — no pin; "Drop Pin" button only
+      IDLE        — no pin; "Click map to locate" button only
       AWAITING    — crosshair cursor, one-time map click listener; "Cancel" button
       PIN PLACED  — draggable pin on map; inputs auto-re-evaluate (300ms debounce);
-                    "Drop New Pin" + "✕ Clear" buttons
+                    "Move pin" + "✕ Clear" buttons
 
     Dragging: L.marker with DivIcon (dashed circle) instead of L.circleMarker,
     which has no drag support.  On dragend, routes redraw and result updates.
@@ -1473,16 +1469,16 @@ def _build_whatif_ui_js() -> str:
   }
 
   /**
-   * Restore the Drop Pin button to the correct label for the current state:
-   *   - PIN PLACED → "Drop New Pin" (re-enter AWAITING to relocate)
-   *   - IDLE       → "Drop Pin"
+   * Restore the pin button to the correct label for the current state:
+   *   - PIN PLACED → "Move pin" (re-enter AWAITING to relocate)
+   *   - IDLE       → "Click map to locate"
    */
   function _restoreIdleOrPinnedButton() {
     const btn = document.getElementById('josh-wi-btn-pin');
     if (_lat !== null) {
-      btn.textContent = '\u2316 Drop New Pin';
+      btn.textContent = '\u2316 Move pin';
     } else {
-      btn.textContent = '\u2316 Drop Pin';
+      btn.textContent = '\u2316 Click map to locate';
     }
     btn.onclick = startDropPin;
   }

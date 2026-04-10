@@ -318,14 +318,14 @@
   function _runAnalysis(id) {
     const project = getProject(id);
     if (!project || project.lat === null || project.lng === null) {
-      if (typeof alert !== 'undefined') alert('Drop a pin first to set the project location.');
+      _showPanelError('No location set — use the pin button on the form to place a pin first.');
       return;
     }
     let result;
     try {
       result = WhatIfEngine.evaluateProject(project.lat, project.lng, project.units, project.stories);
     } catch (e) {
-      if (typeof alert !== 'undefined') alert('Analysis failed: ' + e.message);
+      _showPanelError('Analysis failed: ' + e.message);
       return;
     }
     updateProject(id, { result });
@@ -460,11 +460,11 @@
   // Open the brief modal for a saved project's what-if result.
   function _openBrief(project, result) {
     if (typeof window === 'undefined' || !window.BriefRenderer) {
-      if (typeof alert !== 'undefined') alert('Brief renderer not loaded.');
+      _showPanelError('Brief renderer not loaded — try reloading the page.');
       return;
     }
     if (!window.joshBrief) {
-      if (typeof alert !== 'undefined') alert('Brief modal not available.');
+      _showPanelError('Brief modal not available — try reloading the page.');
       return;
     }
     try {
@@ -477,7 +477,7 @@
       window.joshBrief.show(html, filename);
     } catch (e) {
       console.error('[joshPM] _openBrief error:', e);
-      if (typeof alert !== 'undefined') alert('Could not generate brief: ' + e.message);
+      _showPanelError('Could not generate brief: ' + e.message);
     }
   }
 
@@ -524,12 +524,31 @@
            'color:#888;line-height:1;';
   }
 
+  /** Show a brief inline error message at the bottom of the PM panel (replaces alert()). */
+  function _showPanelError(msg) {
+    if (typeof document === 'undefined') return;
+    const panel = document.getElementById('josh-pm-panel');
+    if (!panel) { console.error('[joshPM]', msg); return; }
+    let el = document.getElementById('josh-pm-error');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'josh-pm-error';
+      el.style.cssText = 'padding:8px 14px;color:#c0392b;font-size:11px;' +
+                         'background:#fdf3f3;border-top:1px solid #f5c6c6;';
+      panel.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = '';
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+  }
+
   // ── 11a. Panel HTML builders ──────────────────────────────────────────────────
   function _buildListPanelHtml() {
     return (
       `<div id="josh-pm-drag-handle" style="background:#1c4a6e;color:#fff;padding:10px 14px;` +
       `display:flex;align-items:center;gap:8px;cursor:move;border-radius:8px 8px 0 0;">` +
-      `<span style="font-weight:600;font-size:13px;">&#128209; Saved Projects</span>` +
+      `<span style="font-weight:600;font-size:13px;">&#128209; Saved Analyses</span>` +
       `<span id="josh-pm-count" style="font-size:11px;color:rgba(255,255,255,0.6);margin-left:2px;"></span>` +
       `<span id="josh-pm-dirty" style="font-size:11px;color:#f39c12;margin-left:4px;display:none;">&#9679; unsaved</span>` +
       `<span style="margin-left:auto;cursor:pointer;font-size:16px;opacity:0.7;" ` +
@@ -537,15 +556,15 @@
 
       `<div style="padding:10px 14px;display:flex;gap:6px;border-bottom:1px solid #eee;">` +
       `<button onclick="joshPM_newProject()" style="${_btn('#1c4a6e','#fff')}">+ New</button>` +
-      `<button onclick="joshPM_saveFile()" style="${_btn('#f5f5f5','#555','#ccc')}">&#8595; Save</button>` +
-      `<button onclick="joshPM_loadFile()" style="${_btn('#f5f5f5','#555','#ccc')}">&#8593; Load</button>` +
+      `<button onclick="joshPM_saveFile()" style="${_btn('#f5f5f5','#555','#ccc')}">&#8595; Save session</button>` +
+      `<button onclick="joshPM_loadFile()" style="${_btn('#f5f5f5','#555','#ccc')}">&#8593; Load session</button>` +
       `</div>` +
 
       `<div id="josh-pm-list" style="max-height:260px;overflow-y:auto;"></div>` +
 
       `<div style="padding:8px 14px;border-top:1px solid #eee;">` +
       `<button onclick="joshPM_downloadYaml()" ` +
-      `style="width:100%;${_btn('#f5f5f5','#555','#ccc')}">&#8659; Export YAML for pipeline</button>` +
+      `style="width:100%;${_btn('#f5f5f5','#555','#ccc')}">&#8659; Export for pipeline</button>` +
       `</div>`
     );
   }
@@ -586,7 +605,7 @@
       `<div style="margin-bottom:8px;">` +
       `<div style="font-size:11px;color:#777;margin-bottom:3px;">Location</div>` +
       `<div id="josh-pm-f-coords" style="font-size:11px;color:#555;margin-bottom:4px;">${coordText}</div>` +
-      `<button id="josh-pm-f-pin-btn" onclick="joshPM_dropPin()" style="${_btn('#1c4a6e','#fff')}">&#x2316; Drop Pin</button>` +
+      `<button id="josh-pm-f-pin-btn" onclick="joshPM_dropPin()" style="${_btn('#1c4a6e','#fff')}">&#x2316; Click map to locate</button>` +
       `</div>` +
 
       `<div style="display:flex;gap:8px;margin-top:12px;">` +
@@ -638,8 +657,8 @@
         `title="${_esc(name)}">${_esc(name)}</span>` +
         `<span style="font-size:11px;color:${color};font-weight:600;min-width:36px;text-align:right;">` +
         `${_esc(abbr)}</span>` +
-        `<button onclick="joshPM_analyze('${p.id}')" title="Run analysis" style="${_iconBtn()}">&#9654;</button>` +
-        (p.result ? `<button onclick="joshPM_openBrief('${p.id}')" title="View Report" style="${_iconBtn()}">&#128196;</button>` : '') +
+        `<button onclick="joshPM_analyze('${p.id}')" title="Analyze" style="${_iconBtn()}">&#9654;</button>` +
+        (p.result ? `<button onclick="joshPM_openBrief('${p.id}')" title="View Report" style="${_iconBtn()}">&#128196; Report</button>` : '') +
         `<button onclick="joshPM_edit('${p.id}')" title="Edit" style="${_iconBtn()}">&#9998;</button>` +
         `<button onclick="joshPM_delete('${p.id}')" title="Delete" style="${_iconBtn()}">&#128465;</button>` +
         `</div>`
@@ -748,7 +767,7 @@
     };
     window.joshPM_dropPin      = ()  => {
       if (!window.joshWhatIf || !window.joshWhatIf.startDropPinForProject) {
-        alert('Map not ready — please try again.');
+        _showPanelError('Map not ready — please try again.');
         return;
       }
       const btn = document.getElementById('josh-pm-f-pin-btn');
@@ -797,7 +816,7 @@
         `background:#2980b9;color:#fff;border:none;border-radius:6px;` +
         `padding:9px 15px;font-family:system-ui,sans-serif;font-size:13px;` +
         `font-weight:600;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,0.25);` +
-        `letter-spacing:0.01em;">&#128209; Saved Projects</button>` +
+        `letter-spacing:0.01em;">&#128209; Saved Analyses</button>` +
 
         // Panel container (populated by _renderPanel)
         `<div id="josh-pm-panel" style="` +
