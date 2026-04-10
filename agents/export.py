@@ -495,6 +495,10 @@ _JS_IIFE_FOOTER = """\
   };
 })();
 
+// Browser: expose on window so other <script> blocks (sidebar.js, etc.) can reach it.
+// const/let at the top level of a <script> are NOT added to window automatically.
+if (typeof window !== "undefined") window.WhatIfEngine = WhatIfEngine;
+
 // CommonJS export for Node.js test runner
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { WhatIfEngine };
