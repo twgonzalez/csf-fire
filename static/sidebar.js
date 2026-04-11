@@ -897,6 +897,35 @@
     return 'gray';
   }
 
+  // Build a Leaflet L.circle mirroring the dashed search-radius circle
+  // Folium bakes into each pipeline project's FeatureGroup.  Radius is
+  // `parameters.serving_route_radius_miles` (default 0.5 mi) converted to
+  // meters.  Used for browser / reloaded / opened-from-.json projects that
+  // have no Folium FG.
+  function _buildRuntimeRadiusCircle(project) {
+    if (typeof window === 'undefined' || !window.L) return null;
+    if (project.lat == null || project.lng == null) return null;
+    try {
+      const params       = (_jd() && _jd().parameters) || {};
+      const radiusMiles  = +(params.serving_route_radius_miles || 0.5);
+      const radiusMeters = radiusMiles * 1609.344;
+      const tier  = (project.result && project.result.tier) || '';
+      const color = TIER_COLOR[tier] || '#7f7f7f';
+      return window.L.circle([project.lat, project.lng], {
+        radius:      radiusMeters,
+        color:       color,
+        weight:      1.5,
+        fill:        true,
+        fillColor:   color,
+        fillOpacity: 0.04,
+        dashArray:   '8 4',
+        interactive: false,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Build a Leaflet L.marker using the same AwesomeMarkers icon Folium bakes
   // into demo_map.html for pipeline projects.  Used for browser projects
   // (created via + New, reloaded from localStorage, or opened from a .json
@@ -940,8 +969,15 @@
     if (hasFoliumFg) {
       try { map.addLayer(window[project.folium_fg_name]); } catch (_) {}
     } else {
-      // Runtime home marker for browser projects.  Tracked in _routeLayers
-      // so _clearRoutes() removes it on deselect or project switch.
+      // Runtime search-radius circle + home marker for browser projects.
+      // Tracked in _routeLayers so _clearRoutes() removes them on deselect
+      // or project switch.  Circle is added first so the home marker renders
+      // on top of it in z-order.
+      const radiusCircle = _buildRuntimeRadiusCircle(project);
+      if (radiusCircle) {
+        radiusCircle.addTo(map);
+        _routeLayers.push(radiusCircle);
+      }
       const homeMarker = _buildRuntimeHomeMarker(project);
       if (homeMarker) {
         homeMarker.addTo(map);
