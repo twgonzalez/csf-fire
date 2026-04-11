@@ -89,6 +89,15 @@ global.window = {
 global.crypto = { randomUUID: () => 'test-' + Math.random().toString(36).slice(2) };
 global.indexedDB = undefined;   // unavailable in Node — exercises the fallback path
 
+// localStorage shim — in-memory Map-backed Storage for Phase 5 tests
+const _lsStore = new Map();
+global.localStorage = {
+  getItem:    k     => _lsStore.has(k) ? _lsStore.get(k) : null,
+  setItem:    (k,v) => { _lsStore.set(k, String(v)); },
+  removeItem: k     => { _lsStore.delete(k); },
+  clear:      ()    => { _lsStore.clear(); },
+};
+
 // ── Load module ───────────────────────────────────────────────────────────────
 const SIDEBAR_PATH = path.join(__dirname, '..', 'static', 'sidebar.js');
 const sb = require(SIDEBAR_PATH);
@@ -482,4 +491,182 @@ test('S16: _toYaml outputs lon: not lng: (pipeline convention)', () => {
   const yaml = sb._toYaml();
   assert.ok(yaml.includes('lon:'),   'YAML must use lon: (pipeline/YAML convention)');
   assert.ok(!yaml.includes('lng:'),  'YAML must NOT use lng: (internal JS field name)');
+});
+
+// ── Phase 5 tests — localStorage auto-save ────────────────────────────────────
+// Corresponds to ~/.claude/plans/spicy-prancing-backus.md Changes 1 + 2.
+// The file-centric FSAPI model is being backstopped with invisible localStorage
+// persistence so new browser projects survive a reload without needing a file save.
+
+test('S17: createProject writes browser project to localStorage', () => {
+  setup();
+  freshProject({ name: 'LocalStorage Auto-Save', units: 42, stories: 3 });
+  const raw = global.localStorage.getItem(sb._lsKey());
+  assert.ok(raw, 'localStorage key must exist after createProject');
+  const obj = JSON.parse(raw);
+  assert.equal(obj.schema_v, 1);
+  assert.ok(Array.isArray(obj.projects));
+  assert.equal(obj.projects.length, 1);
+  assert.equal(obj.projects[0].name,    'LocalStorage Auto-Save');
+  assert.equal(obj.projects[0].units,   42);
+  assert.equal(obj.projects[0].stories, 3);
+});
+
+test('S18: _handle and _stale are stripped from localStorage payload', () => {
+  setup();
+  const p = freshProject({ name: 'No Runtime Fields' });
+  // Stamp runtime-only fields that must never hit localStorage
+  p._handle = { fakeFSAPIHandle: true };
+  p._stale  = true;
+  // Trigger another write via updateProject
+  sb.updateProject(p.id, { address: '123 Persist Ave' });
+  const raw = global.localStorage.getItem(sb._lsKey());
+  assert.ok(raw, 'localStorage key must exist');
+  assert.ok(!raw.includes('_handle'), '_handle must NOT appear in localStorage JSON');
+  assert.ok(!raw.includes('_stale'),  '_stale must NOT appear in localStorage JSON');
+  const obj = JSON.parse(raw);
+  assert.equal(obj.projects[0].address, '123 Persist Ave');
+});
+
+test('S19: pipeline-source projects are excluded from localStorage', () => {
+  setup();
+  sb.createProject({ name: 'Pipeline Seed', units: 10, stories: 2, lat: 37.85, lng: -122.27, source: 'pipeline' });
+  freshProject({ name: 'Browser Only' });
+  const obj = JSON.parse(global.localStorage.getItem(sb._lsKey()));
+  assert.equal(obj.projects.length, 1, 'only browser projects written, not pipeline seeds');
+  assert.equal(obj.projects[0].name, 'Browser Only');
+});
+
+test('S20: _loadFromLocalStorage restores projects into an empty state', () => {
+  setup();
+  freshProject({ name: 'Pre-Reload', units: 55, stories: 6 });
+  // Simulate a page reload: clear in-memory state but leave localStorage alone
+  const savedRaw = global.localStorage.getItem(sb._lsKey());
+  sb._getDirtyIds().clear();
+  // Manually clear _projects without touching localStorage (cannot use _resetState — it clears LS)
+  sb.getProjects().forEach(p => { /* no-op; we'll blow away via module internals */ });
+  // Workaround: reset state, then restore the raw localStorage blob
+  sb._resetState();
+  global.localStorage.setItem(sb._lsKey(), savedRaw);
+  sb._loadFromLocalStorage();
+  const restored = sb.getProjects();
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].name,    'Pre-Reload');
+  assert.equal(restored[0].units,   55);
+  assert.equal(restored[0].stories, 6);
+  // _handle must be null after restore (fresh runtime state)
+  assert.equal(restored[0]._handle, null);
+});
+
+test('S21: _loadFromLocalStorage deduplicates against existing seeds by id', () => {
+  setup();
+  // Seed a pipeline project first (simulating init() order)
+  sb.createProject({ id: 'dedup-1', name: 'Seed Project', units: 10, lat: 37.85, lng: -122.27, source: 'pipeline' });
+  // Pre-populate localStorage with a project that has the SAME id as a seed
+  global.localStorage.setItem(sb._lsKey(), JSON.stringify({
+    schema_v: 1,
+    projects: [
+      { id: 'dedup-1', name: 'Dup by ID',   units: 99, lat: 37.85, lng: -122.27, source: 'browser' },
+      { id: 'unique-2', name: 'New from LS', units: 33, lat: 37.86, lng: -122.28, source: 'browser' },
+    ],
+  }));
+  sb._loadFromLocalStorage();
+  const list = sb.getProjects();
+  // dedup-1 should NOT be overwritten by the localStorage version (pipeline wins)
+  const seed = list.find(p => p.id === 'dedup-1');
+  assert.equal(seed.name,  'Seed Project', 'pipeline seed must NOT be overwritten by localStorage');
+  assert.equal(seed.units, 10);
+  // unique-2 should be added
+  const newOne = list.find(p => p.id === 'unique-2');
+  assert.ok(newOne, 'unique localStorage project must be added');
+  assert.equal(newOne.name, 'New from LS');
+});
+
+test('S22: deleteProject removes the entry from localStorage', () => {
+  setup();
+  const p = freshProject({ name: 'To Delete' });
+  // Verify it's in LS
+  let obj = JSON.parse(global.localStorage.getItem(sb._lsKey()));
+  assert.equal(obj.projects.length, 1);
+  // Delete and verify LS is now empty (for this city)
+  sb.deleteProject(p.id);
+  obj = JSON.parse(global.localStorage.getItem(sb._lsKey()));
+  assert.equal(obj.projects.length, 0, 'deleted project must no longer be in localStorage');
+});
+
+test('S23: _lsKey is versioned and city-scoped', () => {
+  setup();
+  const key = sb._lsKey();
+  assert.ok(key.startsWith('josh_sb_v1_'), '_lsKey must start with josh_sb_v1_');
+  assert.ok(key.endsWith('berkeley'),       '_lsKey must include city slug');
+});
+
+// ── Phase 5b regression tests — form field persistence ───────────────────────
+// Previously, _wireFormListeners only wired units and stories inputs. Typing
+// name or address was stored only in the DOM <input>, and any subsequent
+// _render() (from onPinPlaced, the analysis debounce, or any other cause) would
+// wipe the in-progress values because the form was re-rendered from stale project
+// state. See ~/.claude/plans/spicy-prancing-backus.md follow-up.
+
+test('S24: updateProject persists all four form fields to localStorage', () => {
+  setup();
+  const p = sb.createProject({ source: 'browser' });
+  sb.updateProject(p.id, {
+    name:    'Round Trip All Fields',
+    address: '1 Shattuck Square, Berkeley',
+    lat:     37.8719,
+    lng:     -122.2685,
+    units:   120,
+    stories: 6,
+  });
+  // Read localStorage directly — this is the real persistence sink
+  const obj = JSON.parse(global.localStorage.getItem(sb._lsKey()));
+  assert.equal(obj.projects.length, 1);
+  const stored = obj.projects[0];
+  assert.equal(stored.name,    'Round Trip All Fields');
+  assert.equal(stored.address, '1 Shattuck Square, Berkeley');
+  assert.equal(stored.lat,     37.8719);
+  assert.equal(stored.lng,     -122.2685);
+  assert.equal(stored.units,   120);
+  assert.equal(stored.stories, 6);
+});
+
+test('S25: _wireFormListeners wires all four form input ids (not just units/stories)', () => {
+  // Source-level smoke test — catches regression where name/address wiring is removed.
+  // The fix is required because _render() re-renders the form from project state;
+  // if name/address aren't persisted synchronously on keystroke, any subsequent
+  // re-render wipes the in-progress DOM input values.
+  const fs          = require('node:fs');
+  const SIDEBAR_SRC = fs.readFileSync(path.join(__dirname, '..', 'static', 'sidebar.js'), 'utf8');
+  // Locate the function body
+  const match = SIDEBAR_SRC.match(/function\s+_wireFormListeners\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{2}\}/);
+  assert.ok(match, '_wireFormListeners function must exist');
+  const body = match[1];
+  // All four input ids must appear in the wiring function
+  assert.ok(body.includes("'josh-sb-f-name'"),    "_wireFormListeners must wire 'josh-sb-f-name'");
+  assert.ok(body.includes("'josh-sb-f-addr'"),    "_wireFormListeners must wire 'josh-sb-f-addr'");
+  assert.ok(body.includes("'josh-sb-f-units'"),   "_wireFormListeners must wire 'josh-sb-f-units'");
+  assert.ok(body.includes("'josh-sb-f-stories'"), "_wireFormListeners must wire 'josh-sb-f-stories'");
+});
+
+test('S26: incremental updateProject calls survive a serialize/deserialize round-trip', () => {
+  // Simulates the real-world flow: user types name, then address, then changes
+  // units, each triggering an updateProject. Final state must have all fields.
+  setup();
+  const p = sb.createProject({ source: 'browser' });
+  // Simulate keystroke-by-keystroke updates on different fields
+  sb.updateProject(p.id, { name:    'Incremental' });
+  sb.updateProject(p.id, { address: '42 Berkeley Way' });
+  sb.updateProject(p.id, { lat: 37.87, lng: -122.27 });
+  sb.updateProject(p.id, { units: 99 });
+  sb.updateProject(p.id, { stories: 7 });
+  // Now serialize and round-trip
+  const final = sb.getProject(p.id);
+  const p2    = sb._deserialize(sb._serialize(final));
+  assert.equal(p2.name,    'Incremental');
+  assert.equal(p2.address, '42 Berkeley Way');
+  assert.equal(p2.lat,     37.87);
+  assert.equal(p2.lng,     -122.27);
+  assert.equal(p2.units,   99);
+  assert.equal(p2.stories, 7);
 });

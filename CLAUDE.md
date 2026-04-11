@@ -150,6 +150,14 @@ block in `_inject_josh_data_bundle()` with `<script src="{_APP_JS_CDN_URL}" defe
 revert to node-endpoint-only construction — that produces straight lines cutting
 through terrain and rivers instead of following the road.
 
+**Home icon (house marker) visibility rule:** The home marker for each project lives
+inside its per-project Folium `FeatureGroup` (`show=False` at startup). `sidebar.js`
+calls `map.addLayer(window[project.folium_fg_name])` when a project is selected and
+`map.removeLayer(...)` when deselected. This means **home icons are only visible when
+that project is actively selected** in the sidebar — never floating on the map when no
+project is selected or when a different project is active. Do NOT move markers to a
+permanent always-visible layer; that is the bug this rule fixes.
+
 **What does NOT require rebuild (CDN update only, once switched to CDN delivery):**
 - What-if panel UX (layout, labels, buttons, results display)
 - Brief modal chrome / overlay styling

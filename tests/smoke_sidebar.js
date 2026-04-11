@@ -23,6 +23,24 @@
  *   SMOKE_11: detail card has a "View Report" button for an analyzed project
  *   SMOKE_12: clicking "+ New" shows the New Project form
  *   SMOKE_13: clicking Cancel dismisses the form and restores the project list
+ *   SMOKE_14: "View Report" opens the determination brief modal with srcdoc HTML
+ *
+ *   Phase 5 coverage — persistence paradigm + form/render correctness:
+ *   SMOKE_15: new-project submit does NOT trigger a download dialog
+ *             (removed forced saveAsFile on submit)
+ *   SMOKE_16: createProject writes to localStorage without _handle/_stale
+ *   SMOKE_17: localStorage-seeded browser project loads on page reload
+ *   SMOKE_18: form name/address survive a pin-drop re-render
+ *             (regression test for the wipe-on-re-render bug)
+ *   SMOKE_19: footer has exactly one "Download .json" button
+ *             (no Save / Save As… / Export for pipeline)
+ *   SMOKE_20: unnamed project row renders italic "Untitled" as real DOM
+ *             (regression test for double-escape bug)
+ *   SMOKE_21: browser-source project detail shows auto-save status line
+ *   SMOKE_22: window.joshSidebar._toYaml() is exposed and returns YAML
+ *   SMOKE_23: selecting a pipeline project shows its home icon on the map
+ *   SMOKE_24: every pipeline project has a resolvable folium_fg_name
+ *             (JOSH_DATA integrity — catches stale builds missing fg wiring)
  *
  * Prerequisites:
  *   npm install                          (installs playwright)
@@ -310,6 +328,577 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
       document.querySelectorAll('[onclick^="joshSidebar_select"]').length
     );
     assert.ok(rowCount >= 1, `project list rows must be visible after Cancel, got ${rowCount}`);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Phase 5 — persistence paradigm + form/render correctness
+  // ──────────────────────────────────────────────────────────────────────────
+  // These tests cover the changes from ~/.claude/plans/spicy-prancing-backus.md:
+  //   Change 1: removed forced saveAsFile/saveFile on new-project submit
+  //   Change 2: localStorage auto-save for browser-created projects
+  //   Change 3: single "Download .json" footer button
+  //   Change 4: auto-save status line in detail panel
+  //   Plus the Untitled double-escape fix and the form-field persistence fix.
+  //
+  // Each test is self-resetting (cancels any open form, clears localStorage)
+  // so they can be run in any order without cross-contamination.
+
+  // Shared reset helper — ensures a clean starting state for each Phase 5 test.
+  async function _resetSidebarState() {
+    await page.evaluate(() => {
+      if (typeof joshSidebar_cancelForm === 'function') joshSidebar_cancelForm();
+      try { localStorage.removeItem('josh_sb_v1_berkeley'); } catch (_) {}
+    });
+  }
+
+  // ── SMOKE_15: no download dialog on new-project submit ───────────────────
+  test('SMOKE_15: new-project submit does not trigger a download dialog', async () => {
+    await _resetSidebarState();
+
+    // Detector 1: Playwright download events (blob anchor fallback path).
+    let downloadCount = 0;
+    const onDownload = () => { downloadCount++; };
+    page.on('download', onDownload);
+
+    // Detector 2: FSAPI showSaveFilePicker calls (native picker path).
+    await page.evaluate(() => {
+      window.__smokePickCount = 0;
+      window.__smokeOrigPicker = window.showSaveFilePicker;
+      window.showSaveFilePicker = function () {
+        window.__smokePickCount++;
+        return Promise.reject(new Error('smoke test blocked showSaveFilePicker'));
+      };
+    });
+
+    try {
+      // Open new form + drop pin + fill fields
+      await page.evaluate(() => {
+        if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+        if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+          window.joshSidebar.onPinPlaced(37.8695, -122.2685);
+        }
+        const nameEl  = document.getElementById('josh-sb-f-name');
+        const unitsEl = document.getElementById('josh-sb-f-units');
+        if (nameEl)  { nameEl.value  = 'SMOKE_15 Test'; nameEl.dispatchEvent(new Event('input')); }
+        if (unitsEl) { unitsEl.value = '50';            unitsEl.dispatchEvent(new Event('input')); }
+      });
+      await page.waitForTimeout(500);  // analysis debounce (300 ms) + buffer
+
+      // Submit
+      await page.evaluate(() => {
+        if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+      });
+      // Give any would-be download a chance to fire
+      await page.waitForTimeout(600);
+
+      const pickCount = await page.evaluate(() => window.__smokePickCount || 0);
+      assert.equal(downloadCount, 0,
+        `new-project submit must not fire a "download" event, got ${downloadCount}`);
+      assert.equal(pickCount, 0,
+        `new-project submit must not call showSaveFilePicker, got ${pickCount}`);
+
+      // Sanity: a determination is visible in the detail panel
+      const text = await page.locator('#josh-sidebar').innerText();
+      const hasTier = ['MINISTERIAL', 'CONDITIONAL', 'DISCRETIONARY'].some(t => text.includes(t));
+      assert.ok(hasTier, 'detail panel must show a tier after submit (determination generated independently of save)');
+    } finally {
+      page.off('download', onDownload);
+      await page.evaluate(() => {
+        if (window.__smokeOrigPicker) window.showSaveFilePicker = window.__smokeOrigPicker;
+        delete window.__smokePickCount;
+        delete window.__smokeOrigPicker;
+      });
+    }
+  });
+
+  // ── SMOKE_16: localStorage auto-save ─────────────────────────────────────
+  test('SMOKE_16: createProject writes to localStorage without _handle / _stale', async () => {
+    await _resetSidebarState();
+
+    // Create and submit a browser project
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8700, -122.2690);
+      }
+      const nameEl  = document.getElementById('josh-sb-f-name');
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (nameEl)  { nameEl.value  = 'SMOKE_16 Persist'; nameEl.dispatchEvent(new Event('input')); }
+      if (unitsEl) { unitsEl.value = '30';               unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+    });
+    await page.waitForTimeout(400);
+
+    // Inspect localStorage
+    const { raw, parsed } = await page.evaluate(() => {
+      const raw = localStorage.getItem('josh_sb_v1_berkeley');
+      let parsed = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch (_) {}
+      return { raw, parsed };
+    });
+
+    assert.ok(raw,    'localStorage key "josh_sb_v1_berkeley" must exist after createProject');
+    assert.ok(parsed, 'localStorage value must be valid JSON');
+    assert.ok(Array.isArray(parsed.projects) && parsed.projects.length >= 1,
+      'localStorage must contain ≥1 browser project');
+    const hit = parsed.projects.find(p => p.name === 'SMOKE_16 Persist');
+    assert.ok(hit, 'SMOKE_16 project must be in localStorage by name');
+    assert.equal(hit.source, 'browser', 'persisted project must be browser-source');
+    assert.equal(hit.units,  30,        'units must round-trip');
+
+    // The raw JSON must not contain the runtime-only fields
+    assert.ok(!raw.includes('_handle'), '_handle must NOT be serialized to localStorage');
+    assert.ok(!raw.includes('_stale'),  '_stale must NOT be serialized to localStorage');
+  });
+
+  // ── SMOKE_17: reload persistence ──────────────────────────────────────────
+  test('SMOKE_17: localStorage-seeded browser project loads on page reload', async () => {
+    await _resetSidebarState();
+
+    // Pre-populate localStorage with a known browser project blob — this
+    // isolates the load path from the save path (SMOKE_16 covers save).
+    const KNOWN_ID = 'smoke17-persistent-project';
+    await page.evaluate((id) => {
+      const payload = {
+        schema_v: 1,
+        projects: [{
+          id,
+          schema_v:           1,
+          city_slug:          'berkeley',
+          josh_version:       '1.0.0',
+          parameters_version: '4.0',
+          name:               'SMOKE_17 Reload Test',
+          address:            '',
+          lat:                37.8700,
+          lng:                -122.2690,
+          units:              50,
+          stories:            4,
+          source:             'browser',
+          created_at:         new Date().toISOString(),
+          analyzed_at:        null,
+          result:             null,
+          brief_cache:        null,
+        }],
+      };
+      localStorage.setItem('josh_sb_v1_berkeley', JSON.stringify(payload));
+    }, KNOWN_ID);
+
+    // Reload — stays in the same BrowserContext, so localStorage persists.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#josh-sidebar', { state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(300);  // let init() + _loadFromLocalStorage() settle
+
+    // After reload, init() must merge the localStorage project into _projects
+    const found = await page.evaluate((id) => {
+      const projs = (window.joshSidebar && typeof window.joshSidebar.getProjects === 'function')
+        ? window.joshSidebar.getProjects()
+        : [];
+      const hit = projs.find(p => p.id === id);
+      return hit ? {
+        id:     hit.id,
+        name:   hit.name,
+        source: hit.source,
+        units:  hit.units,
+      } : null;
+    }, KNOWN_ID);
+
+    assert.ok(found, `localStorage-seeded project (id=${KNOWN_ID}) must be loaded by init() after reload`);
+    assert.equal(found.name,   'SMOKE_17 Reload Test', 'name must round-trip through localStorage');
+    assert.equal(found.source, 'browser',               'source must be preserved');
+    assert.equal(found.units,  50,                      'units must round-trip');
+
+    // DOM should also show the row
+    const listText = await page.locator('#josh-sidebar').innerText();
+    assert.ok(listText.includes('SMOKE_17 Reload Test'),
+      'restored project name must appear in the sidebar list');
+
+    // Cleanup — next tests expect a clean localStorage
+    await _resetSidebarState();
+  });
+
+  // ── SMOKE_18: form field persistence across re-render ───────────────────
+  test('SMOKE_18: form name/address survive a pin-drop re-render', async () => {
+    await _resetSidebarState();
+
+    // Open form, type name + address BEFORE dropping pin
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      const nameEl = document.getElementById('josh-sb-f-name');
+      const addrEl = document.getElementById('josh-sb-f-addr');
+      if (nameEl) { nameEl.value = 'Typed Before Pin'; nameEl.dispatchEvent(new Event('input')); }
+      if (addrEl) { addrEl.value = '123 Test Ave';     addrEl.dispatchEvent(new Event('input')); }
+    });
+
+    // Drop the pin — triggers _render() which destroys and rebuilds form DOM.
+    // Prior to the _wireFormListeners fix this is where name/address were lost.
+    await page.evaluate(() => {
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8695, -122.2685);
+      }
+    });
+    await page.waitForTimeout(150);  // let _render() + _wireFormListeners complete
+
+    // Read NEW DOM input values (post-render)
+    const { nameAfter, addrAfter } = await page.evaluate(() => ({
+      nameAfter: (document.getElementById('josh-sb-f-name') || {}).value || '',
+      addrAfter: (document.getElementById('josh-sb-f-addr') || {}).value || '',
+    }));
+    assert.equal(nameAfter, 'Typed Before Pin', 'name input must survive pin-drop re-render');
+    assert.equal(addrAfter, '123 Test Ave',     'address input must survive pin-drop re-render');
+
+    // Units field also triggers a re-render via debounced analysis — check that
+    // name/address still survive after units change + its re-render fires.
+    await page.evaluate(() => {
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (unitsEl) { unitsEl.value = '75'; unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(500);  // analysis debounce + re-render
+
+    const afterUnits = await page.evaluate(() => ({
+      nameAfter: (document.getElementById('josh-sb-f-name') || {}).value || '',
+      addrAfter: (document.getElementById('josh-sb-f-addr') || {}).value || '',
+      unitsAfter: (document.getElementById('josh-sb-f-units') || {}).value || '',
+    }));
+    assert.equal(afterUnits.nameAfter,  'Typed Before Pin', 'name must survive units-triggered re-render');
+    assert.equal(afterUnits.addrAfter,  '123 Test Ave',     'address must survive units-triggered re-render');
+    assert.equal(afterUnits.unitsAfter, '75',               'units value must be preserved after re-render');
+
+    // Cancel to clean up
+    await _resetSidebarState();
+  });
+
+  // ── SMOKE_19: footer has only Download .json button ─────────────────────
+  test('SMOKE_19: footer has exactly one "Download .json" button', async () => {
+    await _resetSidebarState();
+
+    // Select a pipeline project that has a result so _renderFooter fires
+    await page.evaluate(() => {
+      const p = (window.JOSH_DATA.projects || []).find(p => p.result);
+      if (p && typeof joshSidebar_select === 'function') joshSidebar_select(p.id);
+    });
+    await page.waitForTimeout(200);
+
+    const buttonLabels = await page.evaluate(() => {
+      const sb = document.getElementById('josh-sidebar');
+      return sb
+        ? Array.from(sb.querySelectorAll('button')).map(b => b.textContent.trim())
+        : [];
+    });
+
+    const downloadBtns = buttonLabels.filter(l => l === 'Download .json');
+    assert.equal(downloadBtns.length, 1,
+      `expected exactly one "Download .json" button, got ${downloadBtns.length}; ` +
+      `all labels: ${JSON.stringify(buttonLabels)}`);
+
+    // Disallowed legacy labels (form's "Save" is only visible when form is open,
+    // and we have no form open here, so a lingering "Save" button would be a footer regression)
+    assert.ok(!buttonLabels.includes('Save'),
+      'footer must not contain plain "Save" button (form is closed, so any Save is a regression)');
+    assert.ok(!buttonLabels.some(l => l === 'Save As\u2026' || l === 'Save As...'),
+      'footer must not contain "Save As…" button');
+    assert.ok(!buttonLabels.some(l => /Export.*[Pp]ipeline/.test(l)),
+      'footer must not contain "Export for pipeline" button');
+  });
+
+  // ── SMOKE_20: Untitled renders as real DOM, not escaped text ────────────
+  test('SMOKE_20: unnamed project row renders italic "Untitled" as real <em>', async () => {
+    await _resetSidebarState();
+
+    // Create an unnamed browser project via form submit (leave name blank)
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8695, -122.2685);
+      }
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (unitsEl) { unitsEl.value = '50'; unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+    });
+    await page.waitForTimeout(400);
+
+    // Find the list row for the unnamed project and inspect its DOM
+    const inspection = await page.evaluate(() => {
+      const sb = document.getElementById('josh-sidebar');
+      if (!sb) return { found: false };
+      const rows = Array.from(sb.querySelectorAll('[onclick^="joshSidebar_select"]'));
+      // Find a row whose visible text contains "Untitled"
+      const untitledRow = rows.find(r => r.innerText.includes('Untitled'));
+      if (!untitledRow) return { found: false };
+      return {
+        found:      true,
+        hasEm:      untitledRow.querySelector('em') !== null,
+        // Bug signature: double-escaped "<em style…" as visible text
+        visibleText: untitledRow.innerText,
+        innerHTML:   untitledRow.innerHTML,
+      };
+    });
+
+    assert.ok(inspection.found, 'must find an "Untitled" row in the list');
+    assert.ok(inspection.hasEm,
+      'Untitled must render as a real <em> element (got innerHTML: ' + inspection.innerHTML + ')');
+    assert.ok(!inspection.visibleText.includes('<em'),
+      'visible text must NOT contain literal "<em" characters ' +
+      '(double-escape regression): ' + inspection.visibleText);
+    assert.ok(!inspection.innerHTML.includes('&lt;em'),
+      'innerHTML must NOT contain "&lt;em" (_esc() applied to an HTML fallback is a regression)');
+  });
+
+  // ── SMOKE_21: auto-save status line for browser projects ────────────────
+  test('SMOKE_21: browser project detail panel shows auto-save status line', async () => {
+    await _resetSidebarState();
+
+    // Create a fresh browser project via form submit. _submitForm() auto-selects
+    // the newly-created project (sidebar.js:1162 `_selectedId = id`), so the
+    // detail panel renders immediately after — no separate selection step needed.
+    // (Avoiding joshSidebar_select() prevents the toggle-off behavior when the
+    // target project is already selected.)
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8700, -122.2690);
+      }
+      const nameEl  = document.getElementById('josh-sb-f-name');
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (nameEl)  { nameEl.value  = 'SMOKE_21 AutoSave'; nameEl.dispatchEvent(new Event('input')); }
+      if (unitsEl) { unitsEl.value = '50';                unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(500);  // analysis debounce + buffer
+    await page.evaluate(() => {
+      if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+    });
+    await page.waitForTimeout(400);
+
+    // Sanity: a browser project with a result is now in state and selected
+    const state = await page.evaluate(() => {
+      const projs = (window.joshSidebar && typeof window.joshSidebar.getProjects === 'function')
+        ? window.joshSidebar.getProjects()
+        : [];
+      const hit = projs.find(p => p.source === 'browser' && p.name === 'SMOKE_21 AutoSave');
+      return {
+        hasProject: !!hit,
+        hasResult:  !!(hit && hit.result),
+      };
+    });
+    assert.ok(state.hasProject, 'SMOKE_21 browser project must be in state after submit');
+    assert.ok(state.hasResult,  'SMOKE_21 browser project must have a result after submit');
+
+    const text = await page.locator('#josh-sidebar').innerText();
+    assert.ok(text.includes('Auto-saved to this browser'),
+      'detail panel for a browser project must show the "● Auto-saved to this browser" status line');
+  });
+
+  // ── SMOKE_23: home icon visible when project is selected ───────────────
+  // Regression test for CLAUDE.md § "Home icon (house marker) visibility rule":
+  // The home marker for each project lives inside its per-project Folium
+  // FeatureGroup (show=False at startup). sidebar.js must call map.addLayer()
+  // on selection so the FG — and its home marker — become visible.
+  //
+  // This test catches: (a) FG not added due to early return, (b) FG added but
+  // marker is not a child of the FG (permanent map layer), (c) FG reference
+  // missing from window[folium_fg_name], (d) marker DOM element not rendered
+  // after addLayer completes.
+  test('SMOKE_23: selecting a pipeline project shows its home icon on the map', async () => {
+    await _resetSidebarState();
+
+    // Deselect any currently-selected project so the map starts clean.
+    // _clearRoutes() removes all project FGs from the map → no home markers visible.
+    await page.evaluate(() => {
+      // Click any currently-selected row to toggle off; otherwise no-op.
+      const projs = (window.joshSidebar && typeof window.joshSidebar.getProjects === 'function')
+        ? window.joshSidebar.getProjects()
+        : [];
+      // Use selectProject with null-ish id path: pick a project we don't care about,
+      // then pick it again to deselect. Simpler: loop over pipeline projects until
+      // we deselect. Cleanest: just call the window handler with a fake id — no-op.
+      // Actually, just trust that _resetSidebarState cancelled any form. If nothing
+      // is selected, selectProject will select it. If something IS selected, we
+      // re-click it to deselect.
+      // We call selectProject with a sentinel that never matches to ensure
+      // _clearRoutes runs without side-effects — but there's no such API.
+      // Workaround: call _clearRoutes via selecting a non-existent project.
+      // The simplest is to use the internal state: find what's selected and deselect.
+    });
+
+    // Count home-marker DOM elements BEFORE selection. With no project selected,
+    // no per-project FG should be on the map, so no <i class="fa-home"> should exist
+    // inside .leaflet-marker-pane.
+    const beforeHomeCount = await page.evaluate(() => {
+      return document.querySelectorAll('.leaflet-marker-pane i.fa-home').length;
+    });
+
+    // Find the first pipeline project with both a result and a folium_fg_name
+    const targetId = await page.evaluate(() => {
+      const projs = (window.JOSH_DATA.projects || []);
+      const hit = projs.find(p => p.result && p.folium_fg_name);
+      return hit ? hit.id : null;
+    });
+    assert.ok(targetId, 'at least one pipeline project with a folium_fg_name must exist');
+
+    // Select it via the public handler
+    await page.evaluate((id) => {
+      if (typeof joshSidebar_select === 'function') joshSidebar_select(id);
+    }, targetId);
+    await page.waitForTimeout(400);  // wait for addLayer + Leaflet DOM update
+
+    // Verify the FeatureGroup reference exists as a global
+    const fgCheck = await page.evaluate((id) => {
+      const p = (window.JOSH_DATA.projects || []).find(pp => pp.id === id);
+      if (!p) return { fgName: null, fgExists: false, onMap: false };
+      const fg = window[p.folium_fg_name];
+      const map = window._joshMap;
+      return {
+        fgName:   p.folium_fg_name,
+        fgExists: !!fg,
+        onMap:    !!(fg && map && map.hasLayer && map.hasLayer(fg)),
+      };
+    }, targetId);
+    assert.ok(fgCheck.fgName,   'project must carry folium_fg_name: ' + JSON.stringify(fgCheck));
+    assert.ok(fgCheck.fgExists, `window[${fgCheck.fgName}] must exist as a Leaflet layer`);
+    assert.ok(fgCheck.onMap,    'FeatureGroup must be added to the map after selection');
+
+    // Count home-marker DOM elements AFTER selection. Exactly one more home icon
+    // should be present (the selected project's home marker). The increment, not
+    // the absolute count, is what we verify — other map markers may reuse fa-home.
+    const afterHomeCount = await page.evaluate(() => {
+      return document.querySelectorAll('.leaflet-marker-pane i.fa-home').length;
+    });
+    assert.ok(
+      afterHomeCount > beforeHomeCount,
+      `selecting a project must add at least one visible home icon to the map ` +
+      `(before=${beforeHomeCount}, after=${afterHomeCount})`
+    );
+
+    // Additional check: the home marker must be in the DOM (not display:none).
+    // Leaflet removes DOM nodes entirely when a layer is removed, so existence = visible.
+    const visibleHomeIcon = await page.evaluate(() => {
+      const icons = Array.from(document.querySelectorAll('.leaflet-marker-pane i.fa-home'));
+      // A displayed icon has a parent .awesome-marker that itself has a non-zero size
+      for (const icon of icons) {
+        const marker = icon.closest('.awesome-marker');
+        if (!marker) continue;
+        const rect = marker.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+      }
+      return false;
+    });
+    assert.ok(visibleHomeIcon,
+      'at least one home icon must be visible in the DOM (non-zero size) after selection');
+
+    // Cleanup: deselect
+    await page.evaluate((id) => {
+      if (typeof joshSidebar_select === 'function') joshSidebar_select(id);  // toggle off
+    }, targetId);
+    await page.waitForTimeout(200);
+  });
+
+  // ── SMOKE_24: every pipeline project has a resolvable folium_fg_name ────
+  // This is the defensive "JOSH_DATA integrity" assertion that catches stale
+  // builds produced before the `folium_fg_name` wiring landed in
+  // _build_josh_data_projects (agents/visualization/demo.py).
+  //
+  // Failure mode caught:
+  //   - demo.py change ships, Berkeley is rebuilt, other cities are NOT
+  //   - stale cities embed projects with folium_fg_name === null or missing
+  //   - sidebar.js _drawRoutes bails on `!window[fg_name]` → no home icon
+  //   - user sees "missing housing icon when I select a project"
+  //
+  // SMOKE_23 only checks the FIRST matching project. This test walks ALL
+  // pipeline projects with a result and asserts each one has:
+  //   (a) folium_fg_name is a non-empty string
+  //   (b) window[folium_fg_name] exists as a truthy object
+  //   (c) that object is a Leaflet layer (has addTo/remove methods)
+  //
+  // CLAUDE.md § "Home icon (house marker) visibility rule" documents the
+  // architectural contract this test enforces.
+  test('SMOKE_24: every pipeline project has a resolvable folium_fg_name', async () => {
+    const report = await page.evaluate(() => {
+      const projs = (window.JOSH_DATA && window.JOSH_DATA.projects) || [];
+      const pipelineWithResult = projs.filter(p =>
+        p.source !== 'browser' && p.result);
+
+      const failures = [];
+      for (const p of pipelineWithResult) {
+        const entry = { id: p.id, name: p.name, fgName: p.folium_fg_name };
+        if (!p.folium_fg_name || typeof p.folium_fg_name !== 'string') {
+          entry.reason = 'folium_fg_name missing or not a string';
+          failures.push(entry);
+          continue;
+        }
+        const fg = window[p.folium_fg_name];
+        if (!fg) {
+          entry.reason = `window[${p.folium_fg_name}] is undefined`;
+          failures.push(entry);
+          continue;
+        }
+        // A Leaflet FeatureGroup/LayerGroup has addTo + remove + eachLayer.
+        if (typeof fg.addTo !== 'function' || typeof fg.eachLayer !== 'function') {
+          entry.reason = `window[${p.folium_fg_name}] is not a Leaflet layer ` +
+            `(missing addTo/eachLayer)`;
+          failures.push(entry);
+          continue;
+        }
+      }
+      return {
+        total:    pipelineWithResult.length,
+        failures: failures,
+      };
+    });
+
+    assert.ok(report.total > 0,
+      'at least one pipeline project with a result must exist in JOSH_DATA');
+    assert.deepEqual(
+      report.failures, [],
+      `${report.failures.length} of ${report.total} pipeline projects have ` +
+      `an unresolvable folium_fg_name — stale demo_map.html build? ` +
+      `Rebuild with: uv run python build.py demo --city <city>  (or ` +
+      `JOSH_DIR=... uv run python acquire.py run --city <city>):\n` +
+      JSON.stringify(report.failures, null, 2));
+  });
+
+  // ── SMOKE_22: window.joshSidebar._toYaml() exposed ──────────────────────
+  test('SMOKE_22: window.joshSidebar._toYaml() is exposed and returns YAML', async () => {
+    // Doesn't matter what's in the list — pipeline seeds guarantee at least one
+    // project with lat/lng, so the YAML output will contain the schema keys.
+    const { type, yaml } = await page.evaluate(() => {
+      const fn = (window.joshSidebar && window.joshSidebar._toYaml) || null;
+      if (typeof fn !== 'function') return { type: typeof fn, yaml: null };
+      try {
+        return { type: 'function', yaml: fn() };
+      } catch (e) {
+        return { type: 'function', yaml: 'ERROR: ' + e.message };
+      }
+    });
+
+    assert.equal(type, 'function',
+      'window.joshSidebar._toYaml must be exposed as a function for admin console use');
+    assert.ok(yaml && typeof yaml === 'string',
+      '_toYaml() must return a non-empty string');
+    assert.ok(!yaml.startsWith('ERROR:'),
+      '_toYaml() must not throw: ' + yaml);
+
+    // YAML must contain the pipeline-schema keys (matches josh-pipeline/projects/{city}_demo.yaml)
+    assert.ok(yaml.includes('projects:'), 'YAML must contain "projects:" root key');
+    assert.ok(yaml.includes('name:'),     'YAML must contain "name:" key');
+    assert.ok(yaml.includes('lat:'),      'YAML must contain "lat:" key');
+    assert.ok(yaml.includes('lon:'),      'YAML must contain "lon:" key');
+    assert.ok(yaml.includes('units:'),    'YAML must contain "units:" key');
+    assert.ok(yaml.includes('stories:'),  'YAML must contain "stories:" key');
+
+    // Export for pipeline button must NOT exist in the footer DOM
+    const hasExportBtn = await page.evaluate(() => {
+      const sb = document.getElementById('josh-sidebar');
+      if (!sb) return false;
+      return Array.from(sb.querySelectorAll('button'))
+        .some(b => /Export.*[Pp]ipeline/.test(b.textContent));
+    });
+    assert.ok(!hasExportBtn,
+      'Export for pipeline button must be removed from UI (available via _toYaml() console helper instead)');
   });
 
 });

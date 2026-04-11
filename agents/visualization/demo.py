@@ -335,14 +335,6 @@ def create_demo_map(
     heatmap_fg.add_to(m)
     heatmap_js_name = heatmap_fg.get_name()
 
-    # ── Permanent project-pin layer (home icons — always visible) ─────────
-    # Home markers are kept separate from per-project route FeatureGroups so
-    # they remain visible regardless of which project is selected in the sidebar.
-    # Phase 3 retired the demo-panel layer toggle; sidebar.js now handles route
-    # visibility via AntPath.  Without this layer, only project-0's marker was
-    # visible (show=(i==0) on per-project groups).
-    project_pins_fg = folium.FeatureGroup(name="Project Locations", show=True)
-
     # ── Per-project FeatureGroups ──────────────────────────────────────────
     proj_js_names: list[str] = []
     # Accumulate GeoJson var names that need post-creation popup binding.
@@ -440,7 +432,7 @@ def create_demo_map(
         # ── Wildland project FeatureGroup ────────────────────────────────
         proj_group = folium.FeatureGroup(
             name=f"{project.project_name or f'Project {i+1}'} — {tier}",
-            show=(i == 0),
+            show=False,   # sidebar.js controls visibility; start all hidden
         )
         proj_js_names.append(proj_group.get_name())
 
@@ -709,9 +701,8 @@ def create_demo_map(
                     tooltip=_bn_tip,
                 ).add_to(proj_group)
 
-        # Project marker — added to the permanent always-visible pins layer,
-        # NOT the per-project FeatureGroup, so it stays on the map regardless
-        # of which project is selected in the sidebar.
+        # Project marker — lives inside the per-project FeatureGroup so it is
+        # only visible when the user selects this project in the sidebar.
         folium.Marker(
             location=[project.location_lat, project.location_lon],
             popup=folium.Popup(
@@ -726,7 +717,7 @@ def create_demo_map(
             ),
             tooltip=f"{project.project_name} · {tier}",
             icon=folium.Icon(color=marker_color, icon="home", prefix="fa"),
-        ).add_to(project_pins_fg)
+        ).add_to(proj_group)
 
         # Additional egress point markers — city-planner-defined secondary exits.
         # Drawn as small circle markers distinct from the primary home pin.
@@ -760,9 +751,6 @@ def create_demo_map(
 
         proj_group.add_to(m)
 
-    # Add permanent project-pin layer last so markers render above route layers.
-    project_pins_fg.add_to(m)
-
     # ── Fixed panels ───────────────────────────────────────────────────────
     m.get_root().html.add_child(folium.Element(_build_brand_header_html()))
     # Phase 3: demo panel (top-right dropdown + detail cards) retired — sidebar handles it.
@@ -795,7 +783,7 @@ def create_demo_map(
         _inject_josh_data_bundle(
             output_path, graph_json_path, params_json_path, fhsz_gdf,
             city_name=_city_name, city_slug=_city_slug,
-            projects_data=_build_josh_data_projects(projects, _city_slug),
+            projects_data=_build_josh_data_projects(projects, _city_slug, proj_js_names),
         )
     else:
         # graph.json not yet generated (analyze not run). Fall back to the
@@ -1058,7 +1046,11 @@ def _inject_brief_modals(html_path: Path) -> None:
 _APP_JS_CDN_URL = "https://twgonzalez.github.io/josh/static/v1/app.js"
 
 
-def _build_josh_data_projects(projects: list, city_slug: str) -> list[dict]:
+def _build_josh_data_projects(
+    projects: list,
+    city_slug: str,
+    proj_js_names: list[str] | None = None,
+) -> list[dict]:
     """
     Serialize pipeline-seeded Project objects into the JOSH_DATA.projects schema
     (spec §7) so sidebar.js can initialize with full result data including
@@ -1066,10 +1058,15 @@ def _build_josh_data_projects(projects: list, city_slug: str) -> list[dict]:
 
     Each project's delta_t_results contains the full per-path audit dict from
     base.py compute_delta_t(), including path_wgs84_coords.
+
+    proj_js_names — parallel list of Folium FeatureGroup JS variable names
+    (e.g. "feature_group_abc123").  When provided, each project dict includes
+    ``folium_fg_name`` so sidebar.js can show/hide the Folium layer when the
+    user selects a project.
     """
     route_labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     result = []
-    for proj in projects:
+    for i, proj in enumerate(projects):
         paths_raw: list[dict] = proj.delta_t_results or []
         if not paths_raw:
             continue  # skip projects with no analysis (e.g. below-threshold with no routes)
@@ -1092,16 +1089,18 @@ def _build_josh_data_projects(projects: list, city_slug: str) -> list[dict]:
                 "path_coords":               p.get("path_wgs84_coords") or [],
             })
 
+        fg_name = proj_js_names[i] if (proj_js_names and i < len(proj_js_names)) else None
         result.append({
-            "id":          _slugify(proj.project_name or proj.address or "project"),
-            "name":        proj.project_name or "",
-            "address":     proj.address or "",
-            "lat":         proj.location_lat,
-            "lng":         proj.location_lon,
-            "units":       proj.dwelling_units,
-            "stories":     proj.stories,
-            "source":      "pipeline",
-            "city_slug":   city_slug,
+            "id":             _slugify(proj.project_name or proj.address or "project"),
+            "name":           proj.project_name or "",
+            "address":        proj.address or "",
+            "lat":            proj.location_lat,
+            "lng":            proj.location_lon,
+            "units":          proj.dwelling_units,
+            "stories":        proj.stories,
+            "source":         "pipeline",
+            "city_slug":      city_slug,
+            "folium_fg_name": fg_name,   # Folium FeatureGroup JS var; sidebar shows/hides on select
             "result": {
                 "tier":               proj.determination or "",
                 "hazard_zone":        proj.hazard_zone or "non_fhsz",
@@ -2302,15 +2301,22 @@ def _build_demo_legend_html(
     """
     return f"""
 <style>
+.josh-evac-bar {{
+  border-radius: 10px !important;
+  border: 1px solid #dee2e6 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+}}
 .josh-evac-btn {{
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 26px !important;
-  height: 26px !important;
+  width: 30px !important;
+  height: 30px !important;
   color: #333 !important;
   cursor: pointer !important;
   text-decoration: none !important;
+  border-radius: 10px !important;
+  border-bottom: none !important;
   transition: color 0.2s;
 }}
 .josh-evac-btn:hover {{ background: #f4f4f4 !important; }}
@@ -2368,7 +2374,7 @@ def _build_demo_legend_html(
     var EvacToggle = L.Control.extend({{
       options: {{ position: 'topleft' }},
       onAdd: function () {{
-        var c = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        var c = L.DomUtil.create('div', 'leaflet-bar leaflet-control josh-evac-bar');
         c.style.cssText = 'position:relative;overflow:visible;';
 
         var btn = L.DomUtil.create('a', 'josh-evac-btn', c);
@@ -2376,7 +2382,7 @@ def _build_demo_legend_html(
         btn.title = 'Hide evacuation capacity layer';
         btn.setAttribute('role', 'button');
         btn.innerHTML =
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" ' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" ' +
           'style="display:block;pointer-events:none;">' +
           '<path d="M13.5 0.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73' +
           'l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z' +
