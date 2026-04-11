@@ -44,6 +44,8 @@
  *   SMOKE_25: selecting a BROWSER project (new / reloaded / opened from .json)
  *             shows a home icon on the map — browser projects have no Folium
  *             FG, so sidebar.js must draw a runtime home marker instead
+ *   SMOKE_26: selecting a browser project also shows the 0.5-mile search
+ *             radius circle (matches Folium-baked dashed circle for pipeline)
  *
  * Prerequisites:
  *   npm install                          (installs playwright)
@@ -984,6 +986,101 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
       assert.ok(after.visible >= 1,
         `the browser project's home icon must be visibly rendered (non-zero size), ` +
         `got ${after.visible} visible of ${after.total} total`);
+    } finally {
+      await page.evaluate(() => {
+        if (window.__smokeOrigPicker) window.showSaveFilePicker = window.__smokeOrigPicker;
+        delete window.__smokeOrigPicker;
+      });
+    }
+  });
+
+  // ── SMOKE_26: browser-project search-radius circle ────────────────────
+  // Regression test for the missing 0.5-mile search radius on projects
+  // loaded from disk / created in-browser.  Pipeline projects carry a
+  // pre-baked Folium Circle inside their FeatureGroup — when sidebar.js
+  // addLayer's the FG, the circle appears.  Browser projects have no Folium
+  // FG, so without a runtime circle draw, the radius ring is missing.
+  //
+  // Fix contract: sidebar.js `_drawRoutes()` must create an L.circle of
+  // radius = parameters.serving_route_radius_miles * 1609.344 meters at
+  // [lat, lng], styled like Folium (dashed, tier color, fillOpacity ≈ 0.04),
+  // and push it onto _routeLayers.
+  test('SMOKE_26: selecting a browser project shows a 0.5-mile radius circle', async () => {
+    await _resetSidebarState();
+
+    await page.evaluate(() => {
+      window.__smokeOrigPicker = window.showSaveFilePicker;
+      window.showSaveFilePicker = () => Promise.reject(new Error('smoke block'));
+    });
+
+    // Snapshot all L.Circle layers currently on the map so we can detect
+    // the newly-added radius circle by diffing.
+    const baselineCircleIds = await page.evaluate(() => {
+      const map = window._joshMap;
+      if (!map) return [];
+      const out = [];
+      map.eachLayer(l => {
+        if (window.L && l instanceof window.L.Circle) out.push(l._leaflet_id);
+      });
+      return out;
+    });
+
+    // Create + submit a browser project (auto-selects on submit).
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8700, -122.2690);
+      }
+      const nameEl  = document.getElementById('josh-sb-f-name');
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (nameEl)  { nameEl.value  = 'SMOKE_26 Radius'; nameEl.dispatchEvent(new Event('input')); }
+      if (unitsEl) { unitsEl.value = '50';              unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+    });
+    await page.waitForTimeout(800);
+
+    // Inspect L.Circle layers on the map after selection and find the new one.
+    const newCircles = await page.evaluate((baselineIds) => {
+      const map = window._joshMap;
+      if (!map || !window.L) return [];
+      const baseline = new Set(baselineIds);
+      const found = [];
+      map.eachLayer(l => {
+        if (l instanceof window.L.Circle && !baseline.has(l._leaflet_id)) {
+          const ll = l.getLatLng ? l.getLatLng() : null;
+          found.push({
+            radius: l.getRadius ? l.getRadius() : null,
+            lat:    ll ? ll.lat : null,
+            lng:    ll ? ll.lng : null,
+            dashArray: (l.options && l.options.dashArray) || null,
+          });
+        }
+      });
+      return found;
+    }, baselineCircleIds);
+
+    try {
+      assert.ok(newCircles.length >= 1,
+        `selecting a browser project must add at least one L.Circle to the map ` +
+        `(got ${newCircles.length}). Browser projects have no Folium FG — sidebar.js ` +
+        `must draw a runtime radius circle in _drawRoutes().`);
+
+      // The radius circle should be ≈ 804m (0.5 mi × 1609.344).  Allow a
+      // generous tolerance (600–1200m) in case parameters override the default.
+      const radiusCircle = newCircles.find(c => c.radius && c.radius > 500 && c.radius < 2000);
+      assert.ok(radiusCircle,
+        `at least one new L.Circle must have a radius in [500, 2000] m ` +
+        `(evacuation search radius, default 0.5 mi ≈ 804 m). Got circles: ` +
+        JSON.stringify(newCircles));
+
+      // The circle's center should be at the project pin (37.8700, -122.2690).
+      assert.ok(Math.abs(radiusCircle.lat - 37.8700) < 0.001,
+        `radius circle must be centered at project lat (got ${radiusCircle.lat})`);
+      assert.ok(Math.abs(radiusCircle.lng - (-122.2690)) < 0.001,
+        `radius circle must be centered at project lng (got ${radiusCircle.lng})`);
     } finally {
       await page.evaluate(() => {
         if (window.__smokeOrigPicker) window.showSaveFilePicker = window.__smokeOrigPicker;
