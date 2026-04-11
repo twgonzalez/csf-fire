@@ -41,6 +41,9 @@
  *   SMOKE_23: selecting a pipeline project shows its home icon on the map
  *   SMOKE_24: every pipeline project has a resolvable folium_fg_name
  *             (JOSH_DATA integrity — catches stale builds missing fg wiring)
+ *   SMOKE_25: selecting a BROWSER project (new / reloaded / opened from .json)
+ *             shows a home icon on the map — browser projects have no Folium
+ *             FG, so sidebar.js must draw a runtime home marker instead
  *
  * Prerequisites:
  *   npm install                          (installs playwright)
@@ -899,6 +902,94 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
     });
     assert.ok(!hasExportBtn,
       'Export for pipeline button must be removed from UI (available via _toYaml() console helper instead)');
+  });
+
+  // ── SMOKE_25: browser-project home icon visibility ─────────────────────
+  // Regression test for the "open .json / select browser project → no home
+  // icon" bug.  Browser projects (new, reloaded from localStorage, or opened
+  // from a saved .json) have no pre-baked Folium FeatureGroup.  sidebar.js
+  // `_drawRoutes()` was only rendering a home marker when `folium_fg_name`
+  // resolved to a Folium FG — so any browser project got AntPath routes but
+  // zero home icon on the map.
+  //
+  // Fix: sidebar.js must create a runtime home marker (L.marker + the same
+  // AwesomeMarkers icon style Folium uses) at [lat, lng] when a selected
+  // project has no folium_fg_name, and track it in `_routeLayers` so
+  // `_clearRoutes()` cleans it up on deselect / switch.
+  //
+  // Flows A (create) and C (open-from-.json) both exercise the same code
+  // path: after _submitForm runs _runAnalysis, sidebar.js selects the new
+  // browser project and _drawRoutes must render the home icon.  Flow C
+  // reaches the same state by calling the deserialize path exposed for test.
+  test('SMOKE_25: selecting a browser project shows a home icon on the map', async () => {
+    await _resetSidebarState();
+
+    // Deselect whatever might be currently selected.
+    await page.evaluate(() => {
+      if (typeof joshSidebar_select === 'function') {
+        // selectProject toggles off if re-selected; no-op otherwise.
+        // Calling with a bogus id is ignored.
+        const sel = document.querySelector('#josh-sidebar [data-selected="true"]');
+        if (sel && sel.dataset && sel.dataset.projectId) joshSidebar_select(sel.dataset.projectId);
+      }
+    });
+    await page.waitForTimeout(200);
+
+    // Block showSaveFilePicker (defensive — should be unnecessary but keeps
+    // the FSAPI path from prompting during the submit).
+    await page.evaluate(() => {
+      window.__smokeOrigPicker = window.showSaveFilePicker;
+      window.showSaveFilePicker = () => Promise.reject(new Error('smoke block'));
+    });
+
+    const baseline = await page.evaluate(() =>
+      document.querySelectorAll('.leaflet-marker-pane i.fa-home').length);
+
+    // Create a browser project inline and submit it.
+    await page.evaluate(() => {
+      if (typeof joshSidebar_newProject === 'function') joshSidebar_newProject();
+      if (window.joshSidebar && typeof window.joshSidebar.onPinPlaced === 'function') {
+        window.joshSidebar.onPinPlaced(37.8700, -122.2690);
+      }
+      const nameEl  = document.getElementById('josh-sb-f-name');
+      const unitsEl = document.getElementById('josh-sb-f-units');
+      if (nameEl)  { nameEl.value  = 'SMOKE_25 Home Icon'; nameEl.dispatchEvent(new Event('input')); }
+      if (unitsEl) { unitsEl.value = '50';                 unitsEl.dispatchEvent(new Event('input')); }
+    });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      if (typeof joshSidebar_submitForm === 'function') joshSidebar_submitForm();
+    });
+    await page.waitForTimeout(800);  // analysis + _drawRoutes
+
+    // Post-submit, _submitForm auto-selects the new project — so _drawRoutes
+    // has already run.  Count visible home icons in the marker pane.
+    const after = await page.evaluate(() => {
+      const icons = Array.from(document.querySelectorAll('.leaflet-marker-pane i.fa-home'));
+      const visible = icons.filter(i => {
+        const m = i.closest('.awesome-marker');
+        if (!m) return false;
+        const r = m.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      return { total: icons.length, visible: visible.length };
+    });
+
+    // Cleanup happens even on failure
+    try {
+      assert.ok(after.total > baseline,
+        `selecting a browser project must add a home icon to .leaflet-marker-pane ` +
+        `(baseline=${baseline}, after=${after.total}).  Browser projects have no ` +
+        `folium_fg_name — sidebar.js must draw a runtime marker in _drawRoutes().`);
+      assert.ok(after.visible >= 1,
+        `the browser project's home icon must be visibly rendered (non-zero size), ` +
+        `got ${after.visible} visible of ${after.total} total`);
+    } finally {
+      await page.evaluate(() => {
+        if (window.__smokeOrigPicker) window.showSaveFilePicker = window.__smokeOrigPicker;
+        delete window.__smokeOrigPicker;
+      });
+    }
   });
 
 });

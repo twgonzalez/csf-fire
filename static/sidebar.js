@@ -886,15 +886,67 @@
     _routeLayers = [];
   }
 
+  // Map a JOSH determination tier → Leaflet AwesomeMarkers color keyword.
+  // Must mirror agents/visualization/demo.py _tier_to_marker_color() so that
+  // runtime markers drawn for browser/.json-loaded projects match the pre-baked
+  // Folium markers used by pipeline projects.
+  function _tierToMarkerColor(tier) {
+    if (tier === 'MINISTERIAL')                        return 'green';
+    if (tier === 'MINISTERIAL WITH STANDARD CONDITIONS') return 'orange';
+    if (tier === 'DISCRETIONARY')                       return 'red';
+    return 'gray';
+  }
+
+  // Build a Leaflet L.marker using the same AwesomeMarkers icon Folium bakes
+  // into demo_map.html for pipeline projects.  Used for browser projects
+  // (created via + New, reloaded from localStorage, or opened from a .json
+  // file) — they have no folium_fg_name, so without this runtime marker no
+  // home icon would render on the map when they're selected.
+  function _buildRuntimeHomeMarker(project) {
+    if (typeof window === 'undefined' || !window.L || !window.L.AwesomeMarkers) return null;
+    if (project.lat == null || project.lng == null) return null;
+    try {
+      const tier  = (project.result && project.result.tier) || '';
+      const icon  = window.L.AwesomeMarkers.icon({
+        markerColor: _tierToMarkerColor(tier),
+        iconColor:   'white',
+        icon:        'home',
+        prefix:      'fa',
+        extraClasses: 'fa-rotate-0',
+      });
+      const tooltip = (project.name || 'Untitled') + (tier ? ' · ' + tier : '');
+      return window.L.marker([project.lat, project.lng], { icon, zIndexOffset: 400 })
+        .bindTooltip(tooltip, { sticky: true });
+    } catch (_) {
+      return null;
+    }
+  }
+
   function _drawRoutes(id) {
     _clearRoutes();
     const project = getProject(id);
     if (!project || !project.result) return;
     const map = _getMap();
     if (!map) return;
-    // Show the Folium FeatureGroup baked for this project (search radius + route GeoJSON)
-    if (project.folium_fg_name && typeof window !== 'undefined' && window[project.folium_fg_name]) {
+    // Show the Folium FeatureGroup baked for this project (search radius + route GeoJSON).
+    // Pipeline projects carry folium_fg_name → sidebar.js just toggles the pre-baked layer.
+    // Browser / reloaded / opened-from-.json projects have no Folium FG — they fall
+    // through to the runtime-marker branch below so their home icon still renders.
+    const hasFoliumFg = !!(
+      project.folium_fg_name &&
+      typeof window !== 'undefined' &&
+      window[project.folium_fg_name]
+    );
+    if (hasFoliumFg) {
       try { map.addLayer(window[project.folium_fg_name]); } catch (_) {}
+    } else {
+      // Runtime home marker for browser projects.  Tracked in _routeLayers
+      // so _clearRoutes() removes it on deselect or project switch.
+      const homeMarker = _buildRuntimeHomeMarker(project);
+      if (homeMarker) {
+        homeMarker.addTo(map);
+        _routeLayers.push(homeMarker);
+      }
     }
     const tier  = project.result.tier || '';
     const color = TIER_COLOR[tier] || '#555';
@@ -929,10 +981,14 @@
       }
     });
 
-    // Pan to fit routes
+    // Pan to fit routes — include the project's own coordinates so the home
+    // marker is always inside the viewport, not clipped by route-only bounds.
     if (_routeLayers.length > 0) {
       try {
         const allCoords = (project.result.paths || []).flatMap(p => p.path_coords || p.coordinates || []);
+        if (project.lat != null && project.lng != null) {
+          allCoords.push([project.lat, project.lng]);
+        }
         if (allCoords.length > 0) map.fitBounds(allCoords, { padding: [20, 20] });
       } catch (_) {}
     }
