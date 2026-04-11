@@ -428,8 +428,8 @@
   function _buildWhatIfBanner(inp) {
     if ((inp.source || '') !== 'whatif') return '';
     return '<div class="whatif-banner no-print">' +
-      '&#9888; What-If Estimate \u2014 Not a Legal Determination. ' +
-      'Run <code>build.py evaluate</code> for a binding audit trail.' +
+      '&#9888; What-If Estimate \u2014 For planning purposes only. ' +
+      'Not an official determination. Export and stamp with city letterhead before filing.' +
       '</div>';
   }
 
@@ -1024,7 +1024,7 @@
     if (ctrlLanes) ctrlHcmParts.push(ctrlLanes + ' lanes');
     var ctrlHcmDetail = ctrlHcmParts.join(', ');
 
-    // Audit trail (pipeline source only)
+    // Audit trail — generated client-side by sidebar._buildAuditText(); open by default
     var auditBlock = '';
     if (inp.audit_text) {
       auditBlock = '<details class="no-print" style="margin-top:4px;">' +

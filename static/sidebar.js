@@ -63,6 +63,67 @@
   let _restoreBanner   = false; // whether to show session-restore banner
   let _dirtyIds        = new Set(); // ids of projects with unsaved changes (have handle, written ≠ memory)
 
+  // ── localStorage auto-save (browser-created projects) ────────────────────────
+  // Invisible per-session persistence for projects drawn in the browser.
+  // Pipeline seeds come from JOSH_DATA every init and are not written here.
+  // See docs/ux-spec-project-workflow-v1.md §7.
+  const LS_VERSION = 1;
+  function _lsKey() { return 'josh_sb_v' + LS_VERSION + '_' + _citySlug(); }
+
+  function _saveToLocalStorage() {
+    try {
+      const store = (typeof localStorage !== 'undefined') ? localStorage : null;
+      if (!store) return;
+      const browserOnly = _projects
+        .filter(p => p.source !== 'pipeline')
+        .map(p => {
+          // Strip runtime-only fields; _handle is non-serializable.
+          const copy = {};
+          for (const k in p) {
+            if (k === '_handle' || k === '_stale') continue;
+            copy[k] = p[k];
+          }
+          return copy;
+        });
+      store.setItem(_lsKey(), JSON.stringify({ schema_v: SCHEMA_V, projects: browserOnly }));
+    } catch (_) { /* localStorage unavailable or quota exceeded — silent */ }
+  }
+
+  function _loadFromLocalStorage() {
+    try {
+      const store = (typeof localStorage !== 'undefined') ? localStorage : null;
+      if (!store) return;
+      const raw = store.getItem(_lsKey());
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (!obj || (obj.schema_v || 0) > SCHEMA_V) return;
+      const now = new Date().toISOString();
+      for (const p of (obj.projects || [])) {
+        if (_projects.find(existing => existing.id === p.id)) continue;
+        _projects.push({
+          id:                 p.id || _uuid(),
+          schema_v:           SCHEMA_V,
+          city_slug:          p.city_slug          || _citySlug(),
+          josh_version:       p.josh_version       || _joshVer(),
+          parameters_version: p.parameters_version || _paramsVer(),
+          name:               p.name    || '',
+          address:            p.address || '',
+          lat:                p.lat     != null ? +p.lat : null,
+          lng:                p.lng     != null ? +p.lng : null,
+          units:              +(p.units   || 50),
+          stories:            +(p.stories || 4),
+          source:             p.source  || 'browser',
+          created_at:         p.created_at  || now,
+          analyzed_at:        p.analyzed_at || null,
+          result:             p.result  || null,
+          brief_cache:        p.brief_cache || null,
+          _handle:            null,
+          _stale:             false,
+        });
+      }
+    } catch (_) { /* corrupt data — silent */ }
+  }
+
   // ── Normalize WhatIfEngine output → file-format schema ───────────────────────
   // WhatIfEngine.evaluateProject() returns mixed camelCase/snake_case.
   // File format (spec §7) and JOSH_DATA.projects use snake_case throughout.
@@ -117,6 +178,7 @@
       _stale:              false,  // parameters_version mismatch flag
     }, fields || {});
     _projects.push(p);
+    _saveToLocalStorage();
     return p;
   }
 
@@ -128,6 +190,7 @@
       _projects[idx].analyzed_at = new Date().toISOString();
     }
     _markDirty(id);   // no-op when project has no file handle
+    _saveToLocalStorage();
     return _projects[idx];
   }
 
@@ -143,6 +206,7 @@
   function deleteProject(id) {
     _projects = _projects.filter(p => p.id !== id);
     _clearHandle(id).catch(() => {});
+    _saveToLocalStorage();
   }
 
   function getProject(id) {
@@ -300,72 +364,190 @@
     const thr       = +(result.delta_t_threshold || 0);
     const safeWin   = (maxShare > 0 && thr > 0) ? thr / maxShare : 0;
     const paths     = result.paths || [];
-    const sep40     = '\u2500'.repeat(40);
+    const sep70     = '='.repeat(70);
+    const sep40     = '-'.repeat(40);
+
+    // ── Helpers ──
+    // Reverse-map hazard_degradation_factor → FHSZ zone string
+    function _degToZone(deg) {
+      var d = +(deg != null ? deg : 1.0);
+      if (Math.abs(d - 0.35) < 0.01) return 'vhfhsz';
+      if (Math.abs(d - 0.50) < 0.01) return 'high_fhsz';
+      if (Math.abs(d - 0.75) < 0.01) return 'moderate_fhsz';
+      return 'non_fhsz';
+    }
+    // HAZ_CLASS integer for display
+    function _hazClass(zone) {
+      return ({ vhfhsz: 4, high_fhsz: 3, moderate_fhsz: 2 })[zone] || 0;
+    }
+    // Human-readable road type label
+    function _rtLabel(rt) {
+      if (rt === 'freeway')   return 'Freeway';
+      if (rt === 'multilane') return 'Multi-lane highway';
+      if (rt === 'two_lane')  return 'Two-lane highway';
+      return rt || '?';
+    }
 
     const L = [];
-    L.push('JOSH Evacuation Clearance Audit Trail');
-    L.push('Parameters v' + (project.parameters_version || '?'));
-    L.push(sep40);
-    L.push('');
-    L.push('Project:  ' + (project.name || 'Untitled'));
-    if (project.address) L.push('Address:  ' + project.address);
-    L.push('Location: ' + (project.lat != null ? (+project.lat).toFixed(6) : '?') +
-           ', ' + (project.lng != null ? (+project.lng).toFixed(6) : '?'));
-    L.push('Units:    ' + (project.units || 0) +
-           (project.stories > 0 ? ' @ ' + project.stories + ' stories' : ''));
-    L.push('Source:   ' + (project.source || 'browser'));
-    L.push('');
-    L.push('\u2500\u2500 Standard 1: Applicability \u2500\u2500');
-    L.push('Unit threshold:  ' + ut + ' units');
-    L.push('Applies:         ' + ((project.units || 0) >= ut ? 'YES' : 'NO \u2014 below threshold'));
-    L.push('');
-    L.push('\u2500\u2500 Standard 3: FHSZ \u2500\u2500');
-    L.push('Hazard zone:     ' + hz);
-    L.push('In fire zone:    ' + (result.in_fire_zone ? 'YES' : 'NO'));
-    L.push('');
-    L.push('\u2500\u2500 Standard 4: \u0394T Analysis \u2500\u2500');
-    L.push('Vehicles / unit: ' + vpu.toFixed(1));
-    L.push('Mobilization:    ' + (mob * 100).toFixed(0) + '% (NFPA 101 design basis)');
-    L.push('Project vehicles:' + pv.toFixed(1) +
-           ' (' + (project.units || 0) + ' \xd7 ' + vpu.toFixed(1) + ' \xd7 ' + mob.toFixed(2) + ')');
-    if (ep > 0) {
-      L.push('Egress penalty:  +' + ep.toFixed(1) + ' min (\u22654 stories, NFPA 101/IBC)');
-    }
-    L.push('Safe egress win: ' + safeWin.toFixed(0) + ' min');
-    L.push('Max project shr: ' + (maxShare * 100).toFixed(0) + '%');
-    L.push('\u0394T threshold:    ' + thr.toFixed(3) + ' min');
+
+    // ── Document header ──
+    L.push(sep70);
+    L.push('FIRE EVACUATION CAPACITY ANALYSIS  -  PROJECT DETERMINATION');
+    L.push('JOSH v4.0 (\u0394T Standard  -  Constant Mobilization, NFPA 101)');
+    L.push(sep70);
+    L.push('Project:        ' + (project.name || 'Untitled'));
+    if (project.address) L.push('Address:        ' + project.address);
+    L.push('Location:       ' +
+           (project.lat != null ? (+project.lat).toFixed(4) : '?') + ', ' +
+           (project.lng != null ? (+project.lng).toFixed(4) : '?'));
+    L.push('Dwelling Units: ' + (project.units || 0));
+    if ((project.stories || 0) > 0) L.push('Stories:        ' + project.stories);
+    L.push('Parameters:     v' + (project.parameters_version || '?'));
     L.push('');
 
+    // ── Algorithm description ──
+    L.push('ALGORITHM');
+    L.push(sep40);
+    L.push('  Universal 5-Step Evacuation Capacity Algorithm v4.0 (\u0394T Standard  -  constant mobilization)');
+    L.push('  Each scenario applies: (1) applicability check, (2) scale gate,');
+    L.push('  (3) route identification (EvacuationPath objects with bottleneck tracking),');
+    L.push('  (4) demand calculation (mobilization rate 0.90 \xd7 vpu \xd7 units  -  NFPA 101 design basis),');
+    L.push('  (5) \u0394T test (project_vehicles / bottleneck_effective_capacity \xd7 60 + egress).');
+    L.push('  FHSZ affects road capacity degradation only  -  not mobilization.');
+    L.push('');
+
+    // ── Scenario header ──
+    L.push(sep70);
+    L.push('SCENARIO: WILDLAND_AB747');
+    L.push('  Legal Basis: AB 747 (California Government Code \xa765302.15)  -  General Plan Safety Element');
+    L.push('    mandatory update for evacuation route capacity analysis;');
+    L.push('    HCM 2022 (Highway Capacity Manual, 7th Edition)  -  effective capacity with hazard degradation;');
+    L.push('    NFPA 101 (Life Safety Code)  -  0.90 mobilization design basis;');
+    L.push('    NIST TN 2135 (Maranghides et al.)  -  safe egress windows by hazard zone');
+    L.push('  Result: ' + (result.tier || '?') +
+           '  |  Triggered: ' + (paths.some(function(p){ return p.flagged; }) ? 'YES' : 'NO'));
+    L.push(sep70);
+    L.push('');
+
+    // ── STEP 1: Applicability ──
+    L.push('  STEP 1  -  APPLICABILITY CHECK (Standard 3: FHSZ Modifier)');
+    L.push('  ' + sep40);
+    L.push('  Method: Always applicable; site FHSZ check via GIS point-in-polygon');
+    L.push('  Result: APPLICABLE');
+    L.push('  Standard 3 (FHSZ): ' + hz +
+           (result.in_fire_zone ? ' (in fire zone)' : ' [HAZ_CLASS=0]  (not in FHSZ)'));
+    L.push('  Mobilization Rate: ' + mob.toFixed(2) +
+           ' (NFPA 101 design basis  -  constant; Census ACS B25044 zero-vehicle adjustment)');
+    L.push('');
+
+    // ── STEP 2: Scale gate ──
+    L.push('  STEP 2  -  SCALE GATE (Standard 1)');
+    L.push('  ' + sep40);
+    var applies = (project.units || 0) >= ut;
+    L.push('  ' + (project.units || 0) + ' ' + (applies ? '>=' : '<') + ' ' + ut +
+           ' -> ' + (applies ? 'TRIGGERED' : 'NOT TRIGGERED'));
+    L.push('  (' + (project.units || 0) + ' units vs. ' + ut + ' threshold)');
+    L.push('');
+
+    // ── STEP 3: Route identification ──
+    L.push('  STEP 3  -  ROUTE IDENTIFICATION (Standard 2)');
+    L.push('  ' + sep40);
+    L.push('  Method: Project-origin Dijkstra (v4.0, travel-time weight)  -  fastest path to each');
+    L.push('    regional-network exit node; bottleneck = argmin(eff_cap_vph) on path edges');
+    L.push('  Radius: 0.5 miles (804.7 m)');
     if (paths.length === 0) {
-      L.push('No serving routes found within 0.5 mi radius.');
+      L.push('  No serving routes found within 0.5 mi radius.');
     } else {
-      L.push('Serving routes (' + paths.length + '):');
+      L.push('  Serving EvacuationPaths identified: ' + paths.length);
       paths.forEach(function (p) {
-        const rid = p.route_id || '?';
-        L.push('');
-        L.push('  Route ' + rid + ':');
-        if (p.bottleneck_name) {
-          L.push('    Bottleneck:  ' + p.bottleneck_name +
-                 ' (osmid ' + (p.bottleneck_osmid || '?') + ')');
-        }
-        L.push('    Road type:   ' + (p.bottleneck_road_type || '?'));
-        L.push('    Lanes:       ' + (p.bottleneck_lanes || '?'));
-        L.push('    Speed:       ' + (p.bottleneck_speed || '?') + ' mph');
-        if (+p.hazard_degradation_factor < 1.0) {
-          L.push('    Degradation: \xd7' + (+p.hazard_degradation_factor).toFixed(4) +
-                 ' (VHFHSZ/FHSZ capacity reduction)');
-        }
-        L.push('    Eff. cap.:   ' + (+p.effective_capacity_vph).toFixed(0) + ' vph');
-        const dt = (+p.delta_t).toFixed(3);
-        L.push('    \u0394T:          ' + dt + ' min ' +
-               (p.flagged ? '\u25b2 FLAGGED (>' + thr.toFixed(3) + ')' : '\u2713 OK'));
+        var bnOsmid = p.bottleneck_osmid || '?';
+        var bnName  = p.bottleneck_name || null;
+        var label   = bnName || bnOsmid;
+        var zone    = _degToZone(p.hazard_degradation_factor);
+        var deg     = +(p.hazard_degradation_factor != null ? p.hazard_degradation_factor : 1.0);
+        var effCap  = +(p.effective_capacity_vph || 0);
+        L.push('    - ' + label + ': eff_cap=' + effCap.toFixed(0) +
+               ' vph, fhsz=' + zone + ', deg=' + deg.toFixed(2) + ' (informational)');
       });
     }
-
     L.push('');
-    L.push('\u2500\u2500 Determination \u2500\u2500');
-    L.push('Tier:     ' + (result.tier || '?'));
-    L.push('Analyzed: ' + (project.analyzed_at || new Date().toISOString()));
+
+    // ── STEP 4: Demand calculation ──
+    L.push('  STEP 4  -  DEMAND CALCULATION');
+    L.push('  ' + sep40);
+    L.push('  Formula: ' + (project.units || 0) + ' \xd7 ' + vpu.toFixed(1) + ' \xd7 ' + mob.toFixed(2));
+    L.push('  Hazard Zone: ' + hz);
+    L.push('  Mobilization Rate: ' + mob.toFixed(2) + ' (NFPA 101 design basis, constant)');
+    L.push('  Project vehicles (peak hour): ' + pv.toFixed(1) + ' vph');
+    L.push('  Source (vehicles/unit): U.S. Census ACS B25044');
+    L.push('');
+
+    // ── STEP 5: ΔT test ──
+    L.push('  STEP 5  -  \u0394T TEST (Standard 4)');
+    L.push('  ' + sep40);
+    L.push('  Method: \u0394T = (project_vehicles / bottleneck_effective_capacity) \xd7 60 + egress');
+    L.push('  Hazard Zone: ' + hz);
+    L.push('  Project Vehicles: ' + pv.toFixed(1) + ' vph');
+    L.push('  Egress Penalty: ' + ep.toFixed(1) + ' min (NFPA 101/IBC; applies to buildings \u22654 stories)');
+    L.push('  Safe Egress Window: ' + safeWin.toFixed(0) + ' min (' + hz + ', NIST TN 2135)');
+    L.push('  Max Project Share:  ' + (maxShare * 100).toFixed(0) + '%');
+    L.push('  \u0394T Threshold:       ' + thr.toFixed(2) + ' min (' +
+           safeWin.toFixed(0) + ' min window \xd7 ' + (maxShare * 100).toFixed(0) + '%, NIST TN 2135)');
+    L.push('  Paths Evaluated: ' + paths.length);
+
+    // Max ΔT and triggered flag
+    var maxDt     = 0;
+    var anyFlagged = false;
+    paths.forEach(function(p) {
+      var dt = +(p.delta_t || 0);
+      if (dt > maxDt) maxDt = dt;
+      if (p.flagged) anyFlagged = true;
+    });
+    L.push('  Max \u0394T: ' + maxDt.toFixed(2) + ' min');
+    L.push('  Triggered: ' + (anyFlagged ? 'YES  -  DISCRETIONARY' : 'NO'));
+    L.push('');
+    L.push('  Per-Path Results (all evaluated paths):');
+
+    paths.forEach(function (p) {
+      var bnOsmid = p.bottleneck_osmid || '?';
+      var bnName  = p.bottleneck_name  || null;
+      var bnLabel = bnName || bnOsmid;
+      var flagLine = p.flagged
+        ? '*** \u0394T EXCEEDS THRESHOLD  -  DISCRETIONARY ***'
+        : '[within threshold]';
+      var zone    = _degToZone(p.hazard_degradation_factor);
+      var hazCls  = _hazClass(zone);
+      var deg     = +(p.hazard_degradation_factor != null ? p.hazard_degradation_factor : 1.0);
+      var effCap  = +(p.effective_capacity_vph || 0);
+      var hcmCap  = deg > 0 ? Math.round(effCap / deg) : effCap;
+      var dt      = +(p.delta_t || 0);
+      var rtLbl   = _rtLabel(p.bottleneck_road_type);
+
+      L.push('');
+      // Path header — route letter + bottleneck name + flag status
+      L.push('    Path ' + (p.route_id || '?') + ':');
+      L.push('    Bottleneck: ' + bnLabel +
+             (bnName ? ' (osmid ' + bnOsmid + ')' : '') + '  ' + flagLine);
+      // Road detail: type | speed | lanes | HAZ_CLASS
+      L.push('      Road: ' + rtLbl + '  |  Speed: ' + (p.bottleneck_speed || '?') +
+             ' mph  |  Lanes: ' + (p.bottleneck_lanes || '?') +
+             '  |  HAZ_CLASS: ' + hazCls + ' (' + zone + ')');
+      // HCM cap × degradation = eff cap
+      L.push('      HCM cap: ' + hcmCap + ' vph  x degradation ' + deg.toFixed(2) +
+             ' (' + zone + ')  = eff cap ' + effCap.toFixed(0) + ' vph');
+      // ΔT formula with all numbers + threshold context
+      L.push('      \u0394T = (' + pv.toFixed(1) + ' vph / ' + effCap.toFixed(0) +
+             ' vph) \xd7 60 + ' + ep.toFixed(1) + ' min egress = ' + dt.toFixed(2) + ' min' +
+             '  (threshold: ' + thr.toFixed(2) + ' min (' +
+             safeWin.toFixed(0) + ' min \xd7 ' + (maxShare * 100).toFixed(0) + '%))');
+    });
+
+    // ── Footer ──
+    L.push('');
+    L.push(sep70);
+    L.push('Determination: ' + (result.tier || '?'));
+    L.push('Analyzed:      ' + (project.analyzed_at || new Date().toISOString()));
+    L.push(sep70);
     L.push('');
     L.push('All inputs, calculations, and threshold comparisons are fully');
     L.push('reproducible from the parameters above per JOSH methodology v4.0.');
@@ -691,6 +873,15 @@
     const map = _getMap();
     if (map) {
       _routeLayers.forEach(l => { try { map.removeLayer(l); } catch (_) {} });
+      // Hide all Folium project FeatureGroups (pipeline projects carry folium_fg_name).
+      // This ensures no stale route layer persists when switching projects or clearing.
+      if (typeof window !== 'undefined') {
+        _projects.forEach(p => {
+          if (p.folium_fg_name && window[p.folium_fg_name]) {
+            try { map.removeLayer(window[p.folium_fg_name]); } catch (_) {}
+          }
+        });
+      }
     }
     _routeLayers = [];
   }
@@ -701,6 +892,10 @@
     if (!project || !project.result) return;
     const map = _getMap();
     if (!map) return;
+    // Show the Folium FeatureGroup baked for this project (search radius + route GeoJSON)
+    if (project.folium_fg_name && typeof window !== 'undefined' && window[project.folium_fg_name]) {
+      try { map.addLayer(window[project.folium_fg_name]); } catch (_) {}
+    }
     const tier  = project.result.tier || '';
     const color = TIER_COLOR[tier] || '#555';
     const bkMap = _jd().graph ? (function () {
@@ -811,10 +1006,14 @@
         analyzed_at:         new Date().toISOString(),
         result:              seed.result  || null,
         brief_cache:         seed.brief_cache || null,
+        folium_fg_name:      seed.folium_fg_name || null,
         _handle:             null,
         _stale:              false,
       });
     }
+
+    // Restore browser-created projects from localStorage (synchronous, cheap)
+    _loadFromLocalStorage();
 
     _render();
 
@@ -963,8 +1162,6 @@
         _selectedId = id;
         _drawRoutes(id);
         _render();
-        // Prompt Save As
-        saveAsFile(id).then(() => _render());
       });
     } else {
       updateProject(_formProjectId, { name, address, units, stories, lat, lng, brief_cache: null });
@@ -977,7 +1174,6 @@
       _selectedId = id;
       _drawRoutes(id);
       _render();
-      saveFile(id).then(() => _render());
     }
   }
 
@@ -1102,7 +1298,8 @@
           'border-bottom:1px solid #f0f0f0;cursor:pointer;background:' + bg + ';">' +
           '<span style="flex-shrink:0;">' + dot + '</span>' +
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" ' +
-            'title="' + _esc(p.name || '\u2014') + '">' + _esc(p.name || '<em style="color:#aaa">Untitled</em>') + '</span>' +
+            'title="' + _esc(p.name || '\u2014') + '">' +
+            (p.name ? _esc(p.name) : '<em style="color:#aaa">Untitled</em>') + '</span>' +
           '<span style="font-size:11px;font-weight:700;color:' + color + ';flex-shrink:0;">' + _esc(abbr) + '</span>' +
         '</div>';
       }).join('');
@@ -1122,16 +1319,19 @@
     // Project name
     html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">' + _esc(p.name || 'Untitled') + '</div>';
 
+    // Auto-save status line — only for browser-drawn projects (pipeline seeds are
+    // reloaded from JOSH_DATA, not persisted in localStorage).
+    if (p.source !== 'pipeline') {
+      html += '<div style="font-size:11px;color:#7f8c8d;margin-bottom:8px;" ' +
+              'title="This project is auto-saved to your browser\'s localStorage on every change. ' +
+              'Click \u201CDownload .json\u201D below for an extra durable copy (survives a cache wipe).">' +
+              '\u25cf Auto-saved to this browser</div>';
+    }
+
     // Stale notice
     if (p._stale) {
       html += '<div style="font-size:11px;color:#856404;background:#fff3cd;padding:4px 8px;' +
               'border-radius:3px;margin-bottom:8px;">\u2139 Re-analyzed \u2014 parameters updated.</div>';
-    }
-
-    // Unsaved changes notice (has file handle but memory is ahead of disk)
-    if (_dirtyIds.has(p.id)) {
-      html += '<div style="font-size:11px;color:#856404;background:#fff3cd;padding:4px 8px;' +
-              'border-radius:3px;margin-bottom:8px;">\u25cf Unsaved changes \u2014 click Save to write file.</div>';
     }
 
     if (!r) {
@@ -1280,18 +1480,39 @@
   function _renderFooter() {
     const p = _selectedId ? getProject(_selectedId) : null;
     if (!p || !p.result) return '';
-    const dirty     = _dirtyIds.has(_selectedId);
-    const saveLabel = dirty ? '\u25cf Save' : 'Save';   // ● Save when unsaved changes
-    return '<div style="padding:10px 14px;border-top:1px solid #eee;flex-shrink:0;display:flex;flex-wrap:wrap;gap:6px;">' +
-      '<button onclick="joshSidebar_save(\'' + _selectedId + '\')" style="flex:1;min-width:60px;' + _btn('#1c4a6e','#fff') + '">' + saveLabel + '</button>' +
-      '<button onclick="joshSidebar_saveAs(\'' + _selectedId + '\')" style="flex:1;min-width:70px;' + _btn('#f5f5f5','#555','#ccc') + '">Save As\u2026</button>' +
-      '<button onclick="joshSidebar_exportYaml()" style="width:100%;' + _btn('#f5f5f5','#555','#ccc') + '">Export for pipeline</button>' +
+    // Single download button — explicit backup/export that survives a cache wipe.
+    // Pipeline-seeded projects are reproducible from the YAML source, so the download
+    // is primarily useful for browser-drawn projects; show it for all for consistency.
+    // Admin YAML export lives at window.joshSidebar._toYaml() for console use.
+    return '<div style="padding:10px 14px;border-top:1px solid #eee;flex-shrink:0;">' +
+      '<button onclick="joshSidebar_saveAs(\'' + _selectedId + '\')" ' +
+      'title="Download a JSON backup of this project (for archive / email / re-import)" ' +
+      'style="width:100%;' + _btn('#1c4a6e','#fff') + '">Download .json</button>' +
     '</div>';
   }
 
   // ── Wire live listeners on form inputs ────────────────────────────────────────
+  // Every form input persists to project state on every keystroke so that a
+  // subsequent _render() (triggered by onPinPlaced, the analysis debounce, or
+  // any other cause) re-renders the form from up-to-date project state instead
+  // of wiping in-progress user input. Only units/stories trigger re-analysis;
+  // name/address persist silently without re-rendering.
   function _wireFormListeners() {
     if (!_formMode || !_formProjectId) return;
+
+    // Name and address — persist on every keystroke, no re-render, no re-analysis.
+    ['josh-sb-f-name', 'josh-sb-f-addr'].forEach(elId => {
+      const el = _el(elId);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        if (!_formProjectId) return;
+        const name    = (_el('josh-sb-f-name') || {}).value || '';
+        const address = (_el('josh-sb-f-addr') || {}).value || '';
+        updateProject(_formProjectId, { name, address });
+      });
+    });
+
+    // Units and stories — persist, then debounced re-analysis + re-render.
     ['josh-sb-f-units', 'josh-sb-f-stories'].forEach(elId => {
       const el = _el(elId);
       if (!el) return;
@@ -1348,7 +1569,13 @@
 
   // ── Public API ────────────────────────────────────────────────────────────────
   if (typeof window !== 'undefined') {
-    window.joshSidebar = { init, onPinPlaced, getProjects, selectProject };
+    // _toYaml is exposed for the admin "promote to pipeline source" workflow:
+    //   window.joshSidebar._toYaml()  → returns a YAML snippet suitable for pasting
+    //   into josh-pipeline/projects/{city}_demo.yaml so the next Python rebuild
+    //   bakes this project into the seeded list. Not a finding-generation step —
+    //   the JS engine is already authoritative. See
+    //   ~/.claude/plans/spicy-prancing-backus.md §1.
+    window.joshSidebar = { init, onPinPlaced, getProjects, selectProject, _toYaml };
   }
 
   // CommonJS export for Node.js test runner
@@ -1377,7 +1604,16 @@
         _deleteConfirmId = null;
         _restoreBanner   = false;
         _dirtyIds        = new Set();
+        // Clear localStorage for this city to avoid test cross-pollination.
+        try {
+          const store = (typeof localStorage !== 'undefined') ? localStorage : null;
+          if (store) store.removeItem(_lsKey());
+        } catch (_) {}
       },
+      // localStorage test hooks
+      _saveToLocalStorage,
+      _loadFromLocalStorage,
+      _lsKey,
       // Phase 4 test helpers
       _renderRestoreBanner,
       _setRestoreBanner(val) { _restoreBanner = !!val; },
