@@ -27,8 +27,8 @@
   var PH       = 792;          // page height
   var ML       = 54;           // left margin  (0.75")
   var MR       = 54;           // right margin
-  var MT       = 43;           // top margin   (0.6")
-  var MB       = 43;           // bottom margin
+  var MT       = 54;           // top margin   (0.75")
+  var MB       = 54;           // bottom margin
   var BW       = PW - ML - MR; // body width = 504 pt
   var BODY_FS  = 10;           // body font size
   var FOOT_FS  = 8;            // footer font size
