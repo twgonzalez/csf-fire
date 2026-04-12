@@ -555,6 +555,19 @@
     return L.join('\n');
   }
 
+  function _downloadPdf(project) {
+    if (typeof window === 'undefined' || !window.JoshPdfReport) {
+      _showError('PDF module not loaded \u2014 try reloading the page.'); return;
+    }
+    if (!project.result) {
+      _showError('No analysis result \u2014 run the evaluation first.'); return;
+    }
+    var briefInput = _buildBriefInput(project);
+    var auditText  = _buildAuditText(project, project.result || {}, _params());
+    window.JoshPdfReport.generate(briefInput, auditText)
+      .catch(function (e) { _showError('PDF generation failed: ' + e.message); });
+  }
+
   function _openBrief(project) {
     if (typeof window === 'undefined' || !window.BriefRenderer) {
       _showError('Brief renderer not loaded — try reloading the page.'); return;
@@ -1478,6 +1491,10 @@
       // View Report button
       html += '<button onclick="joshSidebar_openBrief(\'' + _selectedId + '\')" ' +
               'style="width:100%;margin-bottom:6px;' + _btn('#1c4a6e','#fff') + '">View Report</button>';
+
+      // Download PDF button
+      html += '<button onclick="joshSidebar_downloadPdf(\'' + _selectedId + '\')" ' +
+              'style="width:100%;margin-bottom:6px;' + _btn('#f5f5f5','#1c4a6e','#ccc') + '">Download PDF</button>';
     }
 
     // Edit / Delete
@@ -1633,6 +1650,7 @@
     window.joshSidebar_cancelDelete   = ()  => { _deleteConfirmId = null; _render(); };
     window.joshSidebar_doDelete       = id => _doDelete(id);
     window.joshSidebar_openBrief      = id => { const p = getProject(id); if (p) _openBrief(p); };
+    window.joshSidebar_downloadPdf    = id => { const p = getProject(id); if (p) _downloadPdf(p); };
     window.joshSidebar_submitForm     = () => _submitForm();
     window.joshSidebar_cancelForm     = () => { cancelForm(); _render(); };
     window.joshSidebar_rePin          = () => _enterPinMode();
