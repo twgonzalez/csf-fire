@@ -37,7 +37,7 @@
   var CHAR_W   = 6;            // Courier char width at 10pt
   var COLS     = Math.floor(BW / CHAR_W);  // ~84
   var FOOTER_H = 30;           // reserved footer space
-  var HDR_H    = 20;           // reserved header space (pages 2+)
+  var HDR_H    = 30;           // reserved header space (pages 2+)
   var BOX_W    = 72;           // cover box width in chars
   var BOX_PW   = BOX_W * CHAR_W;           // box pixel width = 432pt
   var BOX_X    = ML + (BW - BOX_PW) / 2;  // centered box left edge
@@ -280,11 +280,13 @@
         var isDetermination = /^Determination:/.test(line.trim());
 
         if (isSectionHeader) {
-          // Draw a thin rule instead of ====== text
+          // Draw a thin rule with clearance above and below adjacent text.
+          // Rule sits at the current baseline; advance a full line afterward
+          // so the next text (often a bold section title) doesn't overlap.
           doc.setDrawColor(120);
           doc.setLineWidth(0.5);
-          doc.line(ML, ctx.y - 4, ML + BW, ctx.y - 4);
-          ctx.y += 2;
+          doc.line(ML, ctx.y - 2, ML + BW, ctx.y - 2);
+          ctx.y += LH;
           continue;
         }
 
