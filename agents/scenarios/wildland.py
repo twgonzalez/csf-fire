@@ -702,7 +702,8 @@ class WildlandScenario(EvacuationScenario):
                             f"{min_travel_time/60:.1f} min); {len(filtered)} remain"
                         )
 
-                    seen_bottlenecks: dict[str, float] = {}  # osmid → fastest travel time (s)
+                    seen_bottlenecks: dict[tuple, float] = {}   # dedup_key → fastest travel time (s)
+                    best_paths: dict[tuple, EvacuationPath] = {}  # dedup_key → best EvacuationPath
                     for path_travel_time, exit_node_id, path_osmids_local, exit_osmid, path_length, path_wgs84_local, _osmid_uv in filtered:
                         bottleneck_osmid = min(
                             path_osmids_local,
@@ -713,17 +714,9 @@ class WildlandScenario(EvacuationScenario):
                         if eff_cap <= 0:
                             continue
 
-                        # Dedup: keep only the fastest-travel-time path to each unique bottleneck.
-                        # Travel time (not distance) is the dedup key because Dijkstra now routes
-                        # on time — two paths to the same bottleneck may have different lengths
-                        # but the faster one is the correct evacuation route to preserve.
-                        prior_tt = seen_bottlenecks.get(bottleneck_osmid)
-                        if prior_tt is not None and path_travel_time >= prior_tt:
-                            continue
-                        seen_bottlenecks[bottleneck_osmid] = path_travel_time
-
                         # Cross-street enrichment: look up intersecting street names
-                        # at the bottleneck segment's endpoint nodes.
+                        # at the bottleneck segment's endpoint nodes.  Must run BEFORE
+                        # dedup so the dedup key can use the human-readable label.
                         bn_name = osmid_to_name.get(bottleneck_osmid, "")
                         bn_uv = _osmid_uv.get(bottleneck_osmid)
                         cross_a, cross_b = "", ""
@@ -734,6 +727,19 @@ class WildlandScenario(EvacuationScenario):
                             dist_mi, bearing = _bottleneck_distance_bearing(
                                 G, bn_u, bn_v, proj_x, proj_y,
                             )
+
+                        # Dedup: keep only the fastest-travel-time path to each
+                        # physically distinct bottleneck.  Key on the human-readable
+                        # label (name + cross streets) so that multiple OSM way
+                        # sub-segments on the same road between the same intersections
+                        # collapse into a single representative path.  Falls back to
+                        # osmid when there is no name and no cross streets (rare —
+                        # guarantees no silent merging of truly different segments).
+                        dedup_key = (bn_name, cross_a, cross_b) if (bn_name or cross_a or cross_b) else (bottleneck_osmid,)
+                        prior_tt = seen_bottlenecks.get(dedup_key)
+                        if prior_tt is not None and path_travel_time >= prior_tt:
+                            continue
+                        seen_bottlenecks[dedup_key] = path_travel_time
 
                         path_id = f"proj_{_origin_node}_{exit_node_id}"
                         evac_path = EvacuationPath(
@@ -757,7 +763,10 @@ class WildlandScenario(EvacuationScenario):
                             path_osmids=path_osmids_local,
                             path_wgs84_coords=path_wgs84_local,
                         )
-                        project_paths.append(evac_path)
+                        best_paths[dedup_key] = evac_path
+
+                    # Collect the winning path for each distinct bottleneck
+                    project_paths.extend(best_paths.values())
 
             logger.info(
                 f"  Project-origin Dijkstra (travel-time weight): {len(project_paths)} "

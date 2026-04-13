@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-13T02:57:00.210170+00:00",
+  "generated_at": "2026-04-13T03:30:20.087469+00:00",
   "parameters_version": "4.0",
   "vectors": [
     {
@@ -30,14 +30,8 @@
         "tier": "DISCRETIONARY",
         "hazard_zone": "non_fhsz",
         "project_vehicles": 191.2,
-        "serving_paths_count": 8,
+        "serving_paths_count": 5,
         "paths": [
-          {
-            "bottleneck_osmid": "1000718782",
-            "delta_t_minutes": 6.04,
-            "threshold_minutes": 6.0,
-            "flagged": true
-          },
           {
             "bottleneck_osmid": "1000718782",
             "delta_t_minutes": 6.04,
@@ -52,18 +46,6 @@
           },
           {
             "bottleneck_osmid": "6320410",
-            "delta_t_minutes": 5.1,
-            "threshold_minutes": 6.0,
-            "flagged": false
-          },
-          {
-            "bottleneck_osmid": "6321559",
-            "delta_t_minutes": 5.1,
-            "threshold_minutes": 6.0,
-            "flagged": false
-          },
-          {
-            "bottleneck_osmid": "6321559",
             "delta_t_minutes": 5.1,
             "threshold_minutes": 6.0,
             "flagged": false
@@ -134,26 +116,8 @@
         "tier": "MINISTERIAL WITH STANDARD CONDITIONS",
         "hazard_zone": "non_fhsz",
         "project_vehicles": 56.2,
-        "serving_paths_count": 4,
+        "serving_paths_count": 1,
         "paths": [
-          {
-            "bottleneck_osmid": "23089172",
-            "delta_t_minutes": 3.0,
-            "threshold_minutes": 6.0,
-            "flagged": false
-          },
-          {
-            "bottleneck_osmid": "23089172",
-            "delta_t_minutes": 3.0,
-            "threshold_minutes": 6.0,
-            "flagged": false
-          },
-          {
-            "bottleneck_osmid": "23089172",
-            "delta_t_minutes": 3.0,
-            "threshold_minutes": 6.0,
-            "flagged": false
-          },
           {
             "bottleneck_osmid": "23089172",
             "delta_t_minutes": 3.0,
