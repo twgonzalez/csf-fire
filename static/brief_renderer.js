@@ -75,6 +75,27 @@
   function _esc(s)        {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
+  // Bottleneck label: cross streets + distance, or fallback to name/osmid
+  function _fmtBn(p) {
+    var nm = p.bottleneck_name || '';
+    var cA = p.bottleneck_cross_street_a || '';
+    var cB = p.bottleneck_cross_street_b || '';
+    var d  = +(p.bottleneck_distance_mi || 0);
+    var b  = p.bottleneck_bearing || '';
+    var label;
+    if (nm) {
+      if (cA && cB && cA !== cB) label = nm + ' (' + cA + ' to ' + cB + ')';
+      else if (cA || cB) label = nm + ' at ' + (cA || cB);
+      else label = nm;
+    } else {
+      var oid = p.bottleneck_osmid || '—';
+      if (cA && cB && cA !== cB) label = 'Unnamed road (' + cA + ' to ' + cB + ')';
+      else if (cA || cB) label = 'Unnamed road at ' + (cA || cB);
+      else label = 'osmid ' + oid;
+    }
+    if (d > 0 && b) label += ', ' + d.toFixed(1) + ' mi ' + b;
+    return label;
+  }
   function _badge(n, derived) {
     var cls = derived ? 'legal-num-badge derived' : 'legal-num-badge';
     return '<span class="' + cls + '">' + n + '</span>';
@@ -549,7 +570,7 @@
       var flagged = paths.filter(function(p) { return p.flagged; });
       if (flagged.length) {
         var worst = flagged.reduce(function(a, b) { return +(b.delta_t_minutes||0) > +(a.delta_t_minutes||0) ? b : a; });
-        var nm    = worst.bottleneck_name || ('osmid ' + (worst.bottleneck_osmid || '—'));
+        var nm    = _fmtBn(worst);
         var dt    = +(worst.delta_t_minutes || 0);
         var thr   = +(worst.threshold_minutes || threshold);
         var ratio = dt / Math.max(thr, 0.001);
@@ -565,7 +586,7 @@
       // MINISTERIAL WITH STANDARD CONDITIONS
       if (paths.length) {
         var worst2    = paths.reduce(function(a, b) { return +(b.delta_t_minutes||0) > +(a.delta_t_minutes||0) ? b : a; });
-        var nm2       = worst2.bottleneck_name || ('osmid ' + (worst2.bottleneck_osmid || '—'));
+        var nm2       = _fmtBn(worst2);
         var dt2       = +(worst2.delta_t_minutes || 0);
         var thr2      = +(worst2.threshold_minutes || threshold);
         var remaining = thr2 - dt2;
@@ -711,7 +732,7 @@
 
         var tableRows = displayPaths.map(function(rr) {
           var pid    = rr.path_id || '\u2014';
-          var bname  = rr.bottleneck_name || ('osmid ' + (rr.bottleneck_osmid || '\u2014'));
+          var bname  = _fmtBn(rr);
           var effCap = +(rr.bottleneck_eff_cap_vph || rr.bottleneck_effective_capacity_vph || 0);
           var dt     = +(rr.delta_t_minutes  || 0);
           var thr    = +(rr.threshold_minutes || maxThreshold);
@@ -932,7 +953,7 @@
     if (flaggedPs.length) {
       var parts = flaggedPs.slice(0,3).map(function(p) {
         var pid   = p.path_id || '\u2014';
-        var bname = p.bottleneck_name || ('osmid ' + (p.bottleneck_osmid||'\u2014'));
+        var bname = _fmtBn(p);
         var dt    = +(p.delta_t_minutes || 0);
         var thr   = +(p.threshold_minutes || threshold);
         return 'Path ' + pid + ' \u2014 bottleneck: ' + _esc(bname) + ' (\u0394T ' + _f(dt,1) + ' min vs ' + _f(thr,2) + '-min threshold)';
@@ -1012,7 +1033,7 @@
     if (paths.length) {
       var worst = paths.reduce(function(a, b) { return +(b.delta_t_minutes||0) > +(a.delta_t_minutes||0) ? b : a; });
       effCapCtrl   = +(worst.bottleneck_eff_cap_vph || worst.bottleneck_effective_capacity_vph || 0);
-      ctrlRoadName = worst.bottleneck_name || ('osmid ' + (worst.bottleneck_osmid || '\u2014'));
+      ctrlRoadName = _fmtBn(worst);
       hcmRawCtrl   = +(worst.bottleneck_hcm_capacity_vph || 0);
       ctrlRoadType = worst.bottleneck_road_type || '';
       ctrlSpeed    = +(worst.bottleneck_speed_mph || 0);

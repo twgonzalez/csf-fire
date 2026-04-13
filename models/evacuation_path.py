@@ -38,6 +38,12 @@ class EvacuationPath:
     bottleneck_speed_limit: int = 0  # posted speed mph at bottleneck (selects two-lane HCM row)
     bottleneck_haz_class:   int = 0  # raw CAL FIRE HAZ_CLASS integer (0=none,1=mod,2=high,3=vhfhsz)
 
+    # Cross-street context — human-readable bottleneck location description
+    bottleneck_cross_street_a: str = ""   # cross street at one endpoint of bottleneck segment
+    bottleneck_cross_street_b: str = ""   # cross street at the other endpoint
+    bottleneck_distance_mi: float = 0.0   # distance from project site to bottleneck midpoint
+    bottleneck_bearing: str = ""           # compass direction from project: "N","NE","E", etc.
+
     # Catchment demand at bottleneck (informational)
     catchment_units: float = 0.0    # housing units whose path passes through bottleneck
     baseline_demand_vph: float = 0.0  # catchment_units × vpu × 0.57 (informational)
@@ -67,6 +73,10 @@ class EvacuationPath:
             "bottleneck_hcm_capacity_vph":    round(self.bottleneck_hcm_capacity_vph, 0),
             "bottleneck_hazard_degradation":  self.bottleneck_hazard_degradation,
             "bottleneck_effective_capacity_vph": round(self.bottleneck_effective_capacity_vph, 0),
+            "bottleneck_cross_street_a":      self.bottleneck_cross_street_a,
+            "bottleneck_cross_street_b":      self.bottleneck_cross_street_b,
+            "bottleneck_distance_mi":         round(self.bottleneck_distance_mi, 2),
+            "bottleneck_bearing":             self.bottleneck_bearing,
             "catchment_units":                round(self.catchment_units, 0),
             "baseline_demand_vph":            round(self.baseline_demand_vph, 1),
             "path_osmids":                    self.path_osmids,

@@ -57,6 +57,45 @@ from agents.scenarios.sb79_transit import Sb79TransitScenario
 logger = logging.getLogger(__name__)
 
 
+def _format_bottleneck(r: dict) -> str:
+    """Build a human-readable bottleneck label from path result dict.
+
+    Produces forms like:
+      "North Street (Shattuck Ave to Sacramento St), 0.2 mi NW"
+      "North Street at Shattuck Ave, 0.1 mi E"
+      "North Street, 0.3 mi SW"         (no cross streets)
+      "Unnamed road (at Cedar St), 0.1 mi N"  (bottleneck has no name)
+    """
+    bn_name = r.get("bottleneck_name", "")
+    cross_a = r.get("bottleneck_cross_street_a", "")
+    cross_b = r.get("bottleneck_cross_street_b", "")
+    dist_mi = r.get("bottleneck_distance_mi", 0.0)
+    bearing = r.get("bottleneck_bearing", "")
+
+    # Build segment description
+    if bn_name:
+        if cross_a and cross_b and cross_a != cross_b:
+            label = f"{bn_name} ({cross_a} to {cross_b})"
+        elif cross_a or cross_b:
+            label = f"{bn_name} at {cross_a or cross_b}"
+        else:
+            label = bn_name
+    else:
+        osmid = r.get("bottleneck_osmid", "?")
+        if cross_a and cross_b and cross_a != cross_b:
+            label = f"Unnamed road ({cross_a} to {cross_b})"
+        elif cross_a or cross_b:
+            label = f"Unnamed road at {cross_a or cross_b}"
+        else:
+            label = f"osmid {osmid}"
+
+    # Append distance + bearing
+    if dist_mi > 0 and bearing:
+        label += f", {dist_mi:.1f} mi {bearing}"
+
+    return label
+
+
 # ---------------------------------------------------------------------------
 # ASCII normalizer — text audit files must be plain ASCII for max portability
 # ---------------------------------------------------------------------------
@@ -419,7 +458,7 @@ def generate_audit_trail(
                 "two_lane":  "Two-lane highway",
             }
             for r in s5.get("path_results", []):
-                bn_name  = r.get("bottleneck_name") or r.get("bottleneck_osmid", "Unknown")
+                bn_label = _format_bottleneck(r)
                 path_id  = r.get("path_id", "")
                 origin   = r.get("origin_block_group", "")
                 n_segs   = r.get("path_segment_count", "")
@@ -442,7 +481,7 @@ def generate_audit_trail(
                     ctx_parts.append(f"{n_segs} segments")
                 lines.append("    " + "  |  ".join(ctx_parts))
                 # Bottleneck + flag
-                lines.append(f"    Bottleneck: {bn_name}{flag}")
+                lines.append(f"    Bottleneck: {bn_label}{flag}")
                 # HCM classification inputs (Gap 1) — enables table lookup verification
                 rt_label = _road_type_labels.get(
                     r.get("bottleneck_road_type", ""), r.get("bottleneck_road_type", "")

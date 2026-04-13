@@ -1086,6 +1086,10 @@ def _build_josh_data_projects(
                 "bottleneck_speed":          int(p.get("bottleneck_speed_limit", 0) or 0),
                 "effective_capacity_vph":    round(float(p.get("bottleneck_effective_capacity_vph", 0)), 1),
                 "hazard_degradation_factor": round(float(p.get("bottleneck_hazard_degradation", 1.0)), 4),
+                "bottleneck_cross_street_a": str(p.get("bottleneck_cross_street_a", "")),
+                "bottleneck_cross_street_b": str(p.get("bottleneck_cross_street_b", "")),
+                "bottleneck_distance_mi":    round(float(p.get("bottleneck_distance_mi", 0)), 2),
+                "bottleneck_bearing":        str(p.get("bottleneck_bearing", "")),
                 "path_coords":               p.get("path_wgs84_coords") or [],
             })
 

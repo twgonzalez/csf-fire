@@ -2,7 +2,7 @@
 FIRE EVACUATION CAPACITY ANALYSIS  -  PROJECT DETERMINATION
 JOSH v4.0 (dT Standard  -  Constant Mobilization, NFPA 101)
 ======================================================================
-Date:           2026-04-11T21:01:31.387238
+Date:           2026-04-12T20:56:59.479570
 Project:        Claremont Hills Terrace
 Address:        Ridge Road & Claremont Ave, Berkeley Hills
 APN:            Not provided
@@ -78,25 +78,25 @@ SCENARIO: WILDLAND_AB747
 
   Per-Path Results (all evaluated paths  -  no deduplication):
     Path proj_53148316_243670952  |  origin BG: project_origin  |  35 segments
-    Bottleneck: Ridge Road [within threshold]
+    Bottleneck: Ridge Road (Euclid Avenue to Scenic Avenue), 0.1 mi W [within threshold]
       Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
       HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
       dT = (56.2 vph / 1125 vph) x 60 + 0.0 min egress = 3.00 min  (threshold: 6.00 min (120 min x 5%))
 
     Path proj_53148316_2644106915  |  origin BG: project_origin  |  50 segments
-    Bottleneck: Ridge Road [within threshold]
+    Bottleneck: Ridge Road (Euclid Avenue to Scenic Avenue), 0.1 mi W [within threshold]
       Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
       HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
       dT = (56.2 vph / 1125 vph) x 60 + 0.0 min egress = 3.00 min  (threshold: 6.00 min (120 min x 5%))
 
     Path proj_53148316_2644106917  |  origin BG: project_origin  |  49 segments
-    Bottleneck: Ridge Road [within threshold]
+    Bottleneck: Ridge Road (Euclid Avenue to Scenic Avenue), 0.1 mi W [within threshold]
       Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
       HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
       dT = (56.2 vph / 1125 vph) x 60 + 0.0 min egress = 3.00 min  (threshold: 6.00 min (120 min x 5%))
 
     Path proj_53148316_1541561262  |  origin BG: project_origin  |  34 segments
-    Bottleneck: Ridge Road [within threshold]
+    Bottleneck: Ridge Road (Euclid Avenue to Scenic Avenue), 0.1 mi W [within threshold]
       Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
       HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
       dT = (56.2 vph / 1125 vph) x 60 + 0.0 min egress = 3.00 min  (threshold: 6.00 min (120 min x 5%))

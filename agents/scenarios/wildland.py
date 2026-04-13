@@ -38,6 +38,7 @@ Three-tier output:
 """
 import json
 import logging
+import math
 from pathlib import Path
 
 import geopandas as gpd
@@ -68,6 +69,98 @@ _HAZ_CLASS_TO_ZONE = {
     1: "moderate_fhsz",
     0: "non_fhsz",
 }
+
+
+_METERS_PER_MILE = 1609.344
+
+# 8-point compass labels indexed by octant (0 = N, 1 = NE, ... 7 = NW)
+_COMPASS_LABELS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def _get_cross_streets(G, u: int, v: int, segment_name: str) -> tuple[str, str]:
+    """Find cross-street names at both endpoints of an edge.
+
+    For each endpoint node, iterate incident edges, collect street names
+    (excluding the bottleneck's own name), and return the best candidate.
+    Returns (cross_street_a, cross_street_b) — empty string if none found.
+    """
+    def _best_cross(node: int) -> str:
+        names: list[str] = []
+        for _, nbr, data in G.edges(node, data=True):
+            if isinstance(data, dict):
+                nm = data.get("name", None)
+            else:
+                # MultiDiGraph returns keyed edges; get first
+                nm = None
+            if nm:
+                if isinstance(nm, list):
+                    nm = nm[0]
+                nm = str(nm)
+                if nm and nm != segment_name:
+                    names.append(nm)
+        if not names:
+            return ""
+        # Return most frequent cross street, tie-break alphabetically
+        from collections import Counter
+        counts = Counter(names)
+        return min(counts, key=lambda n: (-counts[n], n))
+
+    # MultiDiGraph: G.edges(node, data=True) yields (u, v, key, data) with
+    # keys=True, or (u, v, data) without.  Handle both by also checking the
+    # underlying adjacency directly.
+    def _cross_names_at(node: int) -> list[str]:
+        names: list[str] = []
+        try:
+            for nbr_dict in G.adj[node].values():
+                for edge_data in nbr_dict.values():
+                    nm = edge_data.get("name", None)
+                    if nm:
+                        if isinstance(nm, list):
+                            nm = nm[0]
+                        nm = str(nm)
+                        if nm and nm != segment_name:
+                            names.append(nm)
+        except (AttributeError, TypeError):
+            pass
+        return names
+
+    def _pick_best(names: list[str]) -> str:
+        if not names:
+            return ""
+        from collections import Counter
+        counts = Counter(names)
+        return min(counts, key=lambda n: (-counts[n], n))
+
+    cross_a = _pick_best(_cross_names_at(u))
+    cross_b = _pick_best(_cross_names_at(v))
+    return cross_a, cross_b
+
+
+def _bottleneck_distance_bearing(
+    G, u: int, v: int, proj_x: float, proj_y: float,
+) -> tuple[float, str]:
+    """Compute distance (miles) and compass bearing from project to bottleneck midpoint.
+
+    Uses projected coordinates (meters) for accuracy.
+    """
+    ux = G.nodes[u].get("x", 0)
+    uy = G.nodes[u].get("y", 0)
+    vx = G.nodes[v].get("x", 0)
+    vy = G.nodes[v].get("y", 0)
+    mx = (ux + vx) / 2
+    my = (uy + vy) / 2
+
+    dx = mx - proj_x
+    dy = my - proj_y
+    dist_m = math.hypot(dx, dy)
+    dist_mi = dist_m / _METERS_PER_MILE
+
+    # Bearing: atan2(dx, dy) gives angle from north (Y-axis) clockwise
+    angle = math.degrees(math.atan2(dx, dy)) % 360
+    octant = int((angle + 22.5) / 45) % 8
+    bearing = _COMPASS_LABELS[octant]
+
+    return round(dist_mi, 2), bearing
 
 
 class WildlandScenario(EvacuationScenario):
@@ -561,6 +654,7 @@ class WildlandScenario(EvacuationScenario):
                             path_wgs84_local.append([_l_lat, _l_lon])
 
                     path_osmids_local: list[str] = []
+                    osmid_to_uv: dict[str, tuple[int, int]] = {}  # osmid → (u, v) node pair
                     path_length       = 0.0   # metres — for logging only
                     path_travel_time  = 0.0   # seconds — drives filter + dedup
                     exit_osmid = ""
@@ -576,6 +670,7 @@ class WildlandScenario(EvacuationScenario):
                                 if oid:
                                     oid_str = str(oid[0]) if isinstance(oid, list) else str(oid)
                                     path_osmids_local.append(oid_str)
+                                    osmid_to_uv[oid_str] = (u, v)
                                     path_length      += seg_len
                                     path_travel_time += seg_tt
                                     break
@@ -585,7 +680,7 @@ class WildlandScenario(EvacuationScenario):
                     if path_osmids_local and path_travel_time > 0:
                         candidates.append(
                             (path_travel_time, exit_node_id, path_osmids_local,
-                             exit_osmid, path_length, path_wgs84_local)
+                             exit_osmid, path_length, path_wgs84_local, osmid_to_uv)
                         )
 
                 # ── Pass 2: filter by travel-time ratio, then dedup by bottleneck
@@ -608,7 +703,7 @@ class WildlandScenario(EvacuationScenario):
                         )
 
                     seen_bottlenecks: dict[str, float] = {}  # osmid → fastest travel time (s)
-                    for path_travel_time, exit_node_id, path_osmids_local, exit_osmid, path_length, path_wgs84_local in filtered:
+                    for path_travel_time, exit_node_id, path_osmids_local, exit_osmid, path_length, path_wgs84_local, _osmid_uv in filtered:
                         bottleneck_osmid = min(
                             path_osmids_local,
                             key=lambda o: osmid_to_eff_cap.get(o, 9999),
@@ -627,13 +722,26 @@ class WildlandScenario(EvacuationScenario):
                             continue
                         seen_bottlenecks[bottleneck_osmid] = path_travel_time
 
+                        # Cross-street enrichment: look up intersecting street names
+                        # at the bottleneck segment's endpoint nodes.
+                        bn_name = osmid_to_name.get(bottleneck_osmid, "")
+                        bn_uv = _osmid_uv.get(bottleneck_osmid)
+                        cross_a, cross_b = "", ""
+                        dist_mi, bearing = 0.0, ""
+                        if bn_uv:
+                            bn_u, bn_v = bn_uv
+                            cross_a, cross_b = _get_cross_streets(G, bn_u, bn_v, bn_name)
+                            dist_mi, bearing = _bottleneck_distance_bearing(
+                                G, bn_u, bn_v, proj_x, proj_y,
+                            )
+
                         path_id = f"proj_{_origin_node}_{exit_node_id}"
                         evac_path = EvacuationPath(
                             path_id=path_id,
                             origin_block_group=_origin_bg,
                             exit_segment_osmid=exit_osmid,
                             bottleneck_osmid=bottleneck_osmid,
-                            bottleneck_name=osmid_to_name.get(bottleneck_osmid, ""),
+                            bottleneck_name=bn_name,
                             bottleneck_fhsz_zone=osmid_to_fhsz.get(bottleneck_osmid, "non_fhsz"),
                             bottleneck_road_type=osmid_to_rtype.get(bottleneck_osmid, "two_lane"),
                             bottleneck_hcm_capacity_vph=osmid_to_hcm.get(bottleneck_osmid, eff_cap),
@@ -642,6 +750,10 @@ class WildlandScenario(EvacuationScenario):
                             bottleneck_lane_count=osmid_to_lanes.get(bottleneck_osmid, 0),
                             bottleneck_speed_limit=osmid_to_speed.get(bottleneck_osmid, 0),
                             bottleneck_haz_class=osmid_to_haz_class.get(bottleneck_osmid, 0),
+                            bottleneck_cross_street_a=cross_a,
+                            bottleneck_cross_street_b=cross_b,
+                            bottleneck_distance_mi=dist_mi,
+                            bottleneck_bearing=bearing,
                             path_osmids=path_osmids_local,
                             path_wgs84_coords=path_wgs84_local,
                         )

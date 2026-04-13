@@ -347,3 +347,91 @@ test('T9 — audit_text produces collapsible <details> block; empty audit_text o
   var detailsInLegal = htmlNo.indexOf('<details');
   assert.ok(detailsInLegal === -1, 'no details block when audit_text is empty');
 });
+
+// ── Test 10: Cross-street bottleneck labels ──────────────────────────────────
+
+test('T10 — cross-street bottleneck: two cross streets renders "Name (A to B), dist mi bearing"', function() {
+  var path1 = makePath({
+    bottleneck_name:             'Grizzly Peak Blvd',
+    bottleneck_cross_street_a:   'Centennial Dr',
+    bottleneck_cross_street_b:   'Euclid Ave',
+    bottleneck_distance_mi:      0.3,
+    bottleneck_bearing:          'NW',
+    delta_t_minutes:             8.50,
+    flagged:                     true,
+  });
+  var an  = makeAnalysis(true, true, { delta_t_triggered: true });
+  var inp = makeInput('DISCRETIONARY', [path1], null, an);
+
+  var html = BR.render(inp);
+
+  // Controlling finding callout should use cross-street label
+  assert.ok(html.includes('Grizzly Peak Blvd (Centennial Dr to Euclid Ave)'), 'cross-street pair in controlling callout');
+  assert.ok(html.includes('0.3 mi NW'), 'distance+bearing in controlling callout');
+
+  // Route table bottleneck cell should also use cross-street label
+  assert.ok(html.includes('Centennial Dr to Euclid Ave'), 'cross-street pair in route table');
+});
+
+test('T11 — cross-street bottleneck: single cross street renders "Name at Cross"', function() {
+  var path1 = makePath({
+    bottleneck_name:             'Oxford St',
+    bottleneck_cross_street_a:   'Cedar St',
+    bottleneck_cross_street_b:   '',
+    bottleneck_distance_mi:      0.1,
+    bottleneck_bearing:          'E',
+    delta_t_minutes:             8.50,
+    flagged:                     true,
+  });
+  var an  = makeAnalysis(true, true, { delta_t_triggered: true });
+  var inp = makeInput('DISCRETIONARY', [path1], null, an);
+
+  var html = BR.render(inp);
+
+  assert.ok(html.includes('Oxford St at Cedar St'), 'single cross street uses "at"');
+  assert.ok(html.includes('0.1 mi E'), 'distance+bearing present');
+});
+
+test('T12 — cross-street bottleneck: no cross streets falls back to name only', function() {
+  var path1 = makePath({
+    bottleneck_name:             'Highway 13',
+    bottleneck_cross_street_a:   '',
+    bottleneck_cross_street_b:   '',
+    bottleneck_distance_mi:      0.0,
+    bottleneck_bearing:          '',
+    delta_t_minutes:             8.50,
+    flagged:                     true,
+  });
+  var an  = makeAnalysis(true, true, { delta_t_triggered: true });
+  var inp = makeInput('DISCRETIONARY', [path1], null, an);
+
+  var html = BR.render(inp);
+
+  // Name appears without cross-street decoration
+  assert.ok(html.includes('Highway 13'), 'bottleneck name present');
+  // Should NOT contain cross-street patterns — "Name (CrossA to CrossB)" or "Name at Cross"
+  assert.ok(!html.includes('Highway 13 (Centennial'), 'no cross-street parens');
+  assert.ok(!html.includes('Highway 13 at '), 'no "at" when no cross streets');
+  // Should NOT contain "Unnamed road" since we have a name
+  assert.ok(!html.includes('Unnamed road'), 'no unnamed road when name is present');
+});
+
+test('T13 — cross-street bottleneck: unnamed road with cross streets', function() {
+  var path1 = makePath({
+    bottleneck_name:             '',
+    bottleneck_osmid:            '999888',
+    bottleneck_cross_street_a:   'Main St',
+    bottleneck_cross_street_b:   'Oak Ave',
+    bottleneck_distance_mi:      0.2,
+    bottleneck_bearing:          'S',
+    delta_t_minutes:             8.50,
+    flagged:                     true,
+  });
+  var an  = makeAnalysis(true, true, { delta_t_triggered: true });
+  var inp = makeInput('DISCRETIONARY', [path1], null, an);
+
+  var html = BR.render(inp);
+
+  assert.ok(html.includes('Unnamed road (Main St to Oak Ave)'), 'unnamed road with cross streets');
+  assert.ok(html.includes('0.2 mi S'), 'distance+bearing for unnamed road');
+});

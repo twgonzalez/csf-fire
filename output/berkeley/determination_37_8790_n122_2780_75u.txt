@@ -2,7 +2,7 @@
 FIRE EVACUATION CAPACITY ANALYSIS  -  PROJECT DETERMINATION
 JOSH v4.0 (dT Standard  -  Constant Mobilization, NFPA 101)
 ======================================================================
-Date:           2026-04-11T21:01:32.055492
+Date:           2026-04-12T20:57:00.154009
 Project:        Cedar Street Infill
 Address:        Cedar Street & Shattuck Ave, North Berkeley
 APN:            Not provided
@@ -74,7 +74,7 @@ SCENARIO: WILDLAND_AB747
 
   Per-Path Results (all evaluated paths  -  no deduplication):
     Path proj_53141270_243670952  |  origin BG: project_origin  |  30 segments
-    Bottleneck: North Street *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
+    Bottleneck: North Street at Jaynes Street, 0.0 mi S *** dT EXCEEDS THRESHOLD  -  DISCRETIONARY ***
       Road: Two-lane highway  |  Speed: 25 mph  |  Lanes: 1  |  HAZ_CLASS: 0 (non_fhsz)
       HCM cap: 1125 vph  x degradation 1.00 (non_fhsz)  = eff cap 1125 vph
       dT = (168.8 vph / 1125 vph) x 60 + 9.0 min egress = 18.00 min  (threshold: 6.00 min (120 min x 5%))

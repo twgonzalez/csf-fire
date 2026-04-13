@@ -141,6 +141,10 @@
       bottleneck_speed:          +(p.bottleneck_speed || 0),
       effective_capacity_vph:    parseFloat((p.bottleneckEffCapVph || p.effective_capacity_vph || 0).toFixed(1)),
       hazard_degradation_factor: parseFloat((p.hazard_degradation_factor || 1.0).toFixed(4)),
+      bottleneck_cross_street_a: p.bottleneck_cross_street_a || '',
+      bottleneck_cross_street_b: p.bottleneck_cross_street_b || '',
+      bottleneck_distance_mi:    +(p.bottleneck_distance_mi || 0),
+      bottleneck_bearing:        p.bottleneck_bearing || '',
       path_coords:               p.path_coords || p.coordinates || [],
     }));
     return {
@@ -280,6 +284,10 @@
         bottleneck_road_type:          p.bottleneck_road_type || null,
         bottleneck_speed_mph:          p.bottleneck_speed   || null,
         bottleneck_lanes:              p.bottleneck_lanes   || null,
+        bottleneck_cross_street_a:     p.bottleneck_cross_street_a || '',
+        bottleneck_cross_street_b:     p.bottleneck_cross_street_b || '',
+        bottleneck_distance_mi:        +(p.bottleneck_distance_mi || 0),
+        bottleneck_bearing:            p.bottleneck_bearing || '',
         delta_t_minutes:               +(p.delta_t          || 0),
         threshold_minutes:             thrMin,
         safe_egress_window_minutes:    safeWin,
@@ -346,6 +354,41 @@
       },
       parameters: pr,
     };
+  }
+
+  // ── Bottleneck label formatter ─────────────────────────────────────────────
+  // Mirrors _format_bottleneck() in objective_standards.py.
+  function _formatBottleneck(p) {
+    var bnName  = p.bottleneck_name  || '';
+    var crossA  = p.bottleneck_cross_street_a || '';
+    var crossB  = p.bottleneck_cross_street_b || '';
+    var distMi  = +(p.bottleneck_distance_mi  || 0);
+    var bearing = p.bottleneck_bearing || '';
+    var label;
+
+    if (bnName) {
+      if (crossA && crossB && crossA !== crossB) {
+        label = bnName + ' (' + crossA + ' to ' + crossB + ')';
+      } else if (crossA || crossB) {
+        label = bnName + ' at ' + (crossA || crossB);
+      } else {
+        label = bnName;
+      }
+    } else {
+      var osmid = p.bottleneck_osmid || '?';
+      if (crossA && crossB && crossA !== crossB) {
+        label = 'Unnamed road (' + crossA + ' to ' + crossB + ')';
+      } else if (crossA || crossB) {
+        label = 'Unnamed road at ' + (crossA || crossB);
+      } else {
+        label = 'osmid ' + osmid;
+      }
+    }
+
+    if (distMi > 0 && bearing) {
+      label += ', ' + distMi.toFixed(1) + ' mi ' + bearing;
+    }
+    return label;
   }
 
   // ── Audit trail text builder ──────────────────────────────────────────────
@@ -460,9 +503,7 @@
     } else {
       L.push('  Serving EvacuationPaths identified: ' + paths.length);
       paths.forEach(function (p) {
-        var bnOsmid = p.bottleneck_osmid || '?';
-        var bnName  = p.bottleneck_name || null;
-        var label   = bnName || bnOsmid;
+        var label   = _formatBottleneck(p);
         var zone    = _degToZone(p.hazard_degradation_factor);
         var deg     = +(p.hazard_degradation_factor != null ? p.hazard_degradation_factor : 1.0);
         var effCap  = +(p.effective_capacity_vph || 0);
@@ -509,9 +550,7 @@
     L.push('  Per-Path Results (all evaluated paths):');
 
     paths.forEach(function (p) {
-      var bnOsmid = p.bottleneck_osmid || '?';
-      var bnName  = p.bottleneck_name  || null;
-      var bnLabel = bnName || bnOsmid;
+      var bnLabel = _formatBottleneck(p);
       var flagLine = p.flagged
         ? '*** \u0394T EXCEEDS THRESHOLD  -  DISCRETIONARY ***'
         : '[within threshold]';
@@ -524,10 +563,9 @@
       var rtLbl   = _rtLabel(p.bottleneck_road_type);
 
       L.push('');
-      // Path header — route letter + bottleneck name + flag status
+      // Path header — route letter + bottleneck description + flag status
       L.push('    Path ' + (p.route_id || '?') + ':');
-      L.push('    Bottleneck: ' + bnLabel +
-             (bnName ? ' (osmid ' + bnOsmid + ')' : '') + '  ' + flagLine);
+      L.push('    Bottleneck: ' + bnLabel + '  ' + flagLine);
       // Road detail: type | speed | lanes | HAZ_CLASS
       L.push('      Road: ' + rtLbl + '  |  Speed: ' + (p.bottleneck_speed || '?') +
              ' mph  |  Lanes: ' + (p.bottleneck_lanes || '?') +
@@ -1481,8 +1519,9 @@
             html += '<div style="font-size:11px;color:#e74c3c;margin-left:8px;">' + _esc(thrLabel) + '</div>';
           }
           if (path.bottleneck_name) {
+            var bnDesc = _formatBottleneck(path);
             html += '<div style="font-size:11px;color:#777;margin-left:8px;">' +
-                    'Bottleneck: ' + _esc(path.bottleneck_name) + '</div>';
+                    'Bottleneck: ' + _esc(bnDesc) + '</div>';
           }
           html += '</div>';
         });
