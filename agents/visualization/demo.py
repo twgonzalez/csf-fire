@@ -1201,12 +1201,6 @@ def _inject_josh_data_bundle(
     sb_block = f'<script id="josh-sidebar-js">\n{sb_js}\n</script>\n' if sb_js else ""
     sb_note  = f"inlined ({len(sb_js) // 1024} KB)" if sb_js else "not found (skipped)"
 
-    # ── pdf_report.js: inline for client-side PDF generation ──────────────────
-    pdf_path = static_dir / "pdf_report.js"
-    pdf_js   = pdf_path.read_text(encoding="utf-8") if pdf_path.exists() else ""
-    pdf_block = f'<script id="josh-pdf-report">\n{pdf_js}\n</script>\n' if pdf_js else ""
-    pdf_note  = f"inlined ({len(pdf_js) // 1024} KB)" if pdf_js else "not found (skipped)"
-
     # ── Sidebar container + map layout CSS ────────────────────────────────────
     # The sidebar (320 px) occupies the left edge; the brand header (54 px) the top.
     # CSS shifts the Folium map container right + down so it never renders under
@@ -1273,15 +1267,15 @@ def _inject_josh_data_bundle(
         f'JOSH v{_PARAMETERS_VERSION} · © 2026 Thomas Gonzalez · AGPL-3.0'
         f'</div>\n'
     )
-    injection = data_block + app_block + br_block + sb_block + pdf_block + layout_block + footer_block
+    injection = data_block + app_block + br_block + sb_block + layout_block + footer_block
     if "</body>" in html:
         html = html.replace("</body>", injection + "</body>", 1)
     else:
         html += injection
     html_path.write_text(html, encoding="utf-8")
     logger.info(
-        "  JOSH data bundle injected (%d briefs); app.js %s; brief_renderer.js %s; sidebar.js %s; pdf_report.js %s.",
-        len(brief_data), app_note, br_note, sb_note, pdf_note,
+        "  JOSH data bundle injected (%d briefs); app.js %s; brief_renderer.js %s; sidebar.js %s.",
+        len(brief_data), app_note, br_note, sb_note,
     )
 
 

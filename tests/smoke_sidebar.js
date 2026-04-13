@@ -1100,39 +1100,37 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
     });
     await new Promise(r => setTimeout(r, 500));
 
-    // Check the "Download PDF" button exists in the sidebar DOM.
-    const pdfButtonInfo = await page.evaluate(() => {
+    // Check the "Download Determination" button exists in the sidebar DOM.
+    const detButtonInfo = await page.evaluate(() => {
       var sidebar = document.getElementById('josh-sidebar');
       if (!sidebar) return { found: false, reason: 'no sidebar' };
       var buttons = sidebar.querySelectorAll('button');
       for (var i = 0; i < buttons.length; i++) {
-        if (buttons[i].textContent.trim() === 'Download PDF') {
+        if (buttons[i].textContent.trim() === 'Download Determination') {
           return {
             found: true,
             onclick: buttons[i].getAttribute('onclick') || '',
           };
         }
       }
-      return { found: false, reason: 'no Download PDF button in ' + buttons.length + ' buttons' };
+      return { found: false, reason: 'no Download Determination button in ' + buttons.length + ' buttons' };
     });
 
-    assert.ok(pdfButtonInfo.found,
-      'a "Download PDF" button must appear when a project is selected ' +
-      '(got: ' + JSON.stringify(pdfButtonInfo) + ')');
-    assert.ok(pdfButtonInfo.onclick.indexOf('joshSidebar_downloadPdf') !== -1,
-      'onclick must call joshSidebar_downloadPdf (got: "' + pdfButtonInfo.onclick + '")');
+    assert.ok(detButtonInfo.found,
+      'a "Download Determination" button must appear when a project is selected ' +
+      '(got: ' + JSON.stringify(detButtonInfo) + ')');
+    assert.ok(detButtonInfo.onclick.indexOf('joshSidebar_downloadDetermination') !== -1,
+      'onclick must call joshSidebar_downloadDetermination (got: "' + detButtonInfo.onclick + '")');
 
-    // Verify handler + module exist.
+    // Verify handler exists.
     const wiring = await page.evaluate(() => ({
-      handler: typeof window.joshSidebar_downloadPdf,
-      module:  typeof (window.JoshPdfReport || {}).generate,
+      handler: typeof window.joshSidebar_downloadDetermination,
     }));
-    assert.strictEqual(wiring.handler, 'function', 'joshSidebar_downloadPdf must be a function');
-    assert.strictEqual(wiring.module,  'function', 'JoshPdfReport.generate must be a function');
+    assert.strictEqual(wiring.handler, 'function', 'joshSidebar_downloadDetermination must be a function');
   });
 
-  // ── SMOKE_28: Download PDF generates a valid PDF file ───────────────────
-  test('SMOKE_28: Download PDF produces a valid PDF file for a pipeline project', async () => {
+  // ── SMOKE_28: Download Determination generates a valid .txt file ─────────
+  test('SMOKE_28: Download Determination produces a valid .txt file for a pipeline project', async () => {
     await _resetSidebarState();
 
     // Select the first pipeline project.
@@ -1142,24 +1140,12 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
     });
     await new Promise(r => setTimeout(r, 500));
 
-    // Pre-load jsPDF from CDN so the download happens quickly.
-    await page.evaluate(async () => {
-      if (window.jspdf) return;
-      await new Promise((resolve, reject) => {
-        var s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/3.0.3/jspdf.umd.min.js';
-        s.onload = resolve;
-        s.onerror = () => reject(new Error('CDN load failed'));
-        document.head.appendChild(s);
-      });
-    });
-
-    // Trigger PDF download and capture the file via Playwright download event.
+    // Trigger determination download and capture the file via Playwright download event.
     const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
 
     await page.evaluate(() => {
       var ps = window.joshSidebar.getProjects();
-      window.joshSidebar_downloadPdf(ps[0].id);
+      window.joshSidebar_downloadDetermination(ps[0].id);
     });
 
     const download = await downloadPromise;
@@ -1171,23 +1157,23 @@ describe('Smoke: Berkeley demo map', { timeout: 90_000 }, () => {
     try {
       await download.saveAs(tmpPath);
       const stat = fs.statSync(tmpPath);
-      const header = fs.readFileSync(tmpPath, 'latin1').slice(0, 5);
+      const content = fs.readFileSync(tmpPath, 'utf-8');
 
-      // 1. Filename ends with .pdf
-      assert.ok(filename.endsWith('.pdf'),
-        'download filename must end with .pdf (got "' + filename + '")');
+      // 1. Filename ends with .txt
+      assert.ok(filename.endsWith('.txt'),
+        'download filename must end with .txt (got "' + filename + '")');
 
-      // 2. File starts with %PDF- magic bytes
-      assert.strictEqual(header, '%PDF-',
-        'file must start with %PDF- header (got "' + header + '")');
+      // 2. Content starts with determination header
+      assert.ok(content.indexOf('FIRE EVACUATION CAPACITY ANALYSIS') !== -1,
+        'file must contain determination header');
 
-      // 3. File is a reasonable size (> 5 KB for a real report with cover + audit)
-      assert.ok(stat.size > 5000,
-        'PDF must be > 5 KB (got ' + stat.size + ' bytes — too small for a real report)');
+      // 3. Content includes FINAL DETERMINATION section
+      assert.ok(content.indexOf('FINAL DETERMINATION') !== -1,
+        'file must contain FINAL DETERMINATION section');
 
-      // 4. File is not unreasonably large (< 500 KB for a text-only report)
-      assert.ok(stat.size < 500000,
-        'PDF must be < 500 KB (got ' + stat.size + ' bytes — too large for a Courier text report)');
+      // 4. File is a reasonable size (> 1 KB for a real report)
+      assert.ok(stat.size > 1000,
+        'determination must be > 1 KB (got ' + stat.size + ' bytes)');
     } finally {
       try { fs.unlinkSync(tmpPath); } catch (_) {}
     }
