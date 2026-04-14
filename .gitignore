@@ -2,12 +2,29 @@ data/*
 !data/berkeley/
 output/*
 !output/berkeley/
-!output/paradise/
 config/private/
 prompts/
 __pycache__/
 .venv/
 .claude/
 cache/
+node_modules/
+test-results/
+.DS_Store
+
+# Claude Code instructions — local dev only, not a public dependency
+CLAUDE.md
+
+# Internal docs, plans, and business strategy — kept in josh-pipeline
+docs/
+specs.md
+pages/
+projects/
+legal.md
+legal_threshold_plain_english.md
+evacuation_analysis_methodology_spec.docx
+NEW_SESSION_PROMPT.md
+NEXT_SESSION_PROMPT.md
+
 # Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
 config/cities/fhsz/*.geojson
