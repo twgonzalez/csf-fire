@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-04-08T12:49:40.171965+00:00",
+  "parameters_version": "3.4",
+  "vectors": [
+    {
+      "name": "Skyway Gateway Apartments",
+      "input": {
+        "lat": 39.751254,
+        "lon": -121.631168,
+        "units": 200,
+        "stories": 2
+      },
+      "expected": {
+        "tier": "DISCRETIONARY",
+        "hazard_zone": "non_fhsz",
+        "project_vehicles": 450.0,
+        "serving_paths_count": 6,
+        "paths": [
+          {
+            "bottleneck_osmid": "10290351",
+            "delta_t_minutes": 24.0,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10292992",
+            "delta_t_minutes": 24.0,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "538864405",
+            "delta_t_minutes": 17.14,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "538864405",
+            "delta_t_minutes": 17.14,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "538864408",
+            "delta_t_minutes": 7.11,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "538864408",
+            "delta_t_minutes": 7.11,
+            "threshold_minutes": 6.0,
+            "flagged": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Clark Road Commons",
+      "input": {
+        "lat": 39.7479,
+        "lon": -121.5666,
+        "units": 80,
+        "stories": 2
+      },
+      "expected": {
+        "tier": "DISCRETIONARY",
+        "hazard_zone": "vhfhsz",
+        "project_vehicles": 180.0,
+        "serving_paths_count": 2,
+        "paths": [
+          {
+            "bottleneck_osmid": "10294267",
+            "delta_t_minutes": 27.43,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10294267",
+            "delta_t_minutes": 27.43,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pentz Road Village",
+      "input": {
+        "lat": 39.7738,
+        "lon": -121.579511,
+        "units": 45,
+        "stories": 3
+      },
+      "expected": {
+        "tier": "DISCRETIONARY",
+        "hazard_zone": "vhfhsz",
+        "project_vehicles": 101.2,
+        "serving_paths_count": 6,
+        "paths": [
+          {
+            "bottleneck_osmid": "10290179",
+            "delta_t_minutes": 15.43,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10290179",
+            "delta_t_minutes": 15.43,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10293494",
+            "delta_t_minutes": 3.86,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10294520",
+            "delta_t_minutes": 5.4,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10294520",
+            "delta_t_minutes": 5.4,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          },
+          {
+            "bottleneck_osmid": "10295629",
+            "delta_t_minutes": 15.43,
+            "threshold_minutes": 2.25,
+            "flagged": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Skyway \u2014 Minimum Threshold (15 units)",
+      "input": {
+        "lat": 39.747643,
+        "lon": -121.63531,
+        "units": 15,
+        "stories": 2
+      },
+      "expected": {
+        "tier": "MINISTERIAL WITH STANDARD CONDITIONS",
+        "hazard_zone": "non_fhsz",
+        "project_vehicles": 33.8,
+        "serving_paths_count": 3,
+        "paths": [
+          {
+            "bottleneck_osmid": "10290351",
+            "delta_t_minutes": 1.8,
+            "threshold_minutes": 6.0,
+            "flagged": false
+          },
+          {
+            "bottleneck_osmid": "538864408",
+            "delta_t_minutes": 0.53,
+            "threshold_minutes": 6.0,
+            "flagged": false
+          },
+          {
+            "bottleneck_osmid": "538864408",
+            "delta_t_minutes": 0.53,
+            "threshold_minutes": 6.0,
+            "flagged": false
+          }
+        ]
+      }
+    }
+  ]
+}

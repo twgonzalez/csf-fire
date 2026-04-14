@@ -2,6 +2,7 @@ data/*
 !data/berkeley/
 output/*
 !output/berkeley/
+!output/paradise/
 config/private/
 prompts/
 __pycache__/
@@ -15,16 +16,28 @@ test-results/
 # Claude Code instructions — local dev only, not a public dependency
 CLAUDE.md
 
-# Internal docs, plans, and business strategy — kept in josh-pipeline
-docs/
-specs.md
-pages/
-projects/
-legal.md
+# Root-level private files
+/projects/
+/legal.md
 legal_threshold_plain_english.md
+specs.md
 evacuation_analysis_methodology_spec.docx
 NEW_SESSION_PROMPT.md
 NEXT_SESSION_PROMPT.md
+
+# Private docs — business plans and internal ops (public methodology docs are tracked)
+docs/plan-cross-street-bottleneck.md
+docs/plan-project-manager-v2.md
+docs/plan-tech-debt-v1.md
+docs/plan-ux-redesign-v1.md
+docs/plan-ux-redesign-v2.md
+docs/plan-wildland-refactor-v1.md
+docs/refactor-v1.0-plan.md
+docs/ux-spec-project-workflow-v1.md
+docs/ux-spec-v2.md
+docs/city_onboarding.md
+docs/spec-pdf-determination-v1.md
+docs/archive/
 
 # Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
 config/cities/fhsz/*.geojson

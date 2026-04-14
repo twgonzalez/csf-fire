@@ -33,7 +33,7 @@ jobs:
           uv run python build.py analyze --city "Berkeley" --data-dir data/berkeley
           uv run python build.py demo --city "Berkeley" \
             --data-dir data/berkeley \
-            --projects projects/berkeley_demo.yaml
+            --projects config/projects/berkeley_demo.yaml
 
       - name: Run brief renderer tests
         run: node --test tests/test_brief_renderer.js
@@ -52,7 +52,6 @@ jobs:
           cp pages/index.html output/index.html
           cp pages/viewer.html output/viewer.html
           cp pages/mayors_presentation.html output/mayors_presentation.html
-          cp -r docs output/docs
           cp -r static output/static
 
       - name: Setup Pages

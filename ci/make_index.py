@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).parent.parent
-PROJECTS_YAML = ROOT / "projects" / "berkeley_demo.yaml"
+PROJECTS_YAML = ROOT / "config" / "projects" / "berkeley_demo.yaml"
 OUTPUT_DIR = ROOT / "output" / "berkeley"
 
 TIER_COLORS = {
