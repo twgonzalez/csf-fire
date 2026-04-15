@@ -438,7 +438,7 @@ def _build_report_header(city_name: str, report_date: str) -> str:
     </div>
     <div style="font-size:11px; color:#8899bb;">
       Report date: {report_date} &nbsp;·&nbsp;
-      JOSH v4.0 &nbsp;·&nbsp;
+      JOSH v4.11 &nbsp;·&nbsp;
       Legal basis: <em>AB 747 (2019)</em>, <em>SB 99 (2019)</em>
     </div>
   </div>
@@ -550,7 +550,7 @@ def _build_methodology_section(config: dict) -> str:
   <p>
     <strong>Mobilization rate {mob}:</strong> Derived from NFPA 101 Life Safety Code design basis
     (100% occupant evacuation) adjusted for ~10% zero-vehicle households (Census ACS B25044).
-    Not zone-dependent — applies uniformly per v4.0 architecture.
+    Not zone-dependent — applies uniformly per v4.11 architecture.
   </p>
   <h3>Hazard Degradation &amp; Safe Egress Windows</h3>
   <table>
@@ -1014,7 +1014,7 @@ def _build_report_footer(report_date: str) -> str:
     return f"""
 <footer style="max-width:900px; margin:32px auto 0; padding:16px 24px;
                border-top:1px solid #dee2e6; font-size:11px; color:#6c757d;">
-  JOSH v4.0 &nbsp;&middot;&nbsp; California Stewardship Alliance &nbsp;&middot;&nbsp;
+  JOSH v4.11 &nbsp;&middot;&nbsp; California Stewardship Alliance &nbsp;&middot;&nbsp;
   Generated {report_date} &nbsp;&middot;&nbsp;
   Gov. Code §65302.15 (AB 747) compliance &nbsp;&middot;&nbsp;
   AGPL-3.0-or-later &nbsp;&middot;&nbsp;

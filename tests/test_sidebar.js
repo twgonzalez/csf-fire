@@ -39,9 +39,9 @@ global.window = {
     city_slug:          'berkeley',
     city_name:          'Berkeley, CA',
     josh_version:       '1.0.0',
-    parameters_version: '4.0',
+    parameters_version: '4.11',
     parameters: {
-      parameters_version:  '4.0',
+      parameters_version:  '4.11',
       unit_threshold:      15,
       max_project_share:   0.05,
       mobilization_rate:   0.90,
@@ -262,7 +262,7 @@ test('S6: _deserialize rejects city_slug mismatch with informative error', () =>
   const json = JSON.stringify({
     schema_v:           1,
     city_slug:          'encinitas',  // ← wrong city
-    parameters_version: '4.0',
+    parameters_version: '4.11',
     name:               'Wrong City',
     lat:                33.03,
     lng:                -117.29,
@@ -283,7 +283,7 @@ test('S7: _deserialize rejects schema_v > 1 with informative error', () => {
   const json = JSON.stringify({
     schema_v:           99,
     city_slug:          'berkeley',
-    parameters_version: '4.0',
+    parameters_version: '4.11',
     name:               'Future Version',
     lat:                37.87,
     lng:                -122.27,
@@ -347,7 +347,7 @@ test('S9: stale result detection — parameters_version mismatch sets _stale fla
   const staleJson = JSON.stringify({
     schema_v:           1,
     city_slug:          'berkeley',
-    parameters_version: '3.4',   // ← old version; current is 4.0
+    parameters_version: '3.4',   // ← old version; current is 4.11
     name:               'Stale Project',
     lat:                37.87,
     lng:                -122.27,
@@ -428,7 +428,7 @@ test('S13: city_slug mismatch in _deserialize leaves project list unchanged', ()
   const badJson = JSON.stringify({
     schema_v:           1,
     city_slug:          'encinitas',   // ← wrong city
-    parameters_version: '4.0',
+    parameters_version: '4.11',
     name:               'Wrong City',
     lat:                33.03,
     lng:                -117.29,
@@ -452,7 +452,7 @@ test('S14: stale _deserialize returns valid project object (not rejected) with _
   const staleJson = JSON.stringify({
     schema_v:           1,
     city_slug:          'berkeley',
-    parameters_version: '3.4',         // ← old version; current is 4.0
+    parameters_version: '3.4',         // ← old version; current is 4.11
     name:               'Stale but Valid',
     lat:                37.87,
     lng:                -122.27,

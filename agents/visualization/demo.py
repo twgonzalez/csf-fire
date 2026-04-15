@@ -68,7 +68,7 @@ def _build_capacity_heatmap_layer(
     Build a FeatureGroup containing all evacuation route segments colored by
     effective_capacity_vph using the _EFFECTIVE_CAPACITY_RAMP scale.
 
-    v3.0 ΔT Standard: low effective capacity (bottleneck danger) = red/prominent;
+    v4.11 ΔT Standard: low effective capacity (bottleneck danger) = red/prominent;
     high effective capacity (ample headroom) = gray/subdued.
 
     Returns (FeatureGroup, list_of_geojson_var_names).  The caller must inject
@@ -230,7 +230,7 @@ def create_demo_map(
     data_dir: Path | None = None,
 ) -> Path:
     """
-    Generate a multi-project comparison map — v3.0 ΔT Standard.
+    Generate a multi-project comparison map — v4.11 ΔT Standard.
 
     Visual hierarchy (bottom → top):
       1. CartoDB Positron base
@@ -351,7 +351,7 @@ def create_demo_map(
     }
 
     for i, project in enumerate(projects):
-        # v4.0: Build path_id → path_osmids from this project's ΔT results.
+        # v4.11: Build path_id → path_osmids from this project's ΔT results.
         # Project-origin Dijkstra paths carry their own path_osmids in delta_t_results,
         # so the flow-trace visualization works without the population paths list.
         # Falls back to population paths lookup for any path_ids not found here.
@@ -2232,7 +2232,7 @@ def _build_demo_legend_html(
           '<div style="display:flex;justify-content:space-between;font-size:10px;color:#868e96;margin-top:3px;">' +
           '<span>Severe</span><span>Ample</span></div>' +
           '<div style="margin-top:7px;border-top:1px solid #f1f3f5;padding-top:5px;' +
-          'font-size:9px;color:#adb5bd;">JOSH v4.0 &middot; California Stewardship Alliance</div>';
+          'font-size:9px;color:#adb5bd;">JOSH v4.11 &middot; California Stewardship Alliance</div>';
 
         L.DomEvent.on(btn, 'click', function (e) {{
           L.DomEvent.preventDefault(e);

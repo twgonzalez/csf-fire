@@ -16,7 +16,7 @@
  *   See docs/plan-project-manager-v2.md §"The BriefInput Contract" for full schema.
  *
  * This is the SINGLE SOURCE OF TRUTH for brief HTML.
- * Do NOT edit agents/visualization/brief_v3.py templates — that file is now a thin adapter.
+ * brief_v3.py was removed in v4.11 — all brief rendering is now client-side.
  */
 
 (function (root, factory) {
@@ -978,7 +978,7 @@
       ' (Pub. Resources Code \u00a721100) \u2014 evacuation clearance time impact must be analyzed' +
       ' as a significant transportation impact.</li>' +
       '<li><strong>Evacuation Clearance Time Analysis:</strong> Applicant shall commission' +
-      ' a study conforming to the JOSH v4.0 \u0394T methodology (AB 747 / Gov. Code \u00a765302.15),' +
+      ' a study conforming to the JOSH v4.11 \u0394T methodology (AB 747 / Gov. Code \u00a765302.15),' +
       ' analyzing marginal evacuation clearance time on all serving paths within 0.5 miles,' +
       ' using NFPA 101 design basis mobilization rate (0.90 constant) and HCM 2022' +
       ' hazard-degraded capacity factors.</li>' +
@@ -1133,7 +1133,7 @@
     return '<div class="brief-footer no-print">' +
       'JOSH &nbsp;&middot;&nbsp; Jurisdictional Objective Standards for Housing' +
       ' &nbsp;&middot;&nbsp; California Stewardship Alliance' +
-      ' &nbsp;&middot;&nbsp; v4.0 &nbsp;&middot;&nbsp; AB 747 &nbsp;&middot;&nbsp; Gov. Code &sect;65302.15' +
+      ' &nbsp;&middot;&nbsp; v4.11 &nbsp;&middot;&nbsp; AB 747 &nbsp;&middot;&nbsp; Gov. Code &sect;65302.15' +
       '</div>';
   }
 

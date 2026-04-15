@@ -458,7 +458,7 @@
     // ── Document header (matches Python generate_audit_trail) ──
     L.push(sep70);
     L.push('FIRE EVACUATION CAPACITY ANALYSIS -- PROJECT DETERMINATION');
-    L.push('JOSH v4.0 (dT Standard -- Constant Mobilization, NFPA 101)');
+    L.push('JOSH v4.11 (dT Standard -- Constant Mobilization, NFPA 101)');
     L.push(sep70);
     L.push('Date:           ' + (project.analyzed_at || new Date().toISOString().slice(0, 10)));
     L.push('Project:        ' + (project.name || 'Untitled'));
@@ -474,7 +474,7 @@
     // ── Algorithm ──
     L.push('ALGORITHM');
     L.push(sep40);
-    L.push('  Universal 5-Step Evacuation Capacity Algorithm v4.0 (dT Standard -- constant mobilization)');
+    L.push('  Universal 5-Step Evacuation Capacity Algorithm v4.11 (dT Standard -- constant mobilization)');
     L.push('  Each scenario applies: (1) applicability check, (2) scale gate,');
     L.push('  (3) route identification (EvacuationPath objects with bottleneck tracking),');
     L.push('  (4) demand calculation (mobilization rate 0.90 x vpu x units -- NFPA 101 design basis),');
@@ -521,7 +521,7 @@
       L.push('');
       L.push('  STEP 3 -- ROUTE IDENTIFICATION (Standard 2)');
       L.push('  ' + sep38);
-      L.push('  Method: Project-origin Dijkstra (v4.0, travel-time weight) -- fastest path to each');
+      L.push('  Method: Project-origin Dijkstra (v4.11, travel-time weight) -- fastest path to each');
       L.push('    regional-network exit node; bottleneck = argmin(eff_cap_vph) on path edges');
       L.push('  Radius: 0.5 miles (804.7 m)');
       L.push('  Serving EvacuationPaths identified: ' + paths.length);

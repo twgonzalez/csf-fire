@@ -26,7 +26,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_PARAMETERS_VERSION = "4.0"
+_PARAMETERS_VERSION = "4.11"
 _APP_JS_VERSION = "v1"   # bump only on backward-incompatible JOSH_DATA schema changes
 
 try:
@@ -77,7 +77,7 @@ _JS_IIFE_HEADER = """\
 /**
  * JOSH What-If Evaluation Engine (feat/whatif-browser)
  *
- * Pure JavaScript implementation of the JOSH v4.0 ΔT evacuation clearance
+ * Pure JavaScript implementation of the JOSH v4.11 ΔT evacuation clearance
  * algorithm.  Mirrors agents/scenarios/wildland.py + agents/scenarios/base.py
  * exactly — same Dijkstra weights, same deduplication logic, same ΔT formula.
  *

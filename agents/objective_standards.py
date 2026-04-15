@@ -4,7 +4,7 @@
 # See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
 
 """
-Agent 3: Objective Standards Engine — Orchestrator — JOSH v4.0
+Agent 3: Objective Standards Engine — Orchestrator — JOSH v4.11
 
 Runs all applicable evacuation capacity scenarios against a proposed project
 and returns the most restrictive tier determination.
@@ -115,7 +115,7 @@ def evaluate_project(
         "project":         project.to_dict(),
         "algorithm": {
             "name":        "Universal 5-Step Evacuation Capacity Algorithm",
-            "version":     "4.0 (ΔT Standard — constant mobilization)",
+            "version":     "4.11 (ΔT Standard — constant mobilization, client-side-first)",
             "description": (
                 "Each scenario applies: (1) applicability check, (2) scale gate, "
                 "(3) route identification (EvacuationPath objects with bottleneck tracking), "

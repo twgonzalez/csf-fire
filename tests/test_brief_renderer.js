@@ -82,7 +82,7 @@ function makeResult(tier, paths, overrides) {
     max_project_share:          0.05,
     serving_paths_count:        paths.length,
     egress_minutes:             0.0,
-    parameters_version:         '4.0',
+    parameters_version:         '4.11',
     analyzed_at:                '2026-04-09',
     determination_reason:       tier === 'DISCRETIONARY'
       ? 'One or more serving evacuation paths exceed the ΔT threshold.'
@@ -329,13 +329,13 @@ test('T9 — audit_text produces collapsible <details> block; empty audit_text o
 
   // With audit trail
   var withAudit = Object.assign(makeInput('DISCRETIONARY', [path1], null, an, { result: baseResult }), {
-    audit_text:     'JOSH Audit Trail v4.0\nProject: Test\nΔT = 8.50 min',
+    audit_text:     'JOSH Audit Trail v4.11\nProject: Test\nΔT = 8.50 min',
     audit_filename: 'determination_37_8700_n122_2700_75u.txt',
   });
   var htmlWith = BR.render(withAudit);
   assert.ok(htmlWith.includes('<details'), 'details block present when audit_text set');
   assert.ok(htmlWith.includes('determination_37_8700_n122_2700_75u.txt'), 'audit filename in summary');
-  assert.ok(htmlWith.includes('JOSH Audit Trail v4.0'), 'audit text content embedded');
+  assert.ok(htmlWith.includes('JOSH Audit Trail v4.11'), 'audit text content embedded');
 
   // Without audit trail
   var noAudit = Object.assign(makeInput('DISCRETIONARY', [path1], null, an, { result: baseResult }), {

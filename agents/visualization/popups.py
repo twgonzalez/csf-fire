@@ -6,10 +6,10 @@
 """
 HTML popup and marker popup builders for the demo map.
 
-v3.0 ΔT Standard: all route popups show effective_capacity_vph and ΔT clearance
+v4.11 ΔT Standard: all route popups show effective_capacity_vph and ΔT clearance
 time rather than v/c ratios. v/c and LOS remain informational footnotes only.
 
-Popup A/B/C structure (mirrors brief_v3 determination letter):
+Popup A/B/C structure (mirrors BriefRenderer determination letter):
   A — Applicability Threshold (15-unit size gate)
   B — Site Parameters (FHSZ zone, degradation, threshold)
   C — Evacuation Clearance Analysis (routes + ΔT test — operative step)
@@ -461,7 +461,7 @@ def _build_heatmap_route_popup(
 
 
 # ---------------------------------------------------------------------------
-# Demo map project marker popup — A/B/C structure (mirrors brief_v3)
+# Demo map project marker popup — A/B/C structure (mirrors BriefRenderer)
 # ---------------------------------------------------------------------------
 
 def _build_demo_project_popup(
@@ -476,7 +476,7 @@ def _build_demo_project_popup(
 ) -> str:
     """Popup shown when clicking a project marker on the demo map.
 
-    Mirrors the determination brief (brief_v3) A/B/C criteria structure:
+    Mirrors the determination brief (BriefRenderer) A/B/C criteria structure:
       Hero    — verdict + plain-English action label (city planner first)
       Finding — controlling finding (plain-English outcome, mirrors brief)
       C       — Evacuation Clearance Analysis (ΔT gauge + multi-path bars)

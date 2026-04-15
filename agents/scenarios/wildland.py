@@ -4,7 +4,7 @@
 # See LICENSE for full terms. See CONTRIBUTING.md for contributor license terms.
 
 """
-Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v4.0
+Scenario A: Wildland Evacuation Capacity (Standards 1–4) — JOSH v4.11
 
 Legal basis: AB 747 (California Government Code §65302.15), HCM 2022,
 NFPA 101 (Life Safety Code) mobilization design basis.
@@ -167,7 +167,7 @@ def _bottleneck_distance_bearing(
 
 class WildlandScenario(EvacuationScenario):
     """
-    Evaluates wildland evacuation capacity impact (Standards 1–4) using v3.0 ΔT metric.
+    Evaluates wildland evacuation capacity impact (Standards 1–4) using v4.11 ΔT metric.
 
     Standard 1 (size) gates the analysis.
     Standard 3 (FHSZ modifier) sets project.hazard_zone which controls:
@@ -440,7 +440,7 @@ def _load_graph_and_reachable(
                     nearby_osmids.update(oid_strs)
 
             method_note = (
-                f"Project-origin Dijkstra (v4.0, travel-time weight) — "
+                f"Project-origin Dijkstra (v4.11, travel-time weight) — "
                 f"fastest path from project site to each regional-network "
                 f"exit node (motorway/trunk/primary at city boundary); "
                 f"weight=length/speed_limit (seconds) per speed_defaults config; "

@@ -13,7 +13,7 @@ California AB 747 (Gov. Code §65302.15) requires cities to analyze fire evacuat
 1. **Downloads** CAL FIRE FHSZ zones, the OSM road network, and Census housing data for any California city
 2. **Identifies** evacuation routes and computes per-route bottleneck capacity (HCM 2022)
 3. **Applies** hazard degradation to road capacity based on FHSZ zone (NIST Camp Fire / HCM composite)
-4. **Runs** the ΔT test — marginal evacuation clearance time added by the proposed project (v4.0 standard)
+4. **Runs** the ΔT test — marginal evacuation clearance time added by the proposed project (v4.11 standard)
 5. **Issues** a three-tier determination: `MINISTERIAL`, `CONDITIONAL MINISTERIAL`, or `DISCRETIONARY`
 6. **Generates** a full audit trail for city attorney and planning commission review
 
@@ -45,7 +45,7 @@ The home page covers the methodology, legal framework, adoption pathway, and doc
 
 ---
 
-## Determination Logic (v4.0 ΔT Standard)
+## Determination Logic (v4.11 ΔT Standard)
 
 ```
 Standard 1 — Size gate:       units ≥ 15
@@ -82,10 +82,6 @@ To run analysis for your own city, assemble a data directory (see [Data Requirem
 # Build the evacuation route graph
 uv run python build.py analyze --city "Encinitas" --data-dir /path/to/data/encinitas
 
-# Evaluate a specific project
-uv run python build.py evaluate --city "Encinitas" --lat 33.04 --lon -117.29 --units 80 \
-  --data-dir /path/to/data/encinitas
-
 # Generate a multi-project interactive demo map
 uv run python build.py demo --city "Encinitas" \
   --data-dir /path/to/data/encinitas \
@@ -93,16 +89,19 @@ uv run python build.py demo --city "Encinitas" \
 # → output/encinitas/demo_map.html
 ```
 
+Per-project evaluation, determination briefs, and audit trail downloads are performed
+interactively in the browser via the demo map (v4.11).
+
 ---
 
 ## Output Files
 
 | File | Description |
 |------|-------------|
-| `output/{city}/demo_map.html` | Interactive multi-project comparison map (primary stakeholder UX) |
-| `output/{city}/brief_v3_*.html` | Per-project determination brief (A/B/C criteria, ΔT per path) |
-| `output/{city}/determination_*.txt` | Plaintext audit trail (legal compliance, AB 1600 nexus) |
+| `output/{city}/demo_map.html` | Interactive map with client-side project evaluation, brief rendering, and audit trail download |
 | `output/{city}/routes.csv` | Full evacuation route inventory with capacity and LOS data |
+| `output/{city}/graph.json` | Road network graph for the browser-side WhatIfEngine |
+| `output/{city}/parameters.json` | Algorithm parameters for the browser-side WhatIfEngine |
 
 ---
 

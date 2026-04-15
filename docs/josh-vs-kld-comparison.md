@@ -41,7 +41,7 @@ address at all.
 | **Cost** | ~$200K–$400K consulting engagement | ✅ Open source (AGPL-3.0) | JOSH eliminates the need to hire a traffic engineer for the computational layer. |
 | **Shelter locations** | ❌ Not mapped | ⚠️ Config-driven placeholder | Neither study maps shelters. JOSH provides a `shelters:` config field that renders in the report when populated. |
 | **Machine-readable GIS export** | ❌ PDF + static maps only | ✅ routes.csv + evacuation_paths.json | JOSH outputs GeoJSON-compatible files importable into ArcGIS/QGIS. |
-| **Per-project determination letter** | ❌ Not in scope | ✅ brief_v3 HTML | Legally defensible ministerial/discretionary letter with case number, ΔT calculation, and appeal rights. |
+| **Per-project determination letter** | ❌ Not in scope | ✅ Client-side brief (BriefRenderer) | Legally defensible ministerial/discretionary letter with case number, ΔT calculation, and appeal rights. Generated in-browser on demand. |
 
 ---
 

@@ -155,7 +155,7 @@ _ROAD_CLASS_NORMAL_VC: dict = {
 }
 
 # ---------------------------------------------------------------------------
-# Evacuation capacity heatmap color ramp — v3.0 ΔT Standard
+# Evacuation capacity heatmap color ramp — v4.11 ΔT Standard
 # ---------------------------------------------------------------------------
 
 # Each entry: (upper_effective_capacity_vph_bound, hex_color, opacity)
@@ -210,7 +210,7 @@ def _vc_heatmap_color(vc: float) -> tuple:
 
 def _effective_capacity_heatmap_color(eff_cap: float) -> tuple:
     """
-    Return (color, opacity) for the evacuation capacity heatmap — v3.0 ΔT Standard.
+    Return (color, opacity) for the evacuation capacity heatmap — v4.11 ΔT Standard.
 
     Low effective_capacity_vph (road is a bottleneck) → red/prominent.
     High effective_capacity_vph (road has headroom) → gray/subdued.
