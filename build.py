@@ -11,7 +11,10 @@ Requires pre-acquired data from josh-pipeline (acquire.py).
 Usage:
   uv run python build.py analyze --city "Berkeley" --data-dir /path/to/data/berkeley
   uv run python build.py demo    --city "Berkeley" --data-dir /path/to/data/berkeley
-  uv run python build.py evaluate --city "Berkeley" --lat 37.87 --lon -122.27 --units 75
+
+Note: The `evaluate` command was removed in v4.11. Project evaluation, audit trail
+generation, and brief rendering are now performed client-side in the browser via
+WhatIfEngine.evaluateProject(), sidebar.js _buildAuditText(), and BriefRenderer.render().
 """
 import logging
 import sys
@@ -228,125 +231,9 @@ def analyze(city: str, state: str, data_dir_str: str, city_config_str: str | Non
     )
 
 
-@cli.command()
-@click.option("--city", required=True, help="City name (must match a prior analyze run)")
-@click.option("--lat", required=True, type=float, help="Project latitude")
-@click.option("--lon", required=True, type=float, help="Project longitude")
-@click.option("--units", required=True, type=int, help="Number of dwelling units")
-@click.option("--stories", default=0, type=int, show_default=True,
-              help="Number of above-grade stories (for NFPA 101 egress penalty)")
-@click.option("--name", default="", help="Project name (optional)")
-@click.option("--address", default="", help="Project address (optional)")
-@click.option("--apn", default="", help="Assessor Parcel Number (optional)")
-@click.option(
-    "--data-dir", "data_dir_str", default=None,
-    help="Path to pre-acquired data directory (default: data/{city}/)",
-)
-@click.option(
-    "--city-config", "city_config_str", default=None,
-    help="Path to city config YAML (default: config/cities/{city}.yaml)",
-)
-@click.option(
-    "--output-dir", "output_dir_str", default=None,
-    help="Output directory (default: output/{city}/)",
-)
-def evaluate(city: str, lat: float, lon: float, units: int, stories: int,
-             name: str, address: str, apn: str,
-             data_dir_str: str | None, city_config_str: str | None,
-             output_dir_str: str | None):
-    """
-    Evaluate a proposed project — produce ministerial/discretionary determination.
-
-    Requires a prior `analyze` run.
-
-    Outputs:
-      - output/{city}/determination_{lat}_{lon}.txt -- full audit trail
-      - output/{city}/brief_v3_{lat}_{lon}_{units}u.html -- determination brief
-    """
-    import geopandas as gpd
-    from agents.objective_standards import evaluate_project, generate_audit_trail
-    from models.project import Project
-
-    city_slug = city.lower().replace(" ", "_")
-    city_config_path = Path(city_config_str) if city_config_str else None
-    config, city_config = load_config(city, city_config_path)
-
-    data_dir = (
-        Path(data_dir_str) if data_dir_str else BASE_DIR / "data" / city_slug
-    )
-    output_dir = Path(output_dir_str) if output_dir_str else BASE_DIR / "output" / city_slug
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    roads_path    = data_dir / "roads.gpkg"
-    fhsz_path     = data_dir / "fhsz.geojson"
-    boundary_path = data_dir / "boundary.geojson"
-
-    missing = [p for p in [roads_path, fhsz_path, boundary_path] if not p.exists()]
-    if missing:
-        console.print(f"[red]ERROR: Missing data files: {missing}[/red]")
-        console.print(f'Run first: [cyan]uv run python build.py analyze --city "{city}" --data-dir {data_dir}[/cyan]')
-        sys.exit(1)
-
-    console.rule(f"[bold cyan]Evaluating Project in {city}[/bold cyan]")
-    if name:
-        console.print(f"  Project: {name}")
-    console.print(f"  Location: {lat}, {lon}")
-    console.print(f"  Units: {units}  Stories: {stories}")
-
-    block_groups_path = data_dir / "block_groups.geojson"
-    evac_paths_path   = data_dir / "evacuation_paths.json"
-
-    with console.status("Loading cached data..."):
-        roads_gdf        = gpd.read_file(roads_path, layer="roads")
-        fhsz_gdf         = gpd.read_file(fhsz_path)
-        boundary_gdf     = gpd.read_file(boundary_path)
-        block_groups_gdf = gpd.read_file(block_groups_path) if block_groups_path.exists() else None
-        evacuation_paths = _load_evacuation_paths(evac_paths_path)
-
-    if "effective_capacity_vph" not in roads_gdf.columns or "demand_source" not in roads_gdf.columns:
-        console.print("[yellow]Roads not yet analyzed — running capacity analysis...[/yellow]")
-        from agents.capacity_analysis import analyze_capacity
-        roads_gdf, evacuation_paths = analyze_capacity(
-            roads_gdf, fhsz_gdf, boundary_gdf, config, city_config,
-            block_groups_gdf=block_groups_gdf,
-            data_dir=data_dir,
-        )
-
-    project = Project(
-        location_lat=lat,
-        location_lon=lon,
-        address=address,
-        dwelling_units=units,
-        stories=stories,
-        project_name=name,
-        apn=apn,
-    )
-
-    console.print("\n[bold]Running Objective Standards Engine...[/bold]")
-    project, audit = evaluate_project(
-        project=project,
-        roads_gdf=roads_gdf,
-        fhsz_gdf=fhsz_gdf,
-        config=config,
-        city_config=city_config,
-        evacuation_paths=evacuation_paths,
-        graph_path=data_dir / "graph.graphml",
-    )
-
-    lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
-    lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-    det_filename = f"determination_{lat_str}_{lon_str}_{units}u.txt"
-    audit_path = output_dir / det_filename
-    generate_audit_trail(project, audit, audit_path)
-
-    from agents.visualization.brief_v3 import create_determination_brief_v3
-    brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
-    create_determination_brief_v3(project, audit, config, city_config, brief_path)
-
-    _print_determination(project, audit)
-    console.print(f"\n  Full audit trail: [cyan]{audit_path}[/cyan]")
-    console.print(f"  Determination brief: [cyan]{brief_path}[/cyan]")
-    console.print(f"  Open with: [dim]open {brief_path}[/dim]")
+# evaluate command removed in v4.11 — project evaluation, audit trail generation,
+# and brief rendering are now performed entirely client-side in the browser.
+# See static/sidebar.js and static/brief_renderer.js.
 
 
 @cli.command()
@@ -516,15 +403,9 @@ def demo(city: str, state: str, projects_file: str | None, output_name: str,
                 f"got [white]{actual_tier}[/white][/bold red]"
             )
 
-        from agents.visualization.brief_v3 import create_determination_brief_v3
-        from agents.objective_standards import generate_audit_trail
-        lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "n")
-        lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-        # Write determination txt FIRST so brief_v3.py reads current content
-        audit_path = output_dir / f"determination_{lat_str}_{lon_str}_{units}u.txt"
-        generate_audit_trail(project, audit, audit_path)
-        brief_path = output_dir / f"brief_v3_{lat_str}_{lon_str}_{units}u.html"
-        create_determination_brief_v3(project, audit, config, city_config, brief_path)
+        # v4.11: Audit trail .txt and brief .html are now generated client-side
+        # by sidebar.js (_buildAuditText, _downloadDetermination) and
+        # BriefRenderer.render(). Pipeline no longer writes these files.
 
     console.print()
     _print_demo_summary(evaluated, config)

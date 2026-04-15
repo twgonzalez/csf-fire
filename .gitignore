@@ -41,3 +41,7 @@ docs/archive/
 
 # Auto-provisioned FHSZ GeoJSONs — reproducible from public APIs, not committed
 config/cities/fhsz/*.geojson
+
+# v4.11: Determination files now generated client-side (sidebar.js + BriefRenderer)
+output/*/determination_*.txt
+output/*/brief_v3_*.html

@@ -44,7 +44,6 @@ from .helpers import (
     _osmid_set, _osmid_matches, _to_int_safe,
     _highway_weight,
     _add_zoom_weight_scaler, _build_global_styles,
-    _brief_filename,
 )
 from .popups import _build_route_delta_t_popup, _build_demo_project_popup, _build_heatmap_route_popup
 
@@ -786,10 +785,9 @@ def create_demo_map(
             projects_data=_build_josh_data_projects(projects, _city_slug, proj_js_names),
         )
     else:
-        # graph.json not yet generated (analyze not run). Fall back to the
-        # self-contained brief modal injection so "View Brief" links still work.
-        logger.info("  Skipping what-if bundle (graph.json or parameters.json not found).")
-        _inject_brief_modals(output_path)
+        # graph.json not yet generated (analyze not run). Brief links will
+        # be non-functional until analyze + demo are re-run.
+        logger.warning("  Skipping JOSH_DATA bundle (graph.json or parameters.json not found).")
 
     # ── "What Happened" layer ──────────────────────────────────────────────
     # City-specific historical overlay: fire perimeter, road diet annotation,
@@ -865,173 +863,9 @@ const JOSH_FHSZ   = {_json.dumps(fhsz_geojson, separators=(',',':'))};
 # Determination brief inline modal (fixes file:// link blocking)
 # ---------------------------------------------------------------------------
 
-def _inject_brief_modals(html_path: Path) -> None:
-    """
-    Replace "View Determination Brief" external-file links with an inline
-    <iframe srcdoc> modal so the button works when the demo map is opened
-    from file:// (Safari and Chrome both block file://→file:// navigation
-    via target="_blank").
-
-    Scans the saved HTML for href="brief_v3_*.html" links, reads each brief
-    file from the same directory, and injects:
-      - A modal overlay with a full-height <iframe id="josh-brief-frame">
-      - A <script> with the brief data keyed by filename + joshBrief.show()
-      - A DOM-ready click interceptor that overrides the <a href> clicks
-
-    The brief HTML is set via frame.srcdoc (JS property, not HTML attribute)
-    so no escaping is needed.  srcdoc renders the complete document inline —
-    no external file access, works from file:// on all browsers.
-    """
-    import re as _re
-
-    html = html_path.read_text(encoding="utf-8")
-    output_dir = html_path.parent
-
-    # Find all brief filenames referenced in the HTML
-    filenames = _re.findall(r'href="(brief_v3_[^"]+\.html)"', html)
-    if not filenames:
-        return  # no briefs in this map
-
-    # Read each brief file; skip missing ones silently
-    brief_data: dict[str, str] = {}
-    for fname in dict.fromkeys(filenames):  # deduplicate, preserve order
-        path = output_dir / fname
-        if path.exists():
-            brief_data[fname] = path.read_text(encoding="utf-8")
-
-    if not brief_data:
-        logger.warning("_inject_brief_modals: brief files not found in %s", output_dir)
-        return
-
-    # Build JS object literal: { "filename": <brief HTML string>, ... }
-    # Use json.dumps for each value so special chars / newlines are escaped.
-    entries = ",\n".join(
-        f"  {json.dumps(fname)}: {json.dumps(content)}"
-        for fname, content in brief_data.items()
-    )
-    brief_data_js = "{\n" + entries + "\n}"
-
-    injection = f"""
-<div id="josh-brief-modal" style="
-    display:none; position:fixed; inset:0; z-index:30000;
-    background:rgba(0,0,0,0.55); overflow:hidden;">
-  <div style="
-      position:absolute; inset:40px 60px;
-      background:#fff; border-radius:8px;
-      display:flex; flex-direction:column;
-      box-shadow:0 8px 40px rgba(0,0,0,0.4);
-      overflow:hidden;">
-    <div style="
-        display:flex; align-items:center; justify-content:space-between;
-        padding:11px 16px; border-bottom:1px solid #dee2e6;
-        background:#1c4a6e; flex-shrink:0; gap:8px;">
-      <span style="
-          font-family:system-ui,sans-serif; font-weight:600;
-          font-size:13px; color:#fff; letter-spacing:0.02em; flex:1;">
-        Determination Brief
-      </span>
-      <!-- Print button -->
-      <button onclick="window.joshBrief.print()" title="Print / Save as PDF"
-              style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
-                     border-radius:4px;font-size:12px;cursor:pointer;color:#fff;
-                     padding:3px 9px;font-family:system-ui,sans-serif;white-space:nowrap;">
-        &#128438; Print
-      </button>
-      <!-- Download button -->
-      <button onclick="window.joshBrief.download()" title="Download as HTML file"
-              style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
-                     border-radius:4px;font-size:12px;cursor:pointer;color:#fff;
-                     padding:3px 9px;font-family:system-ui,sans-serif;white-space:nowrap;">
-        &#8659; Download
-      </button>
-      <!-- Close button -->
-      <button onclick="document.getElementById('josh-brief-modal').style.display='none'"
-              title="Close"
-              style="background:none;border:none;font-size:20px;cursor:pointer;
-                     color:rgba(255,255,255,0.75);line-height:1;padding:0 0 0 4px;">&#10005;</button>
-    </div>
-    <iframe id="josh-brief-frame"
-            style="flex:1;border:none;width:100%;background:#fff;"
-            src="about:blank"></iframe>
-  </div>
-</div>
-
-<script id="josh-brief-modals">
-(function () {{
-  var _BRIEFS   = {brief_data_js};
-  var _curHtml  = '';   // current brief HTML (for download / print)
-  var _curFile  = '';   // suggested download filename
-
-  window.joshBrief = {{
-    // show(filenameOrHtml, filename)
-    //   filenameOrHtml — either:
-    //     (a) a filename key into _BRIEFS (pipeline pre-baked briefs), or
-    //     (b) a raw HTML string from BriefRenderer.render() (what-if / project manager)
-    //   filename — optional download filename override (used by project manager)
-    show: function (filenameOrHtml, filename) {{
-      var html;
-      if (typeof filenameOrHtml === 'string' && filenameOrHtml.trimStart().startsWith('<!')) {{
-        html      = filenameOrHtml;
-        _curFile  = filename || ('brief_' + new Date().toISOString().slice(0,10) + '.html');
-      }} else {{
-        html = _BRIEFS[filenameOrHtml];
-        if (!html) {{ console.warn('joshBrief: no data for', filenameOrHtml); return; }}
-        _curFile = filenameOrHtml;  // use the original filename key (e.g. brief_v3_*.html)
-      }}
-      _curHtml = html;
-      var frame = document.getElementById('josh-brief-frame');
-      frame.srcdoc = html;
-      document.getElementById('josh-brief-modal').style.display = 'block';
-    }},
-
-    // download() — save current brief as a standalone HTML file
-    download: function () {{
-      if (!_curHtml) return;
-      var blob = new Blob([_curHtml], {{ type: 'text/html;charset=utf-8' }});
-      var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href   = url;
-      a.download = _curFile || 'determination_brief.html';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () {{ URL.revokeObjectURL(url); }}, 5000);
-    }},
-
-    // print() — print the brief (browser print dialog; use "Save as PDF" for PDF output)
-    print: function () {{
-      var frame = document.getElementById('josh-brief-frame');
-      if (frame && frame.contentWindow) {{
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-      }}
-    }},
-  }};
-
-  // Intercept brief link clicks — override href navigation with inline modal.
-  // Runs on DOMContentLoaded (brief links are pre-rendered in the HTML body).
-  document.addEventListener('DOMContentLoaded', function () {{
-    document.querySelectorAll('a[href^="brief_v3_"]').forEach(function (link) {{
-      link.addEventListener('click', function (e) {{
-        e.preventDefault();
-        window.joshBrief.show(link.getAttribute('href'));
-      }});
-    }});
-    // Close on backdrop click
-    document.getElementById('josh-brief-modal').addEventListener('click', function (e) {{
-      if (e.target === this) this.style.display = 'none';
-    }});
-  }});
-}})();
-</script>
-"""
-
-    if "</body>" in html:
-        html = html.replace("</body>", injection + "\n</body>", 1)
-    else:
-        html += injection
-    html_path.write_text(html, encoding="utf-8")
-    logger.info("  Brief modals injected (%d briefs).", len(brief_data))
+# _inject_brief_modals removed in v4.11 — briefs are now generated client-side
+# by BriefRenderer.render() via sidebar.js _openBrief(). The brief modal overlay
+# and joshBrief.show() are provided by app.js (inlined into the HTML).
 
 
 # ---------------------------------------------------------------------------
@@ -1153,12 +987,9 @@ def _inject_josh_data_bundle(
 
     html = html_path.read_text(encoding="utf-8")
 
-    # Collect brief HTML strings (same regex as _inject_brief_modals)
+    # v4.11: Briefs are generated client-side by BriefRenderer.render().
+    # Pipeline no longer writes brief_v3_*.html files.
     brief_data: dict[str, str] = {}
-    for fname in dict.fromkeys(re.findall(r'href="(brief_v3_[^"]+\.html)"', html)):
-        path = html_path.parent / fname
-        if path.exists():
-            brief_data[fname] = path.read_text(encoding="utf-8")
 
     josh_data = {
         "schema_version": 1,
@@ -2270,14 +2101,13 @@ def _build_project_detail_div(
     <span style="margin-left:auto; flex-shrink:0;">{hz_label}</span>
   </div>
 
-  <!-- Brief link -->
+  <!-- Brief link — v4.11: client-side generation via sidebar.js -->
   <div style="padding:10px 13px 13px;">
-    <a href="{_brief_filename(project.location_lat, project.location_lon, project.dwelling_units)}"
-       target="_blank"
+    <a onclick="window.joshSidebar_openBriefFor && window.joshSidebar_openBriefFor('{_slugify(project.project_name or project.address or "project")}')"
        style="display:block; text-align:center; padding:8px 10px;
               background:#f0f4f8; border:1px solid #ccd6e0; border-radius:6px;
               font-size:11px; font-weight:600; color:#1c4a6e; text-decoration:none;
-              letter-spacing:0.2px;">
+              letter-spacing:0.2px; cursor:pointer;">
       View Determination Brief &rarr;
     </a>
   </div>

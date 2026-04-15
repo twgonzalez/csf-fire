@@ -7,7 +7,10 @@
 Generate output/berkeley/index.html — public landing page for the JOSH Berkeley demo.
 
 Reads config/projects/berkeley_demo.yaml to build a table of the 6 demo projects
-with tier badges, links to determination briefs, and links to audit trail text files.
+with tier badges and links to the interactive demo map.
+
+v4.11: Determination briefs and audit trails are generated client-side in the browser.
+Pipeline no longer writes .txt/.html determination files.
 
 Run via:  uv run python ci/make_index.py
 Writes:   output/berkeley/index.html
@@ -31,13 +34,6 @@ TIER_SHORT = {
 }
 
 
-def _fmt(lat: float, lon: float) -> tuple[str, str]:
-    """Return (lat_str, lon_str) matching JOSH filename convention (4 d.p.)."""
-    lat_s = f"{lat:.4f}".replace(".", "_")
-    lon_s = f"{lon:.4f}".replace(".", "_").replace("-", "n")
-    return lat_s, lon_s
-
-
 def main() -> None:
     data = yaml.safe_load(PROJECTS_YAML.read_text())
     projects = data.get("projects", [])
@@ -45,15 +41,10 @@ def main() -> None:
     rows = []
     for p in projects:
         name = p["name"]
-        lat, lon = p["lat"], p["lon"]
         units = p["units"]
         stories = p.get("stories", 0)
         tier = p.get("expected_tier", "MINISTERIAL")
         desc = p.get("description", "").strip()
-
-        lat_s, lon_s = _fmt(lat, lon)
-        brief_file = f"brief_v3_{lat_s}_{lon_s}_{units}u.html"
-        audit_file = f"determination_{lat_s}_{lon_s}_{units}u.txt"
 
         fg, bg = TIER_COLORS.get(tier, ("#333", "#eee"))
         short = TIER_SHORT.get(tier, tier)
@@ -72,8 +63,7 @@ def main() -> None:
         </td>
         <td style="font-size:13px;color:#555;max-width:340px">{desc[:160]}{'…' if len(desc) > 160 else ''}</td>
         <td style="white-space:nowrap">
-          <a href="{brief_file}" style="color:#1a56a0;text-decoration:none;margin-right:10px">Brief</a>
-          <a href="{audit_file}" style="color:#555;text-decoration:none;font-size:12px">Audit trail</a>
+          <a href="demo_map.html" style="color:#1a56a0;text-decoration:none;font-size:12px">View in Map</a>
         </td>
       </tr>""")
 

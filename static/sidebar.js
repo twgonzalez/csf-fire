@@ -1764,6 +1764,7 @@
     window.joshSidebar_cancelDelete   = ()  => { _deleteConfirmId = null; _render(); };
     window.joshSidebar_doDelete       = id => _doDelete(id);
     window.joshSidebar_openBrief      = id => { const p = getProject(id); if (p) _openBrief(p); };
+    window.joshSidebar_openBriefFor   = id => { const p = getProject(id); if (p) { selectProject(id); _openBrief(p); } };
     window.joshSidebar_downloadDetermination = id => { const p = getProject(id); if (p) _downloadDetermination(p); };
     window.joshSidebar_submitForm     = () => _submitForm();
     window.joshSidebar_cancelForm     = () => { cancelForm(); _render(); };
